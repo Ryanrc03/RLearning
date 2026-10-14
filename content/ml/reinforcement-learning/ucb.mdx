@@ -1,0 +1,108 @@
+# Upper Confidence Bound (UCB)
+
+UCB 是多臂老虎机问题里的一种选动作方法。它每次都问：**如果我对一个选择保持合理的乐观，它的奖励可能有多好？** 然后选择这个“乐观估计”最高的动作。
+
+这篇笔记从普通 UCB 出发，再解释今天课程实验中的 **按子群选择治疗**和 **Discounted UCB**。这仍是 bandit 问题：每次只观察被选治疗的结果，不需要建模治疗如何改变患者未来的状态。
+
+## What is the problem?
+
+假设有若干种治疗，每位患者到来时只能选一种。治疗后才能知道这次是否改善，奖励为 `1` 或 `0`。如果一直选目前平均效果最好的治疗，可能过早忽略尚未充分尝试的选项；如果平均分配治疗，又会持续浪费机会。
+
+这就是 **exploration（探索）与 exploitation（利用）** 的取舍。UCB 用同一个分数处理两者：
+
+```text
+UCB score = estimated mean reward + uncertainty bonus
+              Q(a)              +       B(a)
+```
+
+`Q(a)` 高，说明已观察到的效果好；`B(a)` 高，说明证据还少，值得再试。
+
+## How does ordinary UCB work?
+
+经典 UCB1 会先尝试每个动作，然后在第 `t` 步选择分数最高的动作：
+
+```text
+a_t = argmax_a [ Q_t(a) + sqrt(2 log(t) / N_t(a)) ]
+```
+
+- `Q_t(a)`：动作 `a` 截至当前的平均奖励。
+- `N_t(a)`：动作 `a` 已被选择的次数。
+- `t`：总选择次数。
+- `sqrt(2 log(t) / N_t(a))`：探索奖励。尝试越少，这一项越大；尝试越多，它越小。
+
+这个分数叫 *upper confidence bound*，因为它把当前均值与一个随不确定性变化的上界项相加。这里的 `2` 属于经典 UCB1 的具体公式；实现时也常用可调系数 `c` 控制探索强度，不能把调参版与 UCB1 的理论保证直接画等号。[原始 UCB1 论文](https://orbit.dtu.dk/en/publications/finite-time-analysis-of-the-multiarmed-bandit-problem/)
+
+### 一个直观例子
+
+设 `c = 0.25`，当前总共观察了 104 次：
+
+```text
+治疗 A：平均奖励 0.70，已试 100 次 → 分数约 0.754
+治疗 B：平均奖励 0.55，已试   4 次 → 分数约 0.819
+```
+
+B 的观察均值较低，但只试了 4 次，不确定性更大。UCB 这一步会选 B。继续观察后，若 B 的效果确实不好，它的探索奖励会逐渐缩小。
+
+## From bandit to contextual bandit
+
+今天的课程问题有多个患者子群。同一种治疗可能对不同子群效果不同，因此要为每个 `(subgroup, treatment)` 分别记录统计量：
+
+```text
+subgroup 0: treatment A / B / C / ... → 各自的均值与次数
+subgroup 1: treatment A / B / C / ... → 各自的均值与次数
+```
+
+患者属于哪个子群，在选治疗前就已知。算法只在该子群内比较治疗。这里的 *context* 是子群标签；它不是完整 RL 中需要预测后续状态转移的状态。
+
+课程实现用的可调分数为：
+
+```text
+score(s, a) = Q(s, a) + c × sqrt(log(max(total_s, 2)) / N(s, a))
+```
+
+`total_s` 是当前子群各治疗的有效次数之和。第一次出现的治疗会优先尝试；分数并列时随机打破平局。实验中的 `c = 0.25` 是在有限本地验证环境下选出的参数，不是普适常数。
+
+## Why discount old observations?
+
+普通 UCB 假设每种治疗的奖励分布稳定。如果治疗效果中途变化，永久累计的均值会被很早以前的结果拖住。**Discounted UCB** 让旧观察的权重逐渐变小，使新结果更快影响选择。[Garivier 与 Moulines 的非平稳 bandit 研究](https://arxiv.org/abs/0805.3415)
+
+课程实验采用一个按子群更新的变体。每次为子群 `s` 选治疗前，先把该子群所有治疗的统计量乘以 `gamma`：
+
+```text
+effective_count[s, :]       *= gamma
+discounted_reward_sum[s, :] *= gamma
+
+Q[s, a] = discounted_reward_sum[s, a] / effective_count[s, a]
+total_s = sum(effective_count[s, :])
+score[s, a] = Q[s, a] + c * sqrt(log(max(total_s, 2)) / effective_count[s, a])
+```
+
+收到被选治疗 `a` 的奖励 `r` 后：
+
+```text
+effective_count[s, a]       += 1
+discounted_reward_sum[s, a] += r
+```
+
+`gamma = 1` 表示不折扣；`gamma` 越小，旧证据遗忘越快。这份实现只在**该子群再次出现时**衰减它，所以折扣按子群的到访次数计算，而不是按全局患者时间计算。它与论文中标准形式的时间定义可能不同，应视为针对课程环境的实现选择。
+
+还有一个容易遗漏的细节：折扣后的有效次数可能非常小，但“很久没选”和“从未选过”不是一回事。因此实现另存 `ever_tried[s, a]`，确保真正未试过的治疗先获得一次观察。
+
+## What did today's experiment show?
+
+在课程提供的三个本地验证试验中，减小 `c` 曾改善平稳任务，但没有同时改善非平稳任务。加入轻度折扣后，非平稳任务的表现上升，而平稳任务通常有所下降。最后采用的基础 Discounted UCB 参数是 `c = 0.25`、`gamma = 0.9985`。
+
+这些数字是**具体环境的调参结果**。验证试验数量少，换一组环境或随机过程，最佳参数可能不同。后续还试过变化检测与局部重置；那属于在 Discounted UCB 之上增加的机制，不是 UCB 本身。
+
+## Key ideas to remember
+
+1. UCB 的“乐观”来自 **估计均值 + 不确定性奖励**。
+2. 一个动作尝试得越少，探索奖励越大；观察越多，探索奖励越小。
+3. Contextual bandit 要按已知 context 分别估计动作价值。
+4. Discounted UCB 用较低的旧数据权重适应变化，同时会牺牲部分稳定环境中的样本效率。
+5. `c`、`gamma` 和折扣发生的时间单位都是实现选择，实验结果必须结合环境解释。
+
+## Further reading
+
+- [Auer, Cesa-Bianchi & Fischer (2002), *Finite-time Analysis of the Multiarmed Bandit Problem*](https://orbit.dtu.dk/en/publications/finite-time-analysis-of-the-multiarmed-bandit-problem/)
+- [Garivier & Moulines, *On Upper-Confidence Bound Policies for Non-Stationary Bandit Problems*](https://arxiv.org/abs/0805.3415)
