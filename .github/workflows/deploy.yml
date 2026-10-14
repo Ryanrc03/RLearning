@@ -26,6 +26,9 @@ jobs:
       # `vercel build` installs dependencies itself, so no separate npm ci step.
       - run: npm i -g vercel@latest
 
+      - name: Check Vercel auth
+        run: vercel whoami --token=${{ secrets.VERCEL_TOKEN }}
+
       - name: Pull Vercel project settings
         run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
 
