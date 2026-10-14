@@ -22,10 +22,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
 
-      - run: npm ci
-
+      # `vercel build` installs dependencies itself, so no separate npm ci step.
       - run: npm i -g vercel@latest
 
       - name: Pull Vercel project settings
