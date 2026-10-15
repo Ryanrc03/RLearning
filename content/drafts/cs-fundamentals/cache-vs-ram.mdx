@@ -1,0 +1,30 @@
+import StoragePairDiagram from "@/components/visualization/storage/StoragePairDiagram";
+
+# Cache vs RAM
+
+## 一句话
+
+**RAM 是数据真正住的地方；cache 是 CPU 旁边的一个小抽屉，硬件自动把最近用过的数据抄一份放进去，下次就不用跑远路。**
+
+cache 里的东西一定也在 RAM 里，它只是影子。程序看不见 cache，也管不了它。
+
+## 一张图
+
+<StoragePairDiagram pair="cache-vs-ram" />
+
+| | cache | RAM |
+| --- | --- | --- |
+| 第一次读 x | 没有，去 RAM 拿，顺手抄一份 | 约 100 ns |
+| 第二次读 x | 有了，约 1 ns | 还是约 100 ns |
+
+所以 cache 换来的是**快**，代价是**小**：几十 KB 到几十 MB，只能装最近用的一点点。
+
+## 一个真实的例子：手机的后台
+
+你刷微信，切到相机，再切回微信，微信是秒开的，因为它还留在后台。换成一个一周没开的 app，就要转一会儿圈，因为要从头加载。
+
+后台就是 cache 的思路：手机内存装不下所有 app，所以只留最近用过的几个。cache 对 CPU 做的是同一件事，只是单位从 app 换成了几十字节的数据块，而且全由硬件自动决定留谁、踢谁。
+
+## 再往下看
+
+总览在 [Memory Hierarchy](/notes/cs/fundamentals/memory-hierarchy/)。

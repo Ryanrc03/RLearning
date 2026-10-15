@@ -1,0 +1,30 @@
+import StoragePairDiagram from "@/components/visualization/storage/StoragePairDiagram";
+
+# RAM vs Disk
+
+## 一句话
+
+**RAM 是工作台，程序正在用的东西都摊在上面，快但断电就清空；disk 是仓库，大、慢、断电也不丢。**
+
+程序干活时把文件从仓库搬到工作台上改，改完再搬回去。没搬回去就断电，改动就没了。
+
+## 一张图
+
+<StoragePairDiagram pair="ram-vs-disk" />
+
+| | RAM | Disk |
+| --- | --- | --- |
+| 读一次 | 约 100 ns | SSD 约 100 µs，机械硬盘约 10 ms |
+| 断电 | 内容全丢 | 内容还在 |
+
+所以 RAM 换来的是**快**，disk 换来的是**留得住**。两者差 1000 倍以上，中间没有折中的层。
+
+## 一个真实的例子：Word 没保存就断电
+
+你在 Word 里写了两小时，忽然断电。再开机，文档回到了上次点保存的样子。
+
+这两小时的文字一直在 RAM 的工作台上，Word 显示给你看的就是 RAM 里那份。点保存，才把它写回硬盘的仓库。断电清空了工作台，仓库里只有上次保存的版本。自动保存功能就是定时帮你往仓库搬一次。
+
+## 再往下看
+
+总览在 [Memory Hierarchy](/notes/cs/fundamentals/memory-hierarchy/)。

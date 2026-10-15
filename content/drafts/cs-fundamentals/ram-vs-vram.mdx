@@ -1,0 +1,30 @@
+import StoragePairDiagram from "@/components/visualization/storage/StoragePairDiagram";
+
+# RAM vs VRAM
+
+## 一句话
+
+**RAM 是 CPU 的内存，VRAM（显存）是 GPU 的内存；两块地平级，各归一个处理器，谁也不能直接读对方的。**
+
+数据要让 GPU 算，必须先从 RAM 拷进 VRAM。这次拷贝走 PCIe 总线，比两边各自的内部访问都慢得多。
+
+## 一张图
+
+<StoragePairDiagram pair="ram-vs-vram" />
+
+| | 数据在 RAM | 数据在 VRAM |
+| --- | --- | --- |
+| GPU 要算 | 先经 PCIe 拷进 VRAM，1 GB 约几十毫秒 | 直接读，几百纳秒 |
+| CPU 要读 | 直接读，约 100 ns | 先拷回 RAM |
+
+所以 VRAM 换来的是**GPU 的带宽**（是 RAM 的 10 倍以上），代价是**搬运**：数据在哪，就只有那边的处理器能用。
+
+## 一个真实的例子：游戏的加载进度条
+
+打开一局游戏，进地图前要等一条进度条。那段时间游戏在把贴图和模型从硬盘读进 RAM，再从 RAM 拷进显卡的 VRAM。进了地图以后画面流畅，因为 GPU 要的东西都已经在 VRAM 里了。
+
+显存不够的显卡玩大游戏会卡，就是因为贴图装不下，GPU 只能一边画一边从 RAM 拉，每次都要过那条慢总线。AI 训练里“把 batch 搬进 GPU”是同一个瓶颈。
+
+## 再往下看
+
+总览在 [Memory Hierarchy](/notes/cs/fundamentals/memory-hierarchy/)。GPU 拿到数据后怎么用成千上万个线程去算，看 [进程、线程、协程，以及 CUDA 里的“线程”](/notes/cs/os/processes-threads-coroutines/)。

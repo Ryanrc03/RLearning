@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import ProcessVsThread from "@/content/cs/fundamentals/process-vs-thread.mdx";
+import ThreadVsCoroutine from "@/content/cs/fundamentals/thread-vs-coroutine.mdx";
+import MemoryHierarchy from "@/content/cs/fundamentals/memory-hierarchy.mdx";
+import ProcessesThreadsCoroutines from "@/content/cs/os/processes-threads-coroutines.mdx";
 import VirtualMemory from "@/content/cs/os/virtual-memory.mdx";
 import UCB from "@/content/ml/reinforcement-learning/ucb.mdx";
 import KuairandInput from "@/content/ml/recsys/kuairand-input.mdx";
@@ -16,6 +20,10 @@ import TableOfContents from "@/components/layout/TableOfContents";
 import Icon from "@/components/ui/Icon";
 
 const noteComponents = {
+  "cs/fundamentals/process-vs-thread": ProcessVsThread,
+  "cs/fundamentals/thread-vs-coroutine": ThreadVsCoroutine,
+  "cs/fundamentals/memory-hierarchy": MemoryHierarchy,
+  "cs/os/processes-threads-coroutines": ProcessesThreadsCoroutines,
   "cs/os/virtual-memory": VirtualMemory,
   "ml/reinforcement-learning/ucb": UCB,
   "ml/recsys/kuairand-input": KuairandInput,

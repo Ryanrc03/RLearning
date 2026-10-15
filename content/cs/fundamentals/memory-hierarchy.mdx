@@ -1,0 +1,30 @@
+import MemoryHierarchyViz from "@/components/visualization/storage/MemoryHierarchyViz";
+
+# Memory Hierarchy
+
+## 一句话
+
+**越快的存储越小越贵，所以机器把 register、cache、RAM、SSD、HDD 叠成一座金字塔：常用的数据往上挪，不常用的往下放，程序大部分时间只碰最上面几层。**
+
+上面的层是下面的层的影子：cache 里的数据一定也在 RAM 里，RAM 里正在改的文件迟早要写回 SSD。VRAM 不在这条线上，它是 GPU 自己的一套，和 RAM 平级。
+
+## 一张图
+
+<MemoryHierarchyViz />
+
+| | 上面三层（register、cache、RAM） | 下面两层（SSD、HDD） |
+| --- | --- | --- |
+| 快慢 | 纳秒级 | 微秒到毫秒级，慢 1000 倍以上 |
+| 断电 | 全丢 | 都在 |
+
+所以每往下一层，换来的是**大 100 倍、留得住**，付出的是**慢 100 倍**。
+
+## 一个真实的例子：做饭
+
+手里正拿着的盐和锅铲是 register，就两三样，伸手就到。灶台旁边的小架子是 cache，放着这顿饭要用的调料，不用转身。冰箱是 RAM，这周的菜都在里面，走两步就到。楼下超市是 SSD，什么都有，但要出门一趟。郊区仓库是 HDD，最便宜最大，去一次半天。
+
+做菜时你不会每拿一样东西都去超市，而是先看手边，再看架子，再开冰箱。用过的东西顺手放在架子上，下次就省事。停电了，手里、架子上、冰箱里的东西会坏，超市和仓库的不会。
+
+## 再往下看
+
+GPU 等显存那一层到底怎么等，看 [进程、线程、协程，以及 CUDA 里的“线程”](/notes/cs/os/processes-threads-coroutines/) 的延迟隐藏实验。

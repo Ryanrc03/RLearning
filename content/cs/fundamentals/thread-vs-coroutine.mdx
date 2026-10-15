@@ -1,0 +1,30 @@
+import ThreadVsCoroutineDiagram from "@/components/visualization/os/ThreadVsCoroutineDiagram";
+
+# Thread vs Coroutine
+
+## 一句话
+
+**thread 是内核分配的工人，同一时刻只做一件事，等的时候就干等；coroutine 是运行时在一个 thread 上轮流跑的轻量函数，谁碰到等待就自动让出，换下一个上。**
+
+活里等待多（网络、磁盘、channel），用 coroutine，一个 thread 能挂几万个连接。活里全是计算，coroutine 不会更快，几个核就是几个核。
+
+## 一张图
+
+<ThreadVsCoroutineDiagram />
+
+| | thread | coroutine（goroutine） |
+| --- | --- | --- |
+| 3 个网络请求，各等 2 秒 | 3 个 thread 各自等，2 秒 | 1 个 thread 轮流发，等待重叠，2 秒 |
+| 3 个纯计算，各算 1 秒 | 3 个核并行，1 秒 | 1 个 thread 排队算，3 秒 |
+
+所以 coroutine 换来的是**省 thread**（栈只有 2 KB，切换是一次函数调用），代价是**只能省掉等待**：计算本身没有让出的时刻，一个 thread 就是一个核。
+
+## 一个真实的例子：Go 写的网关
+
+一个用 Go 写的 API 网关，同时接着 5 万个客户端连接。每个连接大部分时间在等客户端发下一个请求，所以每个连接开一个 goroutine，5 万个 goroutine 只占几百 MB，跑在十几个 OS thread 上；请求来了 goroutine 醒来转发，转发时又要等后端，再让出。
+
+同一个网关里压缩响应体是纯计算。Go 默认用所有核，压缩会被分到多个 thread 并行；但把 GOMAXPROCS 设成 1，压缩期间这个 thread 上的几千个 goroutine 全得排队，网关会明显卡顿。连接用 goroutine 是因为等多，压缩快靠的是核多，不是 goroutine 多。
+
+## 再往下看
+
+Go 运行时怎样把几万个 goroutine 分摊到几个 thread 上、切换一次多贵，看 [进程、线程、协程，以及 CUDA 里的“线程”](/notes/cs/os/processes-threads-coroutines/)。

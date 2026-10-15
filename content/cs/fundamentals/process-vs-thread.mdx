@@ -1,0 +1,37 @@
+import ProcessVsThreadDiagram from "@/components/visualization/os/ProcessVsThreadDiagram";
+
+# Process vs Thread
+
+## 一句话
+
+**process 是一个正在运行的程序，带着自己的一份内存；thread 是 process 里干活的人，几个 thread 共用这一份内存。**
+
+一个 process 至少有一个 thread。想要两份互不干扰的内存，就开两个 process；想要几个人一起改同一份数据，就在一个 process 里开几个 thread。
+
+## 一张图
+
+<ProcessVsThreadDiagram />
+
+图里只有两条规律，记住就够了：
+
+| | 两个 process | 一个 process 里的两个 thread |
+| --- | --- | --- |
+| 改一个变量 | 对方看不到 | 对方立刻看到 |
+| 一个崩了 | 另一个没事 | 一起死 |
+
+所以 process 换来的是**安全**，thread 换来的是**方便**。代价也对应：process 之间传数据要绕一圈（管道、socket、共享内存），thread 之间直接读写，但要加锁，不然两个人同时改一个变量会改乱。
+
+## 一个真实的例子：Chrome
+
+打开 Chrome，开三个标签页。
+
+- **每个标签页是一个 process。** 所以某个网页卡死或崩溃时，只有那一个标签页变成“喔唷，崩溃啦”，其他标签页照常用。Chrome 为此多花了内存：三个标签页就是三份独立的内存，这就是 Chrome 吃内存的原因之一。
+- **一个标签页里面有好几个 thread。** 一个 thread 跑网页的 JavaScript，一个 thread 负责把页面画出来，还有 thread 在后台下载图片。它们共用这个标签页的内存：JavaScript 改了一段文字，负责画图的 thread 直接就能读到，不用再传一遍。
+
+把它映射回定义：标签页之间要的是“你崩了别连累我”，所以用 process；一个标签页内部要的是“大家一起快速改同一个页面”，所以用 thread。
+
+同样的思路在别处也一样。自动驾驶的车上，感知、规划、控制是三个 process，因为感知崩了也不能让控制停掉；而感知 process 内部，多路摄像头的解码是多个 thread，因为解码结果要直接塞进同一个队列。
+
+## 再往下看
+
+想知道切换一次要多久、协程又是什么、CUDA 的 thread 为什么不是这里说的 thread，看 [进程、线程、协程，以及 CUDA 里的“线程”](/notes/cs/os/processes-threads-coroutines/)。

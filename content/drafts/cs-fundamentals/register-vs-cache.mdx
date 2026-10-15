@@ -1,0 +1,30 @@
+import StoragePairDiagram from "@/components/visualization/storage/StoragePairDiagram";
+
+# Register vs Cache
+
+## 一句话
+
+**register 是 CPU 里十几个直接被指令点名的小格子，编译器决定放什么；cache 是 CPU 旁边几十 KB 的自动抽屉，硬件决定放什么，程序根本看不见。**
+
+两个都比 RAM 快得多，差别在“谁说了算”和“能装多少”。
+
+## 一张图
+
+<StoragePairDiagram pair="register-vs-cache" />
+
+| | register | cache |
+| --- | --- | --- |
+| 谁决定放什么 | 编译器，用 load 指令明确搬 | 硬件自动，按最近用过 |
+| 装 1000 个变量 | 装不下，多的放回 RAM，用到再搬 | 几十 KB，轻松装下 |
+
+所以 register 换来的是**最快**和**可控**，代价是**极少**；cache 换来的是**大得多**，代价是**不可控**。
+
+## 一个真实的例子：做菜
+
+炒菜时手边只放得下两三样东西：盐、锅铲、正在炒的菜。这是 register，你明确决定拿什么在手上，但位置就那么几个。
+
+灶台旁边有个小架子，放着这顿饭会用到的调料和配菜，不用每次都去冰箱拿。这是 cache：比手边大，比冰箱近，而且你不用刻意管它，常用的自然就留在架子上。冰箱是 RAM。
+
+## 再往下看
+
+总览在 [Memory Hierarchy](/notes/cs/fundamentals/memory-hierarchy/)。
