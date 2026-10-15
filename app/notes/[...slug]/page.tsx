@@ -3,12 +3,21 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import VirtualMemory from "@/content/cs/os/virtual-memory.mdx";
 import UCB from "@/content/ml/reinforcement-learning/ucb.mdx";
+import KuairandInput from "@/content/ml/recsys/kuairand-input.mdx";
+import LightgbmExplained from "@/content/ml/recsys/lightgbm-explained.mdx";
+import BoostingLab from "@/content/ml/recsys/boosting-lab.mdx";
 import { getNote, noteEntries } from "@/content/notes";
 import { getNoteToc } from "@/lib/content";
 import TableOfContents from "@/components/layout/TableOfContents";
 import Icon from "@/components/ui/Icon";
 
-const noteComponents = { "cs/os/virtual-memory": VirtualMemory, "ml/reinforcement-learning/ucb": UCB };
+const noteComponents = {
+  "cs/os/virtual-memory": VirtualMemory,
+  "ml/reinforcement-learning/ucb": UCB,
+  "ml/recsys/kuairand-input": KuairandInput,
+  "ml/recsys/lightgbm-explained": LightgbmExplained,
+  "ml/recsys/boosting-lab": BoostingLab,
+};
 
 export const dynamicParams = false;
 

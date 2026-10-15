@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>提升树训练实验台</title>
+<style>
+  /* Layout: a paper with a lab bench in the middle. Text column 860px; the lab spans 1100px and reflows to one column on phones. */
+  :root {
+    --bg: #faf8ef; --fg: #30332c; --muted: #76796f; --line: #e4dfcb; --panel: #ffffff;
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;   /* dataviz categorical slots 1-4 */
+    --pos: #2a78d6; --neg: #e34948;                                  /* diverging pair */
+    --font-display: Georgia, "Songti SC", "SimSun", serif;
+    --font-body: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --font-mono: "Cascadia Code", Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #17191b; --fg: #e6e8e6; --muted: #9ea8ac; --line: #3a4247; --panel: #1f2326;
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --pos: #3987e5; --neg: #e66767; color-scheme: dark; }
+  }
+  :root[data-theme="dark"] { --bg: #17191b; --fg: #e6e8e6; --muted: #9ea8ac; --line: #3a4247; --panel: #1f2326;
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --pos: #3987e5; --neg: #e66767; color-scheme: dark; }
+  body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15.5px; line-height: 1.75;
+         padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 12px 24px; }
+  main { max-width: 1100px; margin: 0 auto; display: grid; gap: 44px; }
+  .col { max-width: 860px; }
+  header h1 { font-family: var(--font-display); font-size: 34px; font-weight: 700; line-height: 1.3; margin: 0 0 8px; text-wrap: balance; }
+  header .sub { color: var(--muted); font-size: 15px; }
+  .abstract { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 16px 0; margin-top: 20px; }
+  .abstract b { font-family: var(--font-display); }
+  h2 { font-family: var(--font-display); font-size: 22px; font-weight: 700; margin: 0 0 12px; text-wrap: balance; }
+  h2 .no { color: var(--muted); font-family: var(--font-mono); font-size: 15px; font-weight: 400; margin-right: 10px; }
+  h3 { font-size: 15px; font-weight: 700; margin: 0 0 6px; }
+  p { margin: 0 0 10px; max-width: 72ch; }
+  .eq { font-family: var(--font-mono); font-size: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 10px 14px; margin: 10px 0 12px; overflow-x: auto; white-space: nowrap; max-width: 72ch; }
+  .eq sub { font-size: 10.5px; }
+  figure { margin: 0; display: grid; gap: 10px; }
+  .scroll { overflow-x: auto; }
+  svg { display: block; max-width: 100%; height: auto; font-family: var(--font-body); }
+  svg .mono { font-family: var(--font-mono); }
+  figcaption { color: var(--muted); font-size: 14px; max-width: 80ch; line-height: 1.6; }
+  figcaption b { color: var(--fg); font-weight: 600; }
+  /* lab */
+  .lab { display: grid; gap: 18px; border: 1px solid var(--line); border-radius: 6px; padding: 18px; background: var(--panel); }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; font-size: 14px; }
+  .controls fieldset { border: 0; padding: 0; margin: 0; display: flex; gap: 10px; align-items: center; }
+  .controls label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+  .controls select { font: inherit; font-size: 13.5px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--fg); }
+  .controls .k { color: var(--muted); font-size: 12.5px; }
+  .controls button { font: inherit; font-size: 13.5px; padding: 5px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); cursor: pointer; }
+  .controls button.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .controls button:focus-visible, .controls select:focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; }
+  .status { font-family: var(--font-mono); font-size: 13.5px; display: flex; flex-wrap: wrap; gap: 6px 22px; }
+  .status b { font-weight: 600; }
+  .grid2 { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 18px; }
+  @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+  .panel { display: grid; gap: 6px; min-width: 0; }
+  .panel h3 { margin: 0; }
+  .wrap { position: relative; }
+  .tip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; font-size: 12.5px; font-family: var(--font-mono); white-space: nowrap; display: none; z-index: 2; }
+  .narr { font-size: 14.5px; border-left: 3px solid var(--s1); padding-left: 12px; max-width: none; }
+  .params { font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6; display: grid; gap: 4px; max-height: 300px; overflow: auto; }
+  .params .tree-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .params .tree-row b { min-width: 46px; }
+  .params .count { font-family: var(--font-body); font-size: 13.5px; color: var(--muted); }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); }
+  .legend i { display: inline-block; width: 16px; height: 3px; border-radius: 2px; vertical-align: 3px; margin-right: 6px; }
+  .forest { display: flex; gap: 10px; overflow-x: auto; padding: 6px 2px 10px; align-items: flex-start; }
+  .tree-card { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 4px; padding: 6px 6px 4px; background: var(--bg); display: grid; gap: 2px; justify-items: center; }
+  .tree-card.new { border-color: var(--s1); box-shadow: 0 0 0 1px var(--s1); }
+  .tree-card.f0 { font-family: var(--font-mono); font-size: 12px; padding: 14px 10px; align-self: center; }
+  .cap { font-size: 11.5px; color: var(--muted); font-family: var(--font-mono); }
+  p.cap { font-size: 13px; max-width: none; }
+  @media (prefers-reduced-motion: no-preference) { .tree-card.new { animation: pop .45s ease-out; } }
+  @keyframes pop { from { transform: scale(.85); opacity: .3; } to { transform: none; opacity: 1; } }
+  table { border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 4px 9px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; letter-spacing: 0.04em; }
+  td.num, th.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tr.worst td { background: color-mix(in srgb, var(--s2) 14%, transparent); }
+  .cmp { width: 100%; }
+  .cmp td:first-child { color: var(--muted); white-space: nowrap; }
+  .refs { font-size: 13.5px; color: var(--muted); }
+  details { font-size: 13.5px; } summary { cursor: pointer; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<main>
+  <header class="col">
+    <h1>提升树训练实验台</h1>
+    <div class="sub">16 个点、1 个特征的玩具数据。按一轮长一棵树，看残差怎样被压小、LogLoss 怎样一点点下降、模型里到底存了什么。</div>
+    <div class="abstract">
+      <p><b>摘要</b>　神经网络的参数是一组固定数量的权重，训练改的是这些数值。提升树不同：它的"参数"就是树本身，每轮训练新增一棵树（几个切分阈值加几个叶子值），已有的树不再改动。所谓梯度下降发生在"每条样本的分数 F(x<sub>i</sub>)"上：新树去拟合损失对分数的负梯度 y − p，乘一个小的学习率加到分数里，LogLoss 就下降一点。GBDT、XGBoost、LightGBM 是同一个框架的三种实现，差在怎样给叶子赋值（一阶残差均值还是二阶 −G/(H+λ)）、在哪些候选点上找切分（所有取值还是直方图桶边）、按什么顺序长树（按层还是按叶子）。下面的实验台把这三组差别做成了开关。</p>
+    </div>
+  </header>
+
+  <!-- ======= 1. what are the parameters ======= -->
+  <section>
+    <div class="col">
+      <h2><span class="no">1</span>先说清楚：训练在改什么</h2>
+      <p>把两种模型并排放一起，差别一眼就能看出来。</p>
+    </div>
+    <figure>
+      <div class="scroll">
+      <svg viewBox="0 0 1100 250" width="1100" role="img" aria-label="左：神经网络的结构固定，一组权重 w 在训练中被反复修改，更新公式 w 减去学习率乘梯度。右：提升树在训练中不断追加新树，每棵树由切分阈值和叶子值组成，老树不动；更新公式 F 加上学习率乘新树，新树拟合负梯度 y 减 p。">
+        <defs><marker id="arA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+        <g fill="none" stroke="currentColor" stroke-width="1.2">
+          <!-- left: NN -->
+          <text x="40" y="34" font-size="14" font-weight="700" fill="currentColor" stroke="none">神经网络：结构固定，训练改数值</text>
+          <rect x="40" y="56" width="440" height="120" rx="4"/>
+          <g fill="currentColor" stroke="none" opacity="0.8">
+            <rect x="70" y="80" width="18" height="18" rx="2"/><rect x="96" y="80" width="18" height="18" rx="2"/><rect x="122" y="80" width="18" height="18" rx="2"/><rect x="148" y="80" width="18" height="18" rx="2"/><rect x="174" y="80" width="18" height="18" rx="2"/>
+            <rect x="70" y="106" width="18" height="18" rx="2"/><rect x="96" y="106" width="18" height="18" rx="2"/><rect x="122" y="106" width="18" height="18" rx="2"/><rect x="148" y="106" width="18" height="18" rx="2"/><rect x="174" y="106" width="18" height="18" rx="2"/>
+            <rect x="70" y="132" width="18" height="18" rx="2"/><rect x="96" y="132" width="18" height="18" rx="2"/><rect x="122" y="132" width="18" height="18" rx="2"/><rect x="148" y="132" width="18" height="18" rx="2"/><rect x="174" y="132" width="18" height="18" rx="2"/>
+          </g>
+          <g fill="currentColor" stroke="none" font-size="12.5">
+            <text x="220" y="92">权重 w：个数在训练前就定了</text>
+            <text x="220" y="114" class="mono">w ← w − η · ∂L/∂w</text>
+            <text x="220" y="136" opacity="0.75">每一步所有权重都被改一点</text>
+            <text x="220" y="158" opacity="0.75">"参数"= 这一堆数</text>
+          </g>
+          <path d="M60,176 C60,215 150,215 150,176" marker-end="url(#arA)"/>
+          <text x="105" y="232" text-anchor="middle" font-size="11.5" fill="currentColor" stroke="none" opacity="0.75">同一组数反复更新</text>
+          <!-- right: boosting -->
+          <text x="600" y="34" font-size="14" font-weight="700" fill="currentColor" stroke="none">提升树：训练 = 追加，老树不动</text>
+          <rect x="600" y="56" width="70" height="120" rx="4"/><rect x="684" y="56" width="70" height="120" rx="4"/><rect x="768" y="56" width="70" height="120" rx="4"/>
+          <text x="870" y="122" font-size="20" fill="currentColor" stroke="none" text-anchor="middle">…</text>
+          <rect x="900" y="56" width="70" height="120" rx="4" stroke="var(--s1)" stroke-width="2"/>
+          <g fill="currentColor" stroke="none" font-size="11.5" text-anchor="middle">
+            <text x="635" y="76" font-weight="600">树 1</text><text x="635" y="96" class="mono">x ≤ 0.31</text><text x="635" y="114" class="mono">−0.42</text><text x="635" y="130" class="mono">+0.38</text>
+            <text x="719" y="76" font-weight="600">树 2</text><text x="719" y="96" class="mono">x ≤ 0.73</text><text x="719" y="114" class="mono">+0.35</text><text x="719" y="130" class="mono">−0.41</text>
+            <text x="803" y="76" font-weight="600">树 3</text><text x="803" y="96" class="mono">x ≤ 0.31</text><text x="803" y="114" class="mono">−0.33</text><text x="803" y="130" class="mono">+0.27</text>
+            <text x="935" y="76" font-weight="600" fill="var(--s1)">树 m（新）</text><text x="935" y="96" class="mono">阈值 …</text><text x="935" y="114" class="mono">叶子值 …</text>
+            <text x="635" y="160" opacity="0.7">冻结</text><text x="719" y="160" opacity="0.7">冻结</text><text x="803" y="160" opacity="0.7">冻结</text><text x="935" y="160" fill="var(--s1)">本轮唯一在学的</text>
+          </g>
+          <g fill="currentColor" stroke="none" font-size="12.5">
+            <text x="600" y="206" class="mono">F(x) ← F(x) + ν · f<tspan font-size="9" dy="3">m</tspan><tspan dy="-3">(x)，　f</tspan><tspan font-size="9" dy="3">m</tspan><tspan dy="-3"> ≈ −∂L/∂F = y − p</tspan></text>
+            <text x="600" y="230" opacity="0.75">"参数"= 所有树的阈值和叶子值；参数个数随轮数增加</text>
+          </g>
+        </g>
+      </svg>
+      </div>
+      <figcaption><b>图 1</b>　两种模型的"训练"。神经网络在参数空间做梯度下降；提升树在函数空间做梯度下降：每一轮先算损失对每条样本分数的梯度 g = p − y，再用一棵树去近似 −g，把这棵树整体当作一步加进去。决定树的数量的是早停，所以参数总量在训练结束才知道。</figcaption>
+    </figure>
+  </section>
+
+  <!-- ======= 2. the lab ======= -->
+  <section>
+    <div class="col">
+      <h2><span class="no">2</span>实验台</h2>
+      <p>数据：16 条曝光，只有一个特征 x ∈ [0, 1]，标签 y 在 x 落在 0.34 到 0.70 之间时多为 1，另有两个"噪声点"（x = 0.52 没点，x = 0.90 点了）。初始模型是常数 F<sub>0</sub> = ln(7/9) = −0.251，所有点 p = 0.4375。每按一次"走一轮"，就按当前方法长一棵树并加进模型；"播放"自动走到 30 轮。切换方法会重置。</p>
+    </div>
+    <div class="lab">
+      <div class="controls">
+        <fieldset aria-label="方法">
+          <label><input type="radio" name="method" value="gbdt" id="m-gbdt"> GBDT</label>
+          <label><input type="radio" name="method" value="xgb" id="m-xgb"> XGBoost</label>
+          <label><input type="radio" name="method" value="lgbm" id="m-lgbm" checked> LightGBM</label>
+        </fieldset>
+        <label><span class="k">学习率 ν</span><select id="lr"><option>0.1</option><option selected>0.3</option><option>0.5</option><option>1.0</option></select></label>
+        <label id="depth-wrap"><span class="k">max_depth</span><select id="depth"><option>1</option><option selected>2</option><option>3</option></select></label>
+        <label id="leaves-wrap"><span class="k">num_leaves</span><select id="leaves"><option>2</option><option selected>3</option><option>4</option><option>6</option></select></label>
+        <label><span class="k">λ</span><select id="lambda"><option>0</option><option selected>1</option><option>3</option></select></label>
+        <label id="bins-wrap"><span class="k">max_bin</span><select id="bins"><option value="0">精确（所有取值）</option><option value="4">4 个桶</option><option value="8" selected>8 个桶</option></select></label>
+        <label><span class="k">速度</span><select id="speed"><option value="1500">慢</option><option value="800" selected>中</option><option value="300">快</option></select></label>
+        <button type="button" id="step" class="primary">走一轮</button>
+        <button type="button" id="play">播放</button>
+        <button type="button" id="reset">重置</button>
+        <button type="button" id="pin">固定当前曲线做对比</button>
+      </div>
+      <div class="status" id="status"></div>
+      <p class="narr" id="narr"></p>
+      <div class="grid2">
+        <div class="panel">
+          <h3>当前模型 p(x) 与 16 个点</h3>
+          <div class="wrap" id="main-wrap"><div class="tip" id="main-tip"></div></div>
+          <h3>本轮新长出的树 f<sub>m</sub>(x)（乘学习率前）</h3>
+          <div class="wrap" id="tree-wrap"><div class="tip" id="tree-tip"></div></div>
+        </div>
+        <div class="panel">
+          <h3>LogLoss 随轮数变化</h3>
+          <div class="wrap" id="loss-wrap"><div class="tip" id="loss-tip"></div></div>
+          <div class="legend" id="loss-legend"></div>
+          <h3>模型里存的参数</h3>
+          <div class="params" id="params"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>森林：到目前为止的每一棵树。点击上图任意样本点，看它在每棵树里走到哪个叶子</h3>
+        <div class="forest" id="forest"></div>
+        <h3>被选中样本的分数怎样一棵一棵加起来</h3>
+        <div class="wrap" id="acc-wrap"><div class="tip" id="acc-tip"></div></div>
+        <p class="cap" id="acc-text"></p>
+      </div>
+      <details open>
+        <summary>每条样本本轮的数：p、g、h、新树给的值、更新后的分数</summary>
+        <div class="scroll"><table id="tbl"><thead><tr><th>#</th><th class="num">x</th><th class="num">y</th><th class="num">p（轮前）</th><th class="num">g = p − y</th><th class="num">h = p(1−p)</th><th class="num">f<sub>m</sub>(x)</th><th class="num">ν·f<sub>m</sub></th><th class="num">F（轮后）</th><th class="num">p（轮后）</th></tr></thead><tbody></tbody></table></div>
+      </details>
+    </div>
+    <figure>
+      <figcaption><b>怎么看</b>　上图蓝线是当前模型的 p(x)，竖线是每个点的残差 p − y，越短越好；中图是本轮新树在 x 轴上的样子，蓝柱把分推高、红柱拉低，虚线是切分位置；右上角曲线是 LogLoss，每轮降一点。"森林"把每棵树按真正的树形画出来，新树从右边长出，蓝色路径是被选中样本走的路；最下面的曲线是这个样本的分数一棵一棵累加的过程，点上去能看每棵树给了多少。试几件事：把学习率调到 1.0 看曲线怎样变得毛躁；把 λ 从 1 调到 3 看叶子值怎样缩水；LightGBM 下把 max_bin 从 8 改成精确，看切分从 0.375 跳到 0.315。</figcaption>
+    </figure>
+  </section>
+
+  <!-- ======= 3. formulas ======= -->
+  <section class="col">
+    <h2><span class="no">3</span>一轮里到底算了什么</h2>
+    <p>记第 m 轮开始时每条样本的分数为 F<sub>i</sub>，概率 p<sub>i</sub> = σ(F<sub>i</sub>)。LogLoss 对 F<sub>i</sub> 的一阶导和二阶导分别是</p>
+    <div class="eq">g<sub>i</sub> = p<sub>i</sub> − y<sub>i</sub>　　h<sub>i</sub> = p<sub>i</sub>(1 − p<sub>i</sub>)</div>
+    <p>新树把样本切成若干叶子，每个叶子给一个常数 w。三种实现在这一步分叉：</p>
+    <div class="eq">GBDT（一阶）　　　w<sub>j</sub> = mean(−g<sub>i</sub>) = Σ(y<sub>i</sub> − p<sub>i</sub>) / n<sub>j</sub>　　切分看残差的平方误差下降</div>
+    <div class="eq">XGBoost / LightGBM（二阶）　w<sub>j</sub> = −G<sub>j</sub> / (H<sub>j</sub> + λ)　　gain = G<sub>L</sub>²/(H<sub>L</sub>+λ) + G<sub>R</sub>²/(H<sub>R</sub>+λ) − G²/(H+λ)</div>
+    <p>二阶版本是牛顿法：用曲率 h 给残差做归一化。h = p(1−p) 在 p 接近 0.5 时最大、接近 0 或 1 时最小，所以同样的残差，在模型还不确定的地方步子小，在模型已经很确定的地方步子大。实验台里能直接看到：XGBoost 第一棵树的叶子值约 ±1.0，而一阶的 GBDT 只有 ±0.44，所以 XGBoost 的 LogLoss 降得最快。λ 加在分母上就是给这个放大器装的闸：H 很小的叶子（样本少，或者都很确定）步子被压住，样本少的叶子缩向 0。然后所有实现都做同一件事：</p>
+    <div class="eq">F<sub>i</sub> ← F<sub>i</sub> + ν · w<sub>leaf(i)</sub></div>
+    <p>学习率 ν 就是上面实验台里让曲线平滑或毛躁的那个旋钮。它小，每棵树只走一小步，需要更多树，但更稳；真实模型用 0.05，走了 407 步。</p>
+  </section>
+
+  <!-- ======= 4. three implementations ======= -->
+  <section>
+    <div class="col">
+      <h2><span class="no">4</span>GBDT、XGBoost、LightGBM 的差别</h2>
+      <p>三者共用图 1 右侧的框架，差别全在"怎样长一棵树"和"怎样算得快"。实验台里能看到的只有前三行，后面几行是大数据上才显现的工程取舍。</p>
+    </div>
+    <div class="scroll">
+      <table class="cmp">
+        <thead><tr><th></th><th>GBDT（Friedman 2001；sklearn GradientBoosting）</th><th>XGBoost（Chen &amp; Guestrin 2016）</th><th>LightGBM（Ke et al. 2017）</th></tr></thead>
+        <tbody>
+          <tr><td>叶子值</td><td>树按平方误差拟合残差 y − p，叶子取残差均值（sklearn 再做一步牛顿修正）</td><td>二阶：−G/(H+λ)</td><td>二阶：−G/(H+λ)，同 XGBoost</td></tr>
+          <tr><td>切分候选</td><td>特征的所有取值（精确）</td><td>精确，或加权分位数草图近似</td><td>直方图：先分成 ≤255 个桶，只在桶边上找</td></tr>
+          <tr><td>生长顺序</td><td>按层，到 max_depth</td><td>按层，到 max_depth；γ 做剪枝</td><td>按叶子：每次只分裂增益最大的叶子，到 num_leaves</td></tr>
+          <tr><td>正则</td><td>学习率、子采样</td><td>λ（L2）、α（L1）、γ、min_child_weight、列采样</td><td>λ、min_data_in_leaf、feature_fraction、bagging</td></tr>
+          <tr><td>缺失值</td><td>需先填补（新版 sklearn 已支持）</td><td>每个节点学一个默认方向</td><td>同 XGBoost</td></tr>
+          <tr><td>类别特征</td><td>需先编码</td><td>需编码（新版支持原生）</td><td>原生：按 G/H 排序后找最优子集</td></tr>
+          <tr><td>加速</td><td>无</td><td>并行、缓存感知、核外计算</td><td>直方图相减、GOSS（按梯度采样）、EFB（互斥特征捆绑）</td></tr>
+          <tr><td>实验台对应</td><td>一阶叶子、按层、精确切分、λ 不可用</td><td>二阶叶子、按层、精确切分、λ 可调</td><td>二阶叶子、按叶子、桶边切分、λ 可调</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="col">
+      <p>在实验台的 16 个点上，三条曲线的差别来自两处：XGBoost 和 LightGBM 的牛顿步比 GBDT 的残差均值大，所以前两者降得快；LightGBM 默认 8 个桶，第一刀只能落在 0.25 和 0.75（精确切分是 0.315 和 0.735），所以它在这个小数据上反而最慢，把 max_bin 改成精确后曲线几乎和 XGBoost 重合。这正说明三者是同一种算法，差别在近似。真正拉开差距的是 502 万行 × 84 列这种规模：直方图让每轮找切分的代价从"行数"降到"桶数"，按叶子生长让同样的叶子数换来更低的损失，原生类别特征省掉了 26 列的编码。我们的 click 模型 159 秒训完 407 棵 127 叶子的树，用 Friedman 原版实现大约要慢一到两个数量级。</p>
+    </div>
+  </section>
+
+  <!-- ======= 5. map to the real model ======= -->
+  <section class="col">
+    <h2><span class="no">5</span>对应到真实模型</h2>
+    <table class="cmp">
+      <thead><tr><th>实验台</th><th>KuaiRand click 模型</th></tr></thead>
+      <tbody>
+        <tr><td>16 个点，1 个特征</td><td>5,021,422 行，84 个特征</td></tr>
+        <tr><td>num_leaves 3，max_bin 8</td><td>num_leaves 127，max_bin 255，min_data_in_leaf 200</td></tr>
+        <tr><td>ν = 0.3，最多 30 轮</td><td>ν = 0.05，验证集 AUC 50 轮不涨就停，实际 407 轮</td></tr>
+        <tr><td>F<sub>0</sub> = ln(7/9) = −0.251</td><td>F<sub>0</sub> = ln(0.3806/0.6194) = −0.487</td></tr>
+        <tr><td>参数：每棵树 2 个阈值 + 3 个叶子值</td><td>参数：每棵树 126 个切分 + 127 个叶子值，407 棵约 10 万个数</td></tr>
+        <tr><td>LogLoss 从 0.685 往下</td><td>train 上从 0.662 往下，test 0.517</td></tr>
+      </tbody>
+    </table>
+    <h3 style="margin-top:16px">三个常见误解</h3>
+    <p><b>"训练在调树的权重。"</b>不是。每棵树乘的都是同一个固定的 ν，没有被学习的"树权重"；被学的是树的结构和叶子值，而且只在它被创建的那一轮学一次。</p>
+    <p><b>"学习率越小越好。"</b>它只换来更多的树。ν = 0.05 配 407 轮和 ν = 0.1 配约 200 轮效果接近，前者略稳，训练时间翻倍。</p>
+    <p><b>"loss 一直在下降说明还该继续训。"</b>训练集的 LogLoss 几乎单调下降，但验证集的 AUC 会先升后平再降，早停看的是后者。决定树数量的从来不是训练损失。</p>
+    <ol class="refs">
+      <li>Friedman, J. Greedy Function Approximation: A Gradient Boosting Machine. Annals of Statistics 2001.</li>
+      <li>Chen, T. &amp; Guestrin, C. XGBoost: A Scalable Tree Boosting System. KDD 2016.</li>
+      <li>Ke, G. et al. LightGBM: A Highly Efficient Gradient Boosting Decision Tree. NeurIPS 2017.</li>
+    </ol>
+  </section>
+</main>
+
+<script>
+(function () {
+  const X = [0.04, 0.10, 0.16, 0.22, 0.29, 0.34, 0.40, 0.46, 0.52, 0.58, 0.64, 0.70, 0.77, 0.84, 0.90, 0.96];
+  const Y = [0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0];
+  const N = X.length, MAXR = 30;
+  const POS = Y.reduce((a, b) => a + b, 0);
+  const F0 = Math.log(POS / (N - POS));
+  const sig = (z) => 1 / (1 + Math.exp(-z));
+  const fmt = (v, d = 3) => (v < 0 ? "−" : "") + Math.abs(v).toFixed(d);
+  const fmtS = (v, d = 3) => (v < 0 ? "−" : "+") + Math.abs(v).toFixed(d);
+  const $ = (id) => document.getElementById(id);
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (t, a, p) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); if (p) p.appendChild(e); return e; };
+  const txt = (p, x, y, s, a) => { const t = el("text", Object.assign({ x, y }, a || {}), p); t.textContent = s; return t; };
+  const NAME = { gbdt: "GBDT", xgb: "XGBoost", lgbm: "LightGBM" };
+  const DEFAULTS = { gbdt: { lr: "0.3", depth: "2", lambda: "0", bins: "0" }, xgb: { lr: "0.3", depth: "2", lambda: "1", bins: "0" }, lgbm: { lr: "0.3", leaves: "3", lambda: "1", bins: "8" } };
+  const PIN_COLORS = ["var(--s2)", "var(--s3)", "var(--s4)"];
+  const reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function cfg() {
+    const m = document.querySelector("input[name=method]:checked").value;
+    return { method: m, order: m === "gbdt" ? 1 : 2, growth: m === "lgbm" ? "leaf" : "level", lr: +$("lr").value, depth: +$("depth").value,
+             leaves: +$("leaves").value, lambda: m === "gbdt" ? 0 : +$("lambda").value, bins: m === "lgbm" ? +$("bins").value : 0 };
+  }
+  function applyMethodUI() {
+    const m = document.querySelector("input[name=method]:checked").value;
+    $("depth-wrap").hidden = m === "lgbm"; $("leaves-wrap").hidden = m !== "lgbm";
+    $("lambda").disabled = m === "gbdt"; $("bins").disabled = m !== "lgbm";
+    const d = DEFAULTS[m]; for (const k in d) $(k).value = d[k];
+  }
+
+  let S, pins = [], timer = null, sel = 8;  // sel: the sample whose path is highlighted (#9, the noise point inside the bump)
+  function loss(F) { let s = 0; for (let i = 0; i < N; i++) { const p = sig(F[i]); s -= Y[i] * Math.log(p) + (1 - Y[i]) * Math.log(1 - p); } return s / N; }
+  function reset() { stop(); const F = Array(N).fill(F0); S = { F, trees: [], losses: [loss(F)], round: 0, last: null }; render(); }
+  function candidates(idx, c) {
+    const xs = [...new Set(idx.map((i) => X[i]))].sort((a, b) => a - b), out = [];
+    if (c.bins) { for (let k = 1; k < c.bins; k++) { const t = k / c.bins; if (xs[0] <= t && xs[xs.length - 1] > t) out.push(t); } }
+    else { for (let k = 0; k < xs.length - 1; k++) out.push((xs[k] + xs[k + 1]) / 2); }
+    return out;
+  }
+  const st = (idx, g, h) => { let G = 0, H = 0; for (const i of idx) { G += g[i]; H += h[i]; } return { G, H, n: idx.length }; };
+  const leafValue = (s, c) => c.order === 1 ? -s.G / s.n : -s.G / (s.H + c.lambda);
+  const score = (s, c) => c.order === 1 ? s.G * s.G / s.n : s.G * s.G / (s.H + c.lambda);
+  function bestSplit(idx, g, h, c) {
+    const all = st(idx, g, h); let best = null;
+    for (const t of candidates(idx, c)) {
+      const L = idx.filter((i) => X[i] <= t), R = idx.filter((i) => X[i] > t);
+      if (!L.length || !R.length) continue;
+      const gain = score(st(L, g, h), c) + score(st(R, g, h), c) - score(all, c);
+      if (!best || gain > best.gain) best = { t, gain, L, R };
+    }
+    return best;
+  }
+  function grow(g, h, c) {
+    // Builds a real binary tree (nodes with left/right) so the forest panel can draw it; leaves are derived by traversal.
+    const root = { lo: 0, hi: 1, idx: [...Array(N).keys()], depth: 0 }; const splits = [];
+    const splitNode = (nd, s) => { nd.t = s.t; nd.gain = s.gain; splits.push({ t: s.t, gain: s.gain });
+      nd.left = { lo: nd.lo, hi: s.t, idx: s.L, depth: nd.depth + 1 }; nd.right = { lo: s.t, hi: nd.hi, idx: s.R, depth: nd.depth + 1 }; };
+    if (c.growth === "level") {
+      let frontier = [root];
+      for (let d = 0; d < c.depth; d++) {
+        const next = [];
+        for (const nd of frontier) { const s = bestSplit(nd.idx, g, h, c); if (s && s.gain > 1e-12) { splitNode(nd, s); next.push(nd.left, nd.right); } }
+        frontier = next;
+      }
+    } else {
+      const open = [root];
+      while (open.length < c.leaves) {
+        let bi = -1, bs = null;
+        open.forEach((nd, k) => { const s = bestSplit(nd.idx, g, h, c); if (s && s.gain > 1e-12 && (!bs || s.gain > bs.gain)) { bs = s; bi = k; } });
+        if (bi < 0) break;
+        const nd = open[bi]; splitNode(nd, bs); open.splice(bi, 1, nd.left, nd.right);
+      }
+    }
+    const leaves = [];
+    (function collect(nd) { if (nd.left) { collect(nd.left); collect(nd.right); } else leaves.push(nd); })(root);
+    leaves.sort((a, b) => a.lo - b.lo);
+    for (const lf of leaves) { const s = st(lf.idx, g, h); lf.w = leafValue(s, c); lf.G = s.G; lf.H = s.H; }
+    return { root, leaves, splits, lr: c.lr, method: c.method };
+  }
+  function pathNodes(tr, i) { const out = []; let nd = tr.root; while (nd) { out.push(nd); nd = nd.left ? (X[i] <= nd.t ? nd.left : nd.right) : null; } return out; }
+  const treeAt = (tr, x) => { for (const lf of tr.leaves) if (x <= lf.hi) return lf.w; return tr.leaves[tr.leaves.length - 1].w; };
+  const Fx = (x) => { let v = F0; for (const tr of S.trees) v += tr.lr * treeAt(tr, x); return v; };
+  function step() {
+    if (S.round >= MAXR) { stop(); return; }
+    const c = cfg(), p = S.F.map(sig), g = p.map((v, i) => v - Y[i]), h = p.map((v) => v * (1 - v));
+    const tr = grow(g, h, c), f = X.map((x) => treeAt(tr, x)), Fn = S.F.map((v, i) => v + c.lr * f[i]);
+    S.last = { p, g, h, f, tr, Fold: S.F, c }; S.F = Fn; S.trees.push(tr); S.losses.push(loss(Fn)); S.round++;
+    render(); if (S.round >= MAXR) stop();
+  }
+  function play() { if (timer) { stop(); return; } $("play").textContent = "暂停"; timer = setInterval(step, +$("speed").value); }
+  function stop() { if (timer) { clearInterval(timer); timer = null; } $("play").textContent = "播放"; }
+
+  // ---------- tooltips ----------
+  function tip(panel, ev, text) { const w = $(panel + "-wrap"), t = $(panel + "-tip"); t.style.display = "block"; t.textContent = text; const r = w.getBoundingClientRect(); t.style.left = Math.max(0, Math.min(ev.clientX - r.left + 12, r.width - 240)) + "px"; t.style.top = (ev.clientY - r.top - 34) + "px"; }
+  function hide(panel) { $(panel + "-tip").style.display = "none"; }
+  function mount(panel, svg) { const w = $(panel + "-wrap"); const old = w.querySelector("svg"); if (old) old.remove(); svg.style.width = "100%"; w.insertBefore(svg, $(panel + "-tip")); }
+
+  // ---------- panels ----------
+  function renderMain() {
+    const W = 600, H = 290, L = 40, R = 16, T = 20, B = 36;
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "当前模型的预测概率曲线与 16 个样本点，竖线表示每个点的残差。" });
+    const xs = (x) => L + x * (W - L - R), ys = (p) => T + (1 - p) * (H - T - B);
+    for (const v of [0, 0.25, 0.5, 0.75, 1]) { el("line", { x1: L, x2: W - R, y1: ys(v), y2: ys(v), stroke: "currentColor", "stroke-opacity": v === 0 ? 0.4 : 0.12 }, svg); txt(svg, L - 8, ys(v) + 4, v.toFixed(2), { "text-anchor": "end", "font-size": 11, fill: "var(--muted)" }); }
+    for (const v of [0, 0.25, 0.5, 0.75, 1]) txt(svg, xs(v), H - B + 16, v.toFixed(2), { "text-anchor": "middle", "font-size": 11, fill: "var(--muted)" });
+    txt(svg, (L + W - R) / 2, H - 5, "特征 x", { "text-anchor": "middle", "font-size": 11.5, fill: "var(--muted)" });
+    let d = ""; for (let k = 0; k <= 400; k++) { const x = k / 400; d += (k ? "L" : "M") + xs(x).toFixed(1) + "," + ys(sig(Fx(x))).toFixed(1); }
+    el("path", { d, fill: "none", stroke: "var(--s1)", "stroke-width": 2, "stroke-linejoin": "round" }, svg);
+    const p = S.F.map(sig);
+    X.forEach((x, i) => el("line", { x1: xs(x), x2: xs(x), y1: ys(Y[i]), y2: ys(p[i]), stroke: "currentColor", "stroke-opacity": 0.35, "stroke-width": 1 }, svg));
+    X.forEach((x, i) => el("circle", { cx: xs(x), cy: ys(p[i]), r: 3.5, fill: "var(--s1)", stroke: "var(--bg)", "stroke-width": 2 }, svg));
+    X.forEach((x, i) => {
+      if (i === sel) el("circle", { cx: xs(x), cy: ys(Y[i]), r: 10, fill: "none", stroke: "var(--s1)", "stroke-width": 2 }, svg);
+      el("circle", { cx: xs(x), cy: ys(Y[i]), r: 5, fill: Y[i] ? "var(--fg)" : "var(--bg)", stroke: "var(--fg)", "stroke-width": 1.5 }, svg);
+      const hit = el("circle", { cx: xs(x), cy: ys(Y[i]), r: 14, fill: "transparent", style: "cursor:pointer" }, svg);
+      hit.addEventListener("mousemove", (ev) => tip("main", ev, `#${i + 1}  x=${x.toFixed(2)}  y=${Y[i]}  p=${p[i].toFixed(3)}  g=${fmtS(p[i] - Y[i])}  点击选中`));
+      hit.addEventListener("mouseleave", () => hide("main"));
+      hit.addEventListener("click", () => { sel = i; render(); });
+    });
+    txt(svg, W - R, T - 6, "蓝线 = 当前 p(x)；实心点 y=1，空心点 y=0；竖线 = 残差", { "text-anchor": "end", "font-size": 11, fill: "var(--muted)" });
+    mount("main", svg);
+  }
+  function renderTree() {
+    const W = 600, H = 170, L = 40, R = 16, T = 26, B = 30;
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "本轮新树在 x 轴上的分段常数输出，蓝色为正、红色为负，虚线为切分点。" });
+    const xs = (x) => L + x * (W - L - R);
+    if (!S.last) { txt(svg, W / 2, H / 2, "按“走一轮”长出第一棵树", { "text-anchor": "middle", "font-size": 13, fill: "var(--muted)" }); mount("tree", svg); return; }
+    const tr = S.last.tr, vmax = Math.max(0.5, ...tr.leaves.map((l) => Math.abs(l.w))) * 1.25, ys = (v) => T + (vmax - v) / (2 * vmax) * (H - T - B);
+    el("line", { x1: L, x2: W - R, y1: ys(0), y2: ys(0), stroke: "currentColor", "stroke-opacity": 0.4 }, svg);
+    txt(svg, L - 8, ys(0) + 4, "0", { "text-anchor": "end", "font-size": 11, fill: "var(--muted)" });
+    tr.leaves.forEach((lf, k) => {
+      const x0 = xs(lf.lo) + (k ? 1 : 0), x1 = xs(lf.hi) - (k < tr.leaves.length - 1 ? 1 : 0);
+      const y0 = ys(Math.max(0, lf.w)), y1 = ys(Math.min(0, lf.w));
+      const rect = el("rect", { x: x0, y: y0, width: Math.max(1, x1 - x0), height: Math.max(1, y1 - y0), fill: lf.w >= 0 ? "var(--pos)" : "var(--neg)", opacity: 0.85 }, svg);
+      txt(svg, (x0 + x1) / 2, lf.w >= 0 ? y0 - 5 : y1 + 13, fmtS(lf.w), { "text-anchor": "middle", "font-size": 11.5, fill: "var(--fg)", "font-family": "var(--font-mono)" });
+      txt(svg, (x0 + x1) / 2, H - B + 16, `${lf.idx.length} 个点`, { "text-anchor": "middle", "font-size": 11, fill: "var(--muted)" });
+      const hit = el("rect", { x: xs(lf.lo), y: T, width: xs(lf.hi) - xs(lf.lo), height: H - T - B, fill: "transparent" }, svg);
+      const c = S.last.c, formula = c.order === 1 ? `w = −G/n = ${fmt(-lf.G)}/${lf.idx.length}` : `w = −G/(H+λ) = ${fmt(-lf.G)}/(${lf.H.toFixed(3)}+${c.lambda})`;
+      hit.addEventListener("mousemove", (ev) => { rect.setAttribute("opacity", 1); tip("tree", ev, `[${lf.lo.toFixed(3)}, ${lf.hi.toFixed(3)}]  ${formula} = ${fmtS(lf.w)}`); });
+      hit.addEventListener("mouseleave", () => { rect.setAttribute("opacity", 0.85); hide("tree"); });
+    });
+    tr.splits.forEach((s, k) => { el("line", { x1: xs(s.t), x2: xs(s.t), y1: T - 4, y2: H - B, stroke: "currentColor", "stroke-dasharray": "3 3", "stroke-opacity": 0.6 }, svg); txt(svg, xs(s.t), T - 8 - (k % 2) * 0, `x ≤ ${s.t.toFixed(3)}`, { "text-anchor": "middle", "font-size": 11, fill: "var(--fg)", "font-family": "var(--font-mono)" }); });
+    mount("tree", svg);
+  }
+  function renderLoss() {
+    const W = 440, H = 250, L = 46, R = 14, T = 16, B = 36, ymax = 0.75;
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "LogLoss 随训练轮数的变化，当前运行为蓝色，固定下来的对比运行为其它颜色。" });
+    const xs = (r) => L + r / MAXR * (W - L - R), ys = (v) => T + (1 - v / ymax) * (H - T - B);
+    for (const v of [0, 0.25, 0.5, 0.75]) { el("line", { x1: L, x2: W - R, y1: ys(v), y2: ys(v), stroke: "currentColor", "stroke-opacity": v === 0 ? 0.4 : 0.12 }, svg); txt(svg, L - 8, ys(v) + 4, v.toFixed(2), { "text-anchor": "end", "font-size": 11, fill: "var(--muted)" }); }
+    for (const r of [0, 10, 20, 30]) txt(svg, xs(r), H - B + 16, r, { "text-anchor": "middle", "font-size": 11, fill: "var(--muted)" });
+    txt(svg, (L + W - R) / 2, H - 5, "轮数 m（树的数量）", { "text-anchor": "middle", "font-size": 11.5, fill: "var(--muted)" });
+    const line = (ls, color, wdt) => { let d = ""; ls.forEach((v, r) => { d += (r ? "L" : "M") + xs(r).toFixed(1) + "," + ys(v).toFixed(1); }); el("path", { d, fill: "none", stroke: color, "stroke-width": wdt, "stroke-linejoin": "round", "stroke-linecap": "round" }, svg); };
+    pins.forEach((pn) => line(pn.losses, pn.color, 1.5));
+    line(S.losses, "var(--s1)", 2);
+    const r = S.round, v = S.losses[r];
+    el("circle", { cx: xs(r), cy: ys(v), r: 4.5, fill: "var(--s1)", stroke: "var(--bg)", "stroke-width": 2 }, svg);
+    txt(svg, Math.min(xs(r) + 8, W - R - 50), ys(v) - 8, v.toFixed(3), { "font-size": 11.5, fill: "var(--fg)", "font-family": "var(--font-mono)" });
+    const cross = el("line", { x1: 0, x2: 0, y1: T, y2: H - B, stroke: "currentColor", "stroke-opacity": 0.5, "stroke-dasharray": "3 3", visibility: "hidden" }, svg);
+    const hit = el("rect", { x: L, y: T, width: W - L - R, height: H - T - B, fill: "transparent" }, svg);
+    hit.addEventListener("mousemove", (ev) => {
+      const bb = svg.getBoundingClientRect(), px = (ev.clientX - bb.left) * W / bb.width, m = Math.max(0, Math.min(MAXR, Math.round((px - L) / (W - L - R) * MAXR)));
+      cross.setAttribute("x1", xs(m)); cross.setAttribute("x2", xs(m)); cross.setAttribute("visibility", "visible");
+      const parts = [`第 ${m} 轮`]; if (S.losses[m] !== undefined) parts.push(`当前 ${S.losses[m].toFixed(3)}`); pins.forEach((pn) => { if (pn.losses[m] !== undefined) parts.push(`${pn.label} ${pn.losses[m].toFixed(3)}`); });
+      tip("loss", ev, parts.join("  ·  "));
+    });
+    hit.addEventListener("mouseleave", () => { cross.setAttribute("visibility", "hidden"); hide("loss"); });
+    mount("loss", svg);
+    const lg = $("loss-legend"); lg.textContent = "";
+    const c = cfg(); const cur = document.createElement("span"); const ci = document.createElement("i"); ci.style.background = "var(--s1)"; cur.appendChild(ci); cur.appendChild(document.createTextNode(`当前：${NAME[c.method]} ν=${c.lr} ${c.growth === "leaf" ? "num_leaves=" + c.leaves : "max_depth=" + c.depth}${c.order === 2 ? " λ=" + c.lambda : ""}${c.bins ? " bins=" + c.bins : ""}`)); lg.appendChild(cur);
+    pins.forEach((pn) => { const s = document.createElement("span"); const i = document.createElement("i"); i.style.background = pn.color; s.appendChild(i); s.appendChild(document.createTextNode(pn.label)); lg.appendChild(s); });
+  }
+  function renderParams() {
+    const box = $("params"); box.textContent = "";
+    const intro = document.createElement("div"); intro.className = "count"; intro.textContent = `F₀ = ln(${POS}/${N - POS}) = ${fmt(F0)}（基率的对数几率）。之后每轮追加一棵树，已有的树不再改动。`; box.appendChild(intro);
+    let thr = 0, lv = 0;
+    S.trees.forEach((tr, m) => {
+      thr += tr.leaves.length - 1; lv += tr.leaves.length;
+      const row = document.createElement("div"); row.className = "tree-row";
+      const b = document.createElement("b"); b.textContent = `树 ${m + 1}`; row.appendChild(b);
+      const s = document.createElement("span"); s.textContent = tr.leaves.map((lf) => `[${lf.lo.toFixed(2)},${lf.hi.toFixed(2)}] ${fmtS(lf.w, 2)}`).join("  |  ") + `   ×${tr.lr}`; row.appendChild(s);
+      if (m === S.trees.length - 1) row.style.color = "var(--s1)";
+      box.appendChild(row);
+    });
+    const cnt = document.createElement("div"); cnt.className = "count"; cnt.textContent = S.trees.length ? `参数总数：${thr} 个切分阈值 + ${lv} 个叶子值 = ${thr + lv}（${S.trees.length} 棵树）` : "还没有树。"; box.appendChild(cnt);
+    box.scrollTop = box.scrollHeight;
+  }
+  function renderTable() {
+    const tb = document.querySelector("#tbl tbody"); tb.textContent = "";
+    const L = S.last; let worst = -1;
+    if (L) { let m = -1; L.g.forEach((v, i) => { if (Math.abs(v) > m) { m = Math.abs(v); worst = i; } }); }
+    for (let i = 0; i < N; i++) {
+      const tr = document.createElement("tr"); if (i === worst) tr.className = "worst";
+      const cells = L
+        ? [i + 1, X[i].toFixed(2), Y[i], L.p[i].toFixed(3), fmtS(L.g[i]), L.h[i].toFixed(3), fmtS(L.f[i]), fmtS(L.c.lr * L.f[i]), fmt(S.F[i]), sig(S.F[i]).toFixed(3)]
+        : [i + 1, X[i].toFixed(2), Y[i], sig(F0).toFixed(3), fmtS(sig(F0) - Y[i]), (sig(F0) * (1 - sig(F0))).toFixed(3), "", "", fmt(F0), sig(F0).toFixed(3)];
+      cells.forEach((v, k) => { const td = document.createElement("td"); if (k) td.className = "num"; td.textContent = v; tr.appendChild(td); });
+      tb.appendChild(tr);
+    }
+  }
+  function renderStatus() {
+    const s = $("status"); s.textContent = "";
+    const items = [`轮数 ${S.round} / ${MAXR}`, `LogLoss ${S.losses[S.round].toFixed(4)}`, `起点 ${S.losses[0].toFixed(4)}`, `树 ${S.trees.length} 棵`];
+    items.forEach((t) => { const b = document.createElement("b"); b.textContent = t; s.appendChild(b); });
+    const narr = $("narr");
+    if (!S.last) { narr.textContent = `还没开始。所有点的分数都是 F₀ = ${fmt(F0)}，p = ${sig(F0).toFixed(3)}，LogLoss = ${S.losses[0].toFixed(3)}。按“走一轮”。`; return; }
+    const { tr, c, g } = S.last; let worst = 0; g.forEach((v, i) => { if (Math.abs(v) > Math.abs(g[worst])) worst = i; });
+    const prev = S.losses[S.round - 1], now = S.losses[S.round];
+    const splits = tr.splits.map((sp) => `x ≤ ${sp.t.toFixed(3)}（增益 ${sp.gain.toFixed(3)}）`).join("，");
+    narr.textContent = `第 ${S.round} 轮（${NAME[c.method]}）：残差最大的是 #${worst + 1}（g = ${fmtS(g[worst])}）。新树在 ${splits || "无处"} 切分，${tr.leaves.length} 个叶子，叶子值按${c.order === 1 ? "残差均值 −G/n" : "−G/(H+λ)"}算。乘学习率 ${c.lr} 加到每个点的分数上，LogLoss 从 ${prev.toFixed(3)} 到 ${now.toFixed(3)}（${fmtS(now - prev, 4)}）。` + (S.round >= MAXR ? " 已到 30 轮上限。" : "");
+  }
+  function drawTree(tr, m, isNew) {
+    const leaves = tr.leaves, slot = 56, maxDepth = Math.max(...leaves.map((l) => l.depth));
+    const W = Math.max(130, leaves.length * slot + 16), H = 30 + maxDepth * 44 + 24;
+    leaves.forEach((lf, k) => { lf.x = 8 + slot / 2 + k * slot; });
+    (function place(nd) { if (nd.left) { place(nd.left); place(nd.right); nd.x = (nd.left.x + nd.right.x) / 2; } nd.y = 16 + nd.depth * 44; })(tr.root);
+    const onPath = new Set(pathNodes(tr, sel));
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "img", "aria-label": `第 ${m + 1} 棵树，${leaves.length} 个叶子` });
+    svg.style.maxWidth = "none";
+    (function edges(nd) {
+      if (!nd.left) return;
+      [nd.left, nd.right].forEach((ch) => { const hot = onPath.has(nd) && onPath.has(ch);
+        el("line", { x1: nd.x, y1: nd.y + 11, x2: ch.x, y2: ch.y - 11, stroke: hot ? "var(--s1)" : "currentColor", "stroke-width": hot ? 2.5 : 1, "stroke-opacity": hot ? 1 : 0.5 }, svg); });
+      edges(nd.left); edges(nd.right);
+    })(tr.root);
+    (function nodes(nd) {
+      const hot = onPath.has(nd);
+      if (nd.left) {
+        el("rect", { x: nd.x - 27, y: nd.y - 11, width: 54, height: 22, rx: 3, fill: "var(--panel)", stroke: hot ? "var(--s1)" : "currentColor", "stroke-width": hot ? 2 : 1 }, svg);
+        txt(svg, nd.x, nd.y + 3.5, `x≤${nd.t.toFixed(3)}`, { "text-anchor": "middle", "font-size": 9.5, fill: "var(--fg)", "font-family": "var(--font-mono)" });
+        nodes(nd.left); nodes(nd.right);
+      } else {
+        el("rect", { x: nd.x - 23, y: nd.y - 11, width: 46, height: 22, rx: 11, fill: nd.w >= 0 ? "var(--pos)" : "var(--neg)", stroke: hot ? "var(--fg)" : "none", "stroke-width": 2 }, svg);
+        txt(svg, nd.x, nd.y + 3.5, fmtS(nd.w, 2), { "text-anchor": "middle", "font-size": 9.5, fill: "#fff", "font-family": "var(--font-mono)", "font-weight": 600 });
+      }
+    })(tr.root);
+    const card = document.createElement("div"); card.className = "tree-card" + (isNew ? " new" : ""); card.appendChild(svg);
+    const cap = document.createElement("div"); cap.className = "cap"; cap.textContent = `树 ${m + 1}  ×${tr.lr}  →  ${fmtS(tr.lr * treeAt(tr, X[sel]), 3)}`; card.appendChild(cap);
+    return card;
+  }
+  function renderForest() {
+    const box = $("forest"); box.textContent = "";
+    const f0 = document.createElement("div"); f0.className = "tree-card f0"; f0.textContent = `F₀ = ${fmt(F0)}`; box.appendChild(f0);
+    if (!S.trees.length) { const d = document.createElement("div"); d.className = "cap"; d.style.alignSelf = "center"; d.textContent = "还没有树。每走一轮，右边就长出一棵。"; box.appendChild(d); return; }
+    S.trees.forEach((tr, m) => box.appendChild(drawTree(tr, m, m === S.trees.length - 1)));
+    box.scrollLeft = box.scrollWidth;
+  }
+  function renderAcc() {
+    const W = 1060, H = 190, L = 46, R = 14, T = 16, B = 34;
+    const contrib = S.trees.map((tr) => tr.lr * treeAt(tr, X[sel])); const Fs = [F0]; contrib.forEach((c) => Fs.push(Fs[Fs.length - 1] + c));
+    const xmax = Math.max(10, S.round); let lo = Math.min(0, ...Fs), hi = Math.max(0, ...Fs); const pad = Math.max(0.25, (hi - lo) * 0.15); lo -= pad; hi += pad;
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `样本 #${sel + 1} 的分数 F 随树的数量累加的过程` });
+    const xs = (r) => L + r / xmax * (W - L - R), ys = (v) => T + (hi - v) / (hi - lo) * (H - T - B);
+    const stepV = (hi - lo) > 2 ? 0.5 : 0.25;
+    for (let v = Math.ceil(lo / stepV) * stepV; v <= hi; v += stepV) { el("line", { x1: L, x2: W - R, y1: ys(v), y2: ys(v), stroke: "currentColor", "stroke-opacity": Math.abs(v) < 1e-9 ? 0.45 : 0.12 }, svg); txt(svg, L - 8, ys(v) + 4, fmt(v, 2), { "text-anchor": "end", "font-size": 11, fill: "var(--muted)" }); }
+    txt(svg, W - R, ys(0) - 5, "F = 0，即 p = 0.5", { "text-anchor": "end", "font-size": 11, fill: "var(--muted)" });
+    for (let r = 0; r <= xmax; r += xmax > 20 ? 5 : 2) txt(svg, xs(r), H - B + 16, r, { "text-anchor": "middle", "font-size": 11, fill: "var(--muted)" });
+    txt(svg, (L + W - R) / 2, H - 5, "已加入的树的数量", { "text-anchor": "middle", "font-size": 11.5, fill: "var(--muted)" });
+    let d = ""; Fs.forEach((v, r) => { d += (r ? "L" : "M") + xs(r).toFixed(1) + "," + ys(v).toFixed(1); });
+    el("path", { d, fill: "none", stroke: "var(--s1)", "stroke-width": 2, "stroke-linejoin": "round" }, svg);
+    Fs.forEach((v, r) => { if (r) el("circle", { cx: xs(r), cy: ys(v), r: 4, fill: contrib[r - 1] >= 0 ? "var(--pos)" : "var(--neg)", stroke: "var(--bg)", "stroke-width": 2 }, svg); });
+    el("circle", { cx: xs(0), cy: ys(F0), r: 4, fill: "var(--fg)", stroke: "var(--bg)", "stroke-width": 2 }, svg);
+    const last = Fs[Fs.length - 1];
+    txt(svg, Math.min(xs(S.round) + 8, W - R - 120), ys(last) - 8, `F = ${fmt(last)}，p = ${sig(last).toFixed(3)}`, { "font-size": 11.5, fill: "var(--fg)", "font-family": "var(--font-mono)" });
+    const cross = el("line", { x1: 0, x2: 0, y1: T, y2: H - B, stroke: "currentColor", "stroke-opacity": 0.5, "stroke-dasharray": "3 3", visibility: "hidden" }, svg);
+    const hit = el("rect", { x: L, y: T, width: W - L - R, height: H - T - B, fill: "transparent" }, svg);
+    hit.addEventListener("mousemove", (ev) => {
+      const bb = svg.getBoundingClientRect(), px = (ev.clientX - bb.left) * W / bb.width, r = Math.max(0, Math.min(S.round, Math.round((px - L) / (W - L - R) * xmax)));
+      cross.setAttribute("x1", xs(r)); cross.setAttribute("x2", xs(r)); cross.setAttribute("visibility", "visible");
+      tip("acc", ev, r ? `第 ${r} 棵树给 #${sel + 1}：${fmtS(contrib[r - 1])}；累计 F = ${fmt(Fs[r])}，p = ${sig(Fs[r]).toFixed(3)}` : `起点 F₀ = ${fmt(F0)}，p = ${sig(F0).toFixed(3)}`);
+    });
+    hit.addEventListener("mouseleave", () => { cross.setAttribute("visibility", "hidden"); hide("acc"); });
+    mount("acc", svg);
+    const terms = contrib.slice(0, 8).map((c) => fmtS(c, 3)).join(" ") + (contrib.length > 8 ? " …" : "");
+    $("acc-text").textContent = `样本 #${sel + 1}（x = ${X[sel].toFixed(2)}，y = ${Y[sel]}）：F = ${fmt(F0)} ${terms}${contrib.length ? " = " + fmt(last) : ""}，p = σ(F) = ${sig(last).toFixed(3)}。` + (Y[sel] ? "它是正样本，树应该把它往上推。" : "它是负样本，树应该把它往下拉。");
+  }
+  function render() { renderMain(); renderTree(); renderLoss(); renderParams(); renderTable(); renderStatus(); renderForest(); renderAcc(); }
+
+  // ---------- wiring ----------
+  $("step").addEventListener("click", () => { stop(); step(); });
+  $("play").addEventListener("click", play);
+  $("reset").addEventListener("click", reset);
+  $("pin").addEventListener("click", () => {
+    const c = cfg(); const label = `${NAME[c.method]} ν=${c.lr} ${c.growth === "leaf" ? "leaves=" + c.leaves : "depth=" + c.depth}${c.order === 2 ? " λ=" + c.lambda : ""}${c.bins ? " bins=" + c.bins : ""} (${S.round} 轮)`;
+    if (pins.length >= 3) pins.shift();
+    pins.push({ label, losses: S.losses.slice(), color: PIN_COLORS[pins.length % 3] });
+    pins.forEach((pn, k) => { pn.color = PIN_COLORS[k]; });
+    renderLoss();
+  });
+  document.querySelectorAll("input[name=method]").forEach((r) => r.addEventListener("change", () => { applyMethodUI(); reset(); }));
+  ["lr", "depth", "leaves", "lambda", "bins"].forEach((id) => $(id).addEventListener("change", renderLoss));
+  if (reduced) $("speed").value = "1500";
+  applyMethodUI(); reset();
+})();
+</script>
+
+</body>
+</html>

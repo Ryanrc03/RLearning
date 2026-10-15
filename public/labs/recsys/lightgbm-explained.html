@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>梯度提升树如何给曝光打分</title>
+<style>
+  /* Layout: a paper. One reading column (max 860px) for text; figures may extend to 1100px and scroll sideways on phones. */
+  :root {
+    --bg: #faf8ef;
+    --fg: #30332c;
+    --muted: #76796f;
+    --line: #e4dfcb;
+    --panel: #ffffff;
+    --accent: #927014;      /* the sample's path, "this row" */
+    --pos: #2a78d6;         /* positive contribution (dataviz diverging: blue) */
+    --neg: #e34948;         /* negative contribution (dataviz diverging: red) */
+    --mid: #f0efec;
+    --g-ctx: #0e7f84; --g-user: #4f55c4; --g-video: #b9731a; --g-roll: #b53a57;
+    --font-display: Georgia, "Songti SC", "SimSun", serif;
+    --font-body: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --font-mono: "Cascadia Code", Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17191b; --fg: #e6e8e6; --muted: #9ea8ac; --line: #3a4247; --panel: #1f2326;
+      --accent: #3987e5; --pos: #3987e5; --neg: #e66767; --mid: #383835;
+      --g-ctx: #3fbcc0; --g-user: #8f94ea; --g-video: #e0a04a; --g-roll: #e5718b; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #17191b; --fg: #e6e8e6; --muted: #9ea8ac; --line: #3a4247; --panel: #1f2326;
+    --accent: #3987e5; --pos: #3987e5; --neg: #e66767; --mid: #383835;
+    --g-ctx: #3fbcc0; --g-user: #8f94ea; --g-video: #e0a04a; --g-roll: #e5718b; color-scheme: dark;
+  }
+  body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15.5px; line-height: 1.75;
+         padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 12px 24px; }
+  main { max-width: 1100px; margin: 0 auto; display: grid; gap: 44px; }
+  .col { max-width: 860px; }
+  header h1 { font-family: var(--font-display); font-size: 34px; font-weight: 700; line-height: 1.3; margin: 0 0 8px; text-wrap: balance; letter-spacing: 0.01em; }
+  header .sub { color: var(--muted); font-size: 15px; }
+  .abstract { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 16px 0; margin-top: 20px; }
+  .abstract b { font-family: var(--font-display); }
+  h2 { font-family: var(--font-display); font-size: 22px; font-weight: 700; margin: 0 0 12px; text-wrap: balance; }
+  h2 .no { color: var(--muted); font-family: var(--font-mono); font-size: 15px; font-weight: 400; margin-right: 10px; }
+  h3 { font-size: 16px; font-weight: 700; margin: 18px 0 6px; }
+  p { margin: 0 0 10px; max-width: 72ch; }
+  section > p + p { margin-top: -2px; }
+  .eq { font-family: var(--font-mono); font-size: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 10px 14px; margin: 10px 0 12px; overflow-x: auto; white-space: nowrap; max-width: 72ch; }
+  .eq sub, .eq sup { font-size: 10.5px; }
+  .eq .c { color: var(--muted); }
+  figure { margin: 0; display: grid; gap: 10px; }
+  .scroll { overflow-x: auto; }
+  svg { display: block; max-width: 100%; height: auto; font-family: var(--font-body); }
+  svg .mono { font-family: var(--font-mono); }
+  figcaption { color: var(--muted); font-size: 14px; max-width: 80ch; line-height: 1.6; }
+  figcaption b { color: var(--fg); font-weight: 600; }
+  table { border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 5px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; letter-spacing: 0.04em; }
+  td.num, th.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.mono { font-family: var(--font-mono); white-space: nowrap; }
+  tr.hl td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .params { width: 100%; max-width: 860px; }
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+  @media (max-width: 820px) { .charts { grid-template-columns: 1fr; } }
+  .chart { display: grid; gap: 6px; min-width: 0; }
+  .chart h3 { margin: 0; }
+  .tip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px; font-size: 12.5px; font-family: var(--font-mono); white-space: nowrap; display: none; z-index: 2; }
+  .chart-wrap { position: relative; }
+  details { font-size: 13.5px; }
+  summary { cursor: pointer; color: var(--muted); }
+  .note { font-size: 14.5px; border-left: 3px solid var(--accent); padding-left: 12px; max-width: 72ch; color: var(--fg); }
+  .refs { font-size: 13.5px; color: var(--muted); }
+  .refs li { margin-bottom: 4px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -2px; margin-right: 6px; }
+  @media (prefers-reduced-motion: no-preference) { .bar rect { transition: opacity .12s; } }
+</style>
+</head>
+<body>
+
+<main>
+  <header class="col">
+    <h1>梯度提升树如何给曝光打分</h1>
+    <div class="sub">以 KuaiRand-1K 上训练的 click 模型（运行 <span class="mono" style="font-family:var(--font-mono)">20261014_153646_b1_lgbm_f1_is_click</span>）为例，所有数字取自该模型和同一条真实样本</div>
+    <div class="abstract">
+      <p><b>摘要</b>　LightGBM 是梯度提升决策树（GBDT）的一种实现。模型把 84 维特征向量 x 送进 407 棵回归树，把每棵树落到的叶子值相加得到分数 F(x)，再经 sigmoid 变成点击概率 p。训练是一个迭代过程：第 m 轮先用当前模型算出每条样本的概率，再把概率与真实标签的差（梯度）当作新目标，长一棵树去拟合它，乘以 0.05 的学习率加到模型上；验证集 AUC 连续 50 轮不再上升就停止。本文用总览图说明输入输出，用机制图说明一轮迭代、直方图分桶与 leaf-wise 生长，然后解剖真实模型的第一棵树和一条样本的 407 步预测轨迹，最后用 6 条样本、3 棵桩树的玩具例子把公式算一遍。</p>
+    </div>
+  </header>
+
+  <!-- ============ 1. overview ============ -->
+  <section>
+    <div class="col">
+      <h2><span class="no">1</span>总览：一个向量进去，一个概率出来</h2>
+      <p>输入是一次曝光的 84 个数（上下文、用户静态、视频静态、滚动统计四组，见上一篇"一条曝光的 84 维输入"），缺失记为 NaN。输出是一个 0 到 1 之间的数 p，含义是"这次曝光会被点击的概率"。模型本体是 407 棵树的加法：</p>
+    </div>
+    <div class="eq">F(x) = f<sub>1</sub>(x) + f<sub>2</sub>(x) + … + f<sub>407</sub>(x)　　p = σ(F(x)) = 1 / (1 + e<sup>−F(x)</sup>)</div>
+    <figure>
+      <div class="scroll">
+      <svg viewBox="0 0 1100 330" width="1100" role="img" aria-label="总览：84 维特征向量 x 送进 407 棵树，每棵树给出一个叶子值，相加得到 F(x)=0.196，经 sigmoid 得到 p=0.549；训练时 p 与标签 y=0 比较得到 LogLoss，评估时同一用户内按 p 排序得到 GAUC。">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+          <g id="tree">
+            <circle cx="35" cy="10" r="5" fill="none" stroke="currentColor" stroke-width="1.2"/>
+            <line x1="35" y1="15" x2="18" y2="33" stroke="currentColor" stroke-width="1.2"/><line x1="35" y1="15" x2="52" y2="33" stroke="currentColor" stroke-width="1.2"/>
+            <circle cx="18" cy="38" r="5" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="52" cy="38" r="5" fill="none" stroke="currentColor" stroke-width="1.2"/>
+            <line x1="18" y1="43" x2="8" y2="60" stroke="currentColor" stroke-width="1.2"/><line x1="18" y1="43" x2="28" y2="60" stroke="currentColor" stroke-width="1.2"/>
+            <line x1="52" y1="43" x2="42" y2="60" stroke="currentColor" stroke-width="1.2"/><line x1="52" y1="43" x2="62" y2="60" stroke="currentColor" stroke-width="1.2"/>
+            <rect x="4" y="60" width="8" height="8" rx="1" fill="currentColor"/><rect x="24" y="60" width="8" height="8" rx="1" fill="currentColor"/>
+            <rect x="38" y="60" width="8" height="8" rx="1" fill="currentColor"/><rect x="58" y="60" width="8" height="8" rx="1" fill="currentColor"/>
+          </g>
+        </defs>
+        <g fill="none" stroke="currentColor" stroke-width="1.2">
+          <!-- x vector -->
+          <g stroke="none">
+            <rect x="30" y="118" width="14" height="30" fill="var(--g-ctx)"/><rect x="44" y="118" width="60" height="30" fill="var(--g-user)"/>
+            <rect x="104" y="118" width="19" height="30" fill="var(--g-video)"/><rect x="123" y="118" width="107" height="30" fill="var(--g-roll)"/>
+          </g>
+          <rect x="30" y="118" width="200" height="30" rx="2"/>
+          <g stroke="none" fill="currentColor" font-size="12.5">
+            <text x="130" y="104" text-anchor="middle" font-weight="600">x ∈ ℝ<tspan font-size="9" dy="-5">84</tspan><tspan dy="5">，一次曝光</tspan></text>
+            <text x="130" y="168" text-anchor="middle" font-size="11" opacity="0.7">6 + 25 + 8 + 45 列，NaN = 缺失</text>
+            <text x="130" y="186" text-anchor="middle" font-size="11" opacity="0.7" class="mono">用户 427 · 视频 3447 · tab 1</text>
+          </g>
+          <!-- fan-in bracket -->
+          <path d="M230,133 L270,133" marker-end="url(#ar)"/>
+          <path d="M290,60 L290,230" stroke-dasharray="3 3"/>
+          <text x="282" y="250" font-size="11" fill="currentColor" stroke="none" opacity="0.7">同一个 x 送进每棵树</text>
+          <!-- trees -->
+          <g transform="translate(310,70)"><use href="#tree"/></g>
+          <g transform="translate(400,70)"><use href="#tree"/></g>
+          <g transform="translate(490,70)"><use href="#tree"/></g>
+          <g transform="translate(580,70)"><use href="#tree"/></g>
+          <text x="690" y="115" font-size="20" fill="currentColor" stroke="none" text-anchor="middle">…</text>
+          <g transform="translate(730,70)"><use href="#tree"/></g>
+          <g stroke="none" fill="currentColor" font-size="12" text-anchor="middle" class="mono">
+            <text x="345" y="60">f<tspan font-size="9" dy="3">1</tspan></text><text x="435" y="60">f<tspan font-size="9" dy="3">2</tspan></text>
+            <text x="525" y="60">f<tspan font-size="9" dy="3">3</tspan></text><text x="615" y="60">f<tspan font-size="9" dy="3">4</tspan></text><text x="765" y="60">f<tspan font-size="9" dy="3">407</tspan></text>
+            <text x="345" y="160">−0.437</text><text x="435" y="160">+0.056</text><text x="525" y="160">+0.039</text><text x="615" y="160">+0.041</text><text x="765" y="160">−0.002</text>
+          </g>
+          <!-- highlighted leaf for sample (tree 1: third leaf) -->
+          <rect x="348" y="130" width="8" height="8" rx="1" fill="var(--accent)" stroke="none"/>
+          <rect x="434" y="130" width="8" height="8" rx="1" fill="var(--accent)" stroke="none"/>
+          <rect x="498" y="130" width="8" height="8" rx="1" fill="var(--accent)" stroke="none"/>
+          <rect x="642" y="130" width="8" height="8" rx="1" fill="var(--accent)" stroke="none"/>
+          <rect x="754" y="130" width="8" height="8" rx="1" fill="var(--accent)" stroke="none"/>
+          <text x="555" y="186" font-size="11" fill="currentColor" stroke="none" text-anchor="middle" opacity="0.7">每棵 127 个叶子，深 10–31 层；蓝色是这条样本落到的叶子，下面是该叶子的值</text>
+          <!-- sum & sigmoid -->
+          <path d="M330,200 L810,200" stroke-dasharray="3 3"/>
+          <path d="M570,200 L570,222" marker-end="url(#ar)"/>
+          <rect x="500" y="224" width="140" height="40" rx="3"/>
+          <text x="570" y="249" text-anchor="middle" font-size="12.5" fill="currentColor" stroke="none" class="mono">Σ = F(x) = 0.196</text>
+          <path d="M640,244 L700,244" marker-end="url(#ar)"/>
+          <rect x="702" y="224" width="150" height="40" rx="3"/>
+          <text x="777" y="249" text-anchor="middle" font-size="12.5" fill="currentColor" stroke="none" class="mono">σ(F) = p = 0.549</text>
+          <!-- y and uses -->
+          <path d="M852,244 L910,244" marker-end="url(#ar)"/>
+          <g stroke="none" fill="currentColor" font-size="12">
+            <text x="920" y="232">训练：与标签 <tspan class="mono" font-weight="600">y = 0</tspan> 比较</text>
+            <text x="920" y="250">LogLoss = −ln(1 − 0.549) = 0.796</text>
+            <text x="920" y="268">下一棵树的目标 g = p − y = 0.549</text>
+            <text x="920" y="300">评估：同一用户的曝光按 p 排序</text>
+            <text x="920" y="318">GAUC = 0.618（random 集）</text>
+          </g>
+          <path d="M777,264 L777,290 L905,290" marker-end="url(#ar)" stroke-dasharray="3 3"/>
+        </g>
+      </svg>
+      </div>
+      <figcaption><b>图 1</b>　同一个 x 走完 407 棵树，每棵树给一个叶子值，相加再过 sigmoid。这条样本第一棵树给 −0.437（它包含了初始分：训练集点击率 0.3806 的对数几率是 −0.487），之后每棵树只做小幅修正，最后 F = 0.196，p = 0.549，而真实标签是 0。</figcaption>
+    </figure>
+  </section>
+
+  <!-- ============ 2. objective ============ -->
+  <section class="col">
+    <h2><span class="no">2</span>目标函数：从 LogLoss 到两个梯度</h2>
+    <p>二分类用的是对数损失。对 N 条曝光：</p>
+    <div class="eq">L = −(1/N) Σ<sub>i</sub> [ y<sub>i</sub> ln p<sub>i</sub> + (1 − y<sub>i</sub>) ln(1 − p<sub>i</sub>) ]，　p<sub>i</sub> = σ(F(x<sub>i</sub>))</div>
+    <p>梯度提升不直接对 F 求解，而是问：如果给每条样本的分数 F(x<sub>i</sub>) 加一个小量，损失会怎么变？答案由一阶导 g 和二阶导 h 给出，对 LogLoss 两者形式都极简单：</p>
+    <div class="eq">g<sub>i</sub> = ∂L<sub>i</sub>/∂F = p<sub>i</sub> − y<sub>i</sub>　　h<sub>i</sub> = ∂²L<sub>i</sub>/∂F² = p<sub>i</sub>(1 − p<sub>i</sub>)</div>
+    <p>g 是"预测比真实高了多少"：点了却只给 0.2 的样本 g = −0.8，没点却给 0.9 的样本 g = +0.9。h 是不确定度，p 接近 0.5 时最大。新树的任务是在每个叶子里给出一个常数 w，让叶子内样本的损失下降最多。对叶子 j 做二阶展开并求最小，得到 LightGBM 真正写进模型文件的叶子值和分裂时比较用的增益：</p>
+    <div class="eq">w<sub>j</sub> = − G<sub>j</sub> / (H<sub>j</sub> + λ)，　G<sub>j</sub> = Σ<sub>i∈j</sub> g<sub>i</sub>，H<sub>j</sub> = Σ<sub>i∈j</sub> h<sub>i</sub>　　<span class="c">λ = lambda_l2 = 1</span></div>
+    <div class="eq">gain(split) = G<sub>L</sub>²/(H<sub>L</sub>+λ) + G<sub>R</sub>²/(H<sub>R</sub>+λ) − G²/(H+λ)</div>
+    <p>直观地读：叶子里的样本整体被高估（G &gt; 0），叶子值就是负的，把它们往下拉；样本越多、h 越大，拉得越稳。λ 在分母上，样本少的叶子会被压向 0，这是防过拟合的第一道闸。</p>
+  </section>
+
+  <!-- ============ 3. one round ============ -->
+  <section>
+    <div class="col">
+      <h2><span class="no">3</span>一轮迭代做什么</h2>
+      <p>训练就是把下面这个环转 407 圈。第 0 圈的模型是一个常数：训练集点击率的对数几率 ln(0.3806 / 0.6194) = −0.487。</p>
+    </div>
+    <figure>
+      <div class="scroll">
+      <svg viewBox="0 0 1100 350" width="1100" role="img" aria-label="一轮迭代的环：当前模型给出 F，经 sigmoid 得到 p，算出每条样本的梯度 g 和 h，按 255 个直方图桶累加 G 与 H 以找最佳切分，leaf-wise 生长到 127 个叶子并给每个叶子赋值 −G/(H+λ)，乘学习率 0.05 加回模型；每轮在验证集上算 AUC，50 轮不提升则停止。">
+        <defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+        <g fill="none" stroke="currentColor" stroke-width="1.2">
+          <!-- top row -->
+          <rect x="40" y="50" width="280" height="78" rx="3"/>
+          <rect x="410" y="50" width="280" height="78" rx="3"/>
+          <rect x="780" y="50" width="280" height="78" rx="3"/>
+          <!-- bottom row -->
+          <rect x="780" y="222" width="280" height="78" rx="3"/>
+          <rect x="410" y="222" width="280" height="78" rx="3"/>
+          <rect x="40" y="222" width="280" height="78" rx="3" stroke="var(--accent)" stroke-width="1.8"/>
+          <!-- arrows -->
+          <path d="M320,89 L410,89" marker-end="url(#ar2)"/>
+          <path d="M690,89 L780,89" marker-end="url(#ar2)"/>
+          <path d="M920,128 L920,222" marker-end="url(#ar2)"/>
+          <path d="M780,261 L690,261" marker-end="url(#ar2)"/>
+          <path d="M410,261 L320,261" marker-end="url(#ar2)"/>
+          <path d="M180,222 L180,128" marker-end="url(#ar2)"/>
+          <!-- early stop branch -->
+          <path d="M180,300 L180,330 L550,330" stroke-dasharray="4 3"/>
+          <g stroke="none" fill="currentColor" font-size="12.5">
+            <text x="52" y="72" font-weight="600">① 当前模型</text>
+            <text x="52" y="92" class="mono">F<tspan font-size="9" dy="3">m−1</tspan><tspan dy="-3">(x</tspan><tspan font-size="9" dy="3">i</tspan><tspan dy="-3">)，所有 502 万训练行</tspan></text>
+            <text x="52" y="112" opacity="0.7">m = 1 时是常数 −0.487</text>
+            <text x="422" y="72" font-weight="600">② 概率与梯度</text>
+            <text x="422" y="92" class="mono">p<tspan font-size="9" dy="3">i</tspan><tspan dy="-3"> = σ(F)，g</tspan><tspan font-size="9" dy="3">i</tspan><tspan dy="-3"> = p</tspan><tspan font-size="9" dy="3">i</tspan><tspan dy="-3"> − y</tspan><tspan font-size="9" dy="3">i</tspan></text>
+            <text x="422" y="112" class="mono">h<tspan font-size="9" dy="3">i</tspan><tspan dy="-3"> = p</tspan><tspan font-size="9" dy="3">i</tspan><tspan dy="-3">(1 − p</tspan><tspan font-size="9" dy="3">i</tspan><tspan dy="-3">)</tspan></text>
+            <text x="792" y="72" font-weight="600">③ 直方图</text>
+            <text x="792" y="92">84 个特征各 255 个桶，每桶累加 G、H</text>
+            <text x="792" y="112" opacity="0.7">bagging：本轮只用 80% 的行、80% 的列</text>
+            <text x="792" y="244" font-weight="600">④ 长一棵树</text>
+            <text x="792" y="264">每次分裂增益最大的那个叶子（leaf-wise）</text>
+            <text x="792" y="284" opacity="0.7">到 127 个叶子为止；叶子至少 200 行</text>
+            <text x="422" y="244" font-weight="600">⑤ 叶子赋值</text>
+            <text x="422" y="264" class="mono">w<tspan font-size="9" dy="3">j</tspan><tspan dy="-3"> = −G</tspan><tspan font-size="9" dy="3">j</tspan><tspan dy="-3"> / (H</tspan><tspan font-size="9" dy="3">j</tspan><tspan dy="-3"> + 1)</tspan></text>
+            <text x="422" y="284" opacity="0.7">类别特征按梯度排序后找最优子集</text>
+            <text x="52" y="244" font-weight="600">⑥ 更新模型</text>
+            <text x="52" y="264" class="mono">F<tspan font-size="9" dy="3">m</tspan><tspan dy="-3"> = F</tspan><tspan font-size="9" dy="3">m−1</tspan><tspan dy="-3"> + 0.05 · f</tspan><tspan font-size="9" dy="3">m</tspan><tspan dy="-3">(x)</tspan></text>
+            <text x="52" y="284" opacity="0.7">学习率 0.05：每棵树只改一小步</text>
+            <text x="560" y="334">每轮在 250 万验证行上算 AUC；连续 50 轮不涨就停，回退到最好的一轮：m* = 407，valid AUC 0.804</text>
+            <text x="200" y="180" opacity="0.7">下一轮</text>
+          </g>
+        </g>
+      </svg>
+      </div>
+      <figcaption><b>图 2</b>　一轮迭代。① 到 ⑥ 是 LightGBM 内部的一次 boosting round；虚线是训练循环之外的早停判据。注意树拟合的目标不是标签 y，而是上一轮留下的梯度 g：每棵新树都在修正前面所有树的共同残差。</figcaption>
+    </figure>
+  </section>
+
+  <!-- ============ 4. histogram + leaf-wise ============ -->
+  <section>
+    <div class="col">
+      <h2><span class="no">4</span>直方图分桶与 leaf-wise 生长</h2>
+      <p>找最佳切分本来要对每个特征的每个取值都试一遍，502 万行乘 84 列做不到。LightGBM 的两个核心取舍把它变成了可行的：</p>
+      <p><b>直方图</b>：建 Dataset 时把每个连续特征按分位数切成至多 255 个桶（这就是 1.7 GB 的 float32 矩阵变成 0.4 GB 的原因，每个值只存 1 字节桶号）。之后找切分只需在 255 个桶边界上比较增益，而 G、H 的累加对每个叶子只做一遍，子叶子的直方图还能用"父减兄"得到。</p>
+      <p><b>leaf-wise</b>：传统做法按层生长，同一层所有叶子一起分裂。LightGBM 每次只分裂当前增益最大的那一个叶子，同样 127 个叶子能得到更低的损失，代价是树可能很深很偏（这个模型里深度 10 到 31），所以必须配合 <span style="font-family:var(--font-mono)">min_data_in_leaf</span> 和 λ 防止在小样本上钻牛角尖。</p>
+    </div>
+    <figure>
+      <div class="scroll">
+      <svg viewBox="0 0 1100 320" width="1100" role="img" aria-label="左：第一棵树根节点在 utab_ctr_all 的 255 个桶上累加的梯度直方图示意，最佳切分在 0.389，左侧 2,140,513 行，右侧 1,873,658 行。右：leaf-wise 生长按增益顺序 1 到 5 依次分裂单个叶子，与按层生长对比。">
+        <g fill="none" stroke="currentColor" stroke-width="1.2">
+          <!-- left: histogram -->
+          <g stroke="none" fill="currentColor" font-size="12.5"><text x="40" y="34" font-weight="600">根节点在 utab_ctr_all 上找切分（示意）</text></g>
+          <line x1="60" y1="230" x2="520" y2="230"/>
+          <g fill="var(--g-roll)" stroke="none" opacity="0.75">
+            <rect x="64" y="150" width="20" height="80"/><rect x="88" y="140" width="20" height="90"/><rect x="112" y="128" width="20" height="102"/><rect x="136" y="120" width="20" height="110"/>
+            <rect x="160" y="116" width="20" height="114"/><rect x="184" y="124" width="20" height="106"/><rect x="208" y="136" width="20" height="94"/><rect x="232" y="150" width="20" height="80"/>
+            <rect x="256" y="166" width="20" height="64"/><rect x="280" y="180" width="20" height="50"/><rect x="304" y="192" width="20" height="38"/><rect x="328" y="200" width="20" height="30"/>
+            <rect x="352" y="206" width="20" height="24"/><rect x="376" y="211" width="20" height="19"/><rect x="400" y="215" width="20" height="15"/><rect x="424" y="218" width="20" height="12"/>
+            <rect x="448" y="221" width="20" height="9"/><rect x="472" y="224" width="20" height="6"/><rect x="496" y="226" width="20" height="4"/>
+          </g>
+          <line x1="256" y1="100" x2="256" y2="240" stroke="var(--accent)" stroke-width="2"/>
+          <g stroke="none" fill="currentColor" font-size="11.5">
+            <text x="60" y="256">0.0</text><text x="520" y="256" text-anchor="end">1.0</text><text x="290" y="256" text-anchor="middle">特征按分位数切成 255 个桶（这里画 19 个）</text>
+            <text x="256" y="92" text-anchor="middle" fill="var(--accent)" font-weight="600">切分 ≤ 0.389</text>
+            <text x="150" y="60" text-anchor="middle">左：2,140,513 行</text><text x="150" y="76" text-anchor="middle" class="mono">子节点值 −0.525</text>
+            <text x="390" y="60" text-anchor="middle">右：1,873,658 行</text><text x="390" y="76" text-anchor="middle" class="mono">子节点值 −0.444</text>
+            <text x="290" y="282" text-anchor="middle" opacity="0.7">柱高 = 该桶的 G（样本量与梯度之和）；在 254 个桶边界里取增益最大的一个</text>
+          </g>
+          <!-- right: leaf-wise vs level-wise -->
+          <g stroke="none" fill="currentColor" font-size="12.5"><text x="620" y="34" font-weight="600">leaf-wise：每次只分裂增益最大的叶子</text></g>
+          <g transform="translate(620,60)">
+            <circle cx="120" cy="10" r="11" fill="var(--accent)" stroke="none"/><text x="120" y="14" text-anchor="middle" font-size="11" fill="var(--bg)" stroke="none" font-weight="700">1</text>
+            <line x1="112" y1="18" x2="60" y2="60"/><line x1="128" y1="18" x2="180" y2="60"/>
+            <circle cx="60" cy="68" r="11" fill="var(--accent)" stroke="none"/><text x="60" y="72" text-anchor="middle" font-size="11" fill="var(--bg)" stroke="none" font-weight="700">2</text>
+            <circle cx="180" cy="68" r="11"/>
+            <line x1="52" y1="76" x2="25" y2="118"/><line x1="68" y1="76" x2="95" y2="118"/>
+            <circle cx="25" cy="126" r="11" fill="var(--accent)" stroke="none"/><text x="25" y="130" text-anchor="middle" font-size="11" fill="var(--bg)" stroke="none" font-weight="700">3</text>
+            <circle cx="95" cy="126" r="11"/>
+            <line x1="17" y1="134" x2="5" y2="176"/><line x1="33" y1="134" x2="45" y2="176"/>
+            <circle cx="5" cy="184" r="11"/><circle cx="45" cy="184" r="11" fill="var(--accent)" stroke="none"/><text x="45" y="188" text-anchor="middle" font-size="11" fill="var(--bg)" stroke="none" font-weight="700">4</text>
+            <line x1="37" y1="192" x2="25" y2="234"/><line x1="53" y1="192" x2="65" y2="234"/>
+            <circle cx="25" cy="242" r="11"/><circle cx="65" cy="242" r="11"/>
+            <text x="120" y="150" font-size="11.5" fill="currentColor" stroke="none" opacity="0.75">增益最大的叶子可以一直往下分，</text>
+            <text x="120" y="168" font-size="11.5" fill="currentColor" stroke="none" opacity="0.75">于是树又深又偏（这里深 10–31）</text>
+          </g>
+          <g stroke="none" fill="currentColor" font-size="12.5"><text x="880" y="34" font-weight="600">level-wise：一层一起分</text></g>
+          <g transform="translate(880,60)">
+            <circle cx="100" cy="10" r="11" fill="var(--accent)" stroke="none"/><text x="100" y="14" text-anchor="middle" font-size="11" fill="var(--bg)" stroke="none" font-weight="700">1</text>
+            <line x1="92" y1="18" x2="50" y2="60"/><line x1="108" y1="18" x2="150" y2="60"/>
+            <circle cx="50" cy="68" r="11" fill="var(--accent)" stroke="none"/><text x="50" y="72" text-anchor="middle" font-size="11" fill="var(--bg)" stroke="none" font-weight="700">2</text>
+            <circle cx="150" cy="68" r="11" fill="var(--accent)" stroke="none"/><text x="150" y="72" text-anchor="middle" font-size="11" fill="var(--bg)" stroke="none" font-weight="700">2</text>
+            <line x1="42" y1="76" x2="20" y2="118"/><line x1="58" y1="76" x2="80" y2="118"/><line x1="142" y1="76" x2="120" y2="118"/><line x1="158" y1="76" x2="180" y2="118"/>
+            <circle cx="20" cy="126" r="11" fill="var(--accent)" stroke="none"/><text x="20" y="130" text-anchor="middle" font-size="11" fill="var(--bg)" stroke="none" font-weight="700">3</text>
+            <circle cx="80" cy="126" r="11" fill="var(--accent)" stroke="none"/><text x="80" y="130" text-anchor="middle" font-size="11" fill="var(--bg)" stroke="none" font-weight="700">3</text>
+            <circle cx="120" cy="126" r="11" fill="var(--accent)" stroke="none"/><text x="120" y="130" text-anchor="middle" font-size="11" fill="var(--bg)" stroke="none" font-weight="700">3</text>
+            <circle cx="180" cy="126" r="11" fill="var(--accent)" stroke="none"/><text x="180" y="130" text-anchor="middle" font-size="11" fill="var(--bg)" stroke="none" font-weight="700">3</text>
+            <text x="100" y="170" text-anchor="middle" font-size="11.5" fill="currentColor" stroke="none" opacity="0.75">同样叶子数下损失更高，</text>
+            <text x="100" y="188" text-anchor="middle" font-size="11.5" fill="currentColor" stroke="none" opacity="0.75">但树平衡、不易过拟合</text>
+          </g>
+        </g>
+      </svg>
+      </div>
+      <figcaption><b>图 3</b>　左图的桶数和柱高是示意，切分阈值与两侧行数是真实模型第一棵树根节点的值；右图数字是分裂顺序。4,014,171 行是 bagging 抽到的 80% 训练行。</figcaption>
+    </figure>
+  </section>
+
+  <!-- ============ 5. categorical / missing / params ============ -->
+  <section class="col">
+    <h2><span class="no">5</span>类别特征、缺失值与我们用的参数</h2>
+    <p><b>类别特征</b>（tab、tag_first、upload_type、18 个 onehot 等 26 列）不按大小切分。LightGBM 把一个类别特征的各取值按 G/H 排序，然后在排好的序列上找最优的"左右两堆"，所以切分长成"tag_first ∈ {1, 2, 5, 8, 14, …}"这样的集合（图 4 里就有一个）。类别编码里的 −1（缺失）被当成 NaN。</p>
+    <p><b>缺失值</b>（NaN）不需要填补：每个分裂节点学一个默认方向，缺失样本统一走那边。图 4 里 user_gap_s 的节点 default_left = false，意味着"没有上一次请求"的样本走右边。</p>
+    <table class="params">
+      <thead><tr><th>参数</th><th class="num">值</th><th>作用</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">objective</td><td class="num">binary</td><td>LogLoss，输出经 sigmoid</td></tr>
+        <tr><td class="mono">num_leaves</td><td class="num">127</td><td>每棵树的叶子数，leaf-wise 的容量上限</td></tr>
+        <tr><td class="mono">min_data_in_leaf</td><td class="num">200</td><td>叶子至少 200 行，阻止在小群体上过拟合</td></tr>
+        <tr><td class="mono">learning_rate</td><td class="num">0.05</td><td>每棵树的贡献乘 0.05；越小越稳，需要的树越多</td></tr>
+        <tr><td class="mono">feature_fraction</td><td class="num">0.8</td><td>每棵树随机只看 80% 的列</td></tr>
+        <tr><td class="mono">bagging_fraction / freq</td><td class="num">0.8 / 1</td><td>每棵树随机只用 80% 的行</td></tr>
+        <tr><td class="mono">lambda_l2</td><td class="num">1.0</td><td>叶子值分母里的 λ</td></tr>
+        <tr><td class="mono">max_bin</td><td class="num">255</td><td>直方图桶数</td></tr>
+        <tr><td class="mono">num_rounds / early_stopping</td><td class="num">2000 / 50</td><td>上限与早停耐心；实际停在 407</td></tr>
+        <tr><td class="mono">num_threads</td><td class="num">16</td><td>训练 159 秒</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ============ 6. real tree ============ -->
+  <section>
+    <div class="col">
+      <h2><span class="no">6</span>真实模型解剖：第一棵树与这条样本的路径</h2>
+      <p>第一棵树的前三层如下。根节点和两个子节点都在切 utab_ctr_all（用户在该 tab 的历史点击率），这与特征重要性里它排第一是一致的：在没有任何其它信息时，"这个人在这个场景平时点多少"是最有用的一刀。</p>
+    </div>
+    <figure>
+      <div class="scroll">
+      <svg viewBox="0 0 1100 420" width="1100" role="img" aria-label="第一棵树的前三层。根：utab_ctr_all 是否不超过 0.389，4,014,171 行。左子树继续切 utab_ctr_all 0.203，再切 0.126 和 user_gap_s 43.5；右子树切 utab_ctr_all 0.600，再切 utag_ctr_all 0.454 和 tag_first 的类别集合。样本 utab_ctr_all 0.542 向右，不超过 0.600 向左，utag_ctr_all 0.602 向右，进入 494,253 行的子树，最终叶子值 −0.437。">
+        <defs><marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+        <g fill="none" stroke="currentColor" stroke-width="1.2">
+          <!-- level 0 -->
+          <rect x="440" y="20" width="220" height="56" rx="3" stroke="var(--accent)" stroke-width="1.8"/>
+          <!-- level 1 -->
+          <rect x="170" y="130" width="220" height="56" rx="3"/>
+          <rect x="710" y="130" width="220" height="56" rx="3" stroke="var(--accent)" stroke-width="1.8"/>
+          <!-- level 2 -->
+          <rect x="30" y="240" width="200" height="56" rx="3"/>
+          <rect x="300" y="240" width="200" height="56" rx="3"/>
+          <rect x="580" y="240" width="200" height="56" rx="3" stroke="var(--accent)" stroke-width="1.8"/>
+          <rect x="860" y="240" width="220" height="56" rx="3"/>
+          <!-- edges -->
+          <path d="M520,76 L300,130" marker-end="url(#ar3)"/>
+          <path d="M580,76 L800,130" marker-end="url(#ar3)" stroke="var(--accent)" stroke-width="2"/>
+          <path d="M240,186 L140,240" marker-end="url(#ar3)"/><path d="M320,186 L390,240" marker-end="url(#ar3)"/>
+          <path d="M780,186 L690,240" marker-end="url(#ar3)" stroke="var(--accent)" stroke-width="2"/><path d="M860,186 L960,240" marker-end="url(#ar3)"/>
+          <!-- level 3 stubs -->
+          <g stroke-dasharray="3 3">
+            <path d="M90,296 L70,340"/><path d="M170,296 L190,340"/><path d="M360,296 L340,340"/><path d="M440,296 L460,340"/>
+            <path d="M640,296 L620,340"/><path d="M930,296 L910,340"/><path d="M1010,296 L1030,340"/>
+          </g>
+          <path d="M720,296 L740,340" stroke="var(--accent)" stroke-width="2" marker-end="url(#ar3)"/>
+          <g stroke="none" fill="currentColor" font-size="11" opacity="0.75" text-anchor="middle">
+            <text x="70" y="356">615,103 行</text><text x="190" y="356">431,361 行</text><text x="340" y="356">473,114 行</text><text x="460" y="356">620,935 行</text>
+            <text x="620" y="356">595,390 行</text><text x="910" y="356">138,928 行</text><text x="1030" y="356">645,087 行</text>
+          </g>
+          <g stroke="none" fill="var(--accent)" font-size="11.5" text-anchor="middle" font-weight="600">
+            <text x="745" y="356">494,253 行的子树</text>
+            <text x="745" y="374">再过约 15 层，到达叶子值 −0.437</text>
+          </g>
+          <!-- node texts -->
+          <g stroke="none" fill="currentColor" font-size="12">
+            <text x="550" y="41" text-anchor="middle" class="mono" font-weight="600">utab_ctr_all ≤ 0.389</text>
+            <text x="550" y="60" text-anchor="middle" opacity="0.75">4,014,171 行 · 节点值 −0.487</text>
+            <text x="280" y="151" text-anchor="middle" class="mono" font-weight="600">utab_ctr_all ≤ 0.203</text>
+            <text x="280" y="170" text-anchor="middle" opacity="0.75">2,140,513 行 · −0.525</text>
+            <text x="820" y="151" text-anchor="middle" class="mono" font-weight="600">utab_ctr_all ≤ 0.600</text>
+            <text x="820" y="170" text-anchor="middle" opacity="0.75">1,873,658 行 · −0.444</text>
+            <text x="130" y="261" text-anchor="middle" class="mono" font-weight="600">utab_ctr_all ≤ 0.126</text>
+            <text x="130" y="280" text-anchor="middle" opacity="0.75">1,046,464 行 · −0.546</text>
+            <text x="400" y="261" text-anchor="middle" class="mono" font-weight="600">user_gap_s ≤ 43.5</text>
+            <text x="400" y="280" text-anchor="middle" opacity="0.75">1,094,049 行 · −0.506 · 缺失向右</text>
+            <text x="680" y="261" text-anchor="middle" class="mono" font-weight="600">utag_ctr_all ≤ 0.454</text>
+            <text x="680" y="280" text-anchor="middle" opacity="0.75">1,089,643 行 · −0.464</text>
+            <text x="970" y="261" text-anchor="middle" class="mono" font-weight="600">tag_first ∈ {1,2,5,8,14,…}</text>
+            <text x="970" y="280" text-anchor="middle" opacity="0.75">784,015 行 · −0.415 · 16 个类目</text>
+          </g>
+          <!-- edge labels -->
+          <g stroke="none" fill="currentColor" font-size="11" opacity="0.75">
+            <text x="395" y="98">是</text><text x="700" y="98" fill="var(--accent)" opacity="1" font-weight="600">否：样本 0.542 &gt; 0.389</text>
+            <text x="160" y="212">是</text><text x="365" y="212">否</text>
+            <text x="690" y="212" fill="var(--accent)" opacity="1" font-weight="600">是：0.542 ≤ 0.600</text><text x="920" y="212">否</text>
+            <text x="560" y="325" fill="var(--accent)" opacity="1" font-weight="600">样本 utag_ctr_all 0.602 &gt; 0.454，向右</text>
+          </g>
+        </g>
+      </svg>
+      </div>
+      <figcaption><b>图 4</b>　节点值是落入该节点的样本在本轮的平均输出，可以看出第一棵树的整体水平在 −0.5 左右，也就是把所有人先放到基率附近，再按"用户在该 tab 的点击率"分出高低。蓝色路径是样本 row 5,131,746 走的路：高点击率用户向右，再按用户对该类目的偏好细分。整棵树 127 个叶子，这里只画到第三层。</figcaption>
+    </figure>
+  </section>
+
+  <!-- ============ 7. trajectory + contributions ============ -->
+  <section>
+    <div class="col">
+      <h2><span class="no">7</span>这条样本的 407 步，以及分数从哪来</h2>
+      <p>把加法在中途停下来，就能看到每棵树对这条样本做了什么。左图是只用前 m 棵树时的 p；右图把最终的 F = 0.196 按特征拆开（SHAP 式的 pred_contrib，各特征贡献之和加基准分恰好等于 F）。</p>
+    </div>
+    <div class="charts">
+      <figure class="chart">
+        <h3>只用前 m 棵树时的 p</h3>
+        <div class="chart-wrap" id="traj-wrap"><div class="tip" id="traj-tip"></div></div>
+        <figcaption><b>图 5a</b>　第 1 棵树后 p = 0.392（它带着 −0.487 的初始分），前 115 棵树一路抬到 0.594，之后两百多棵树缓慢往下修到 0.549。前几十棵树做大方向，后面的树做细修正，这就是学习率 0.05 的节奏。</figcaption>
+        <details><summary>数据表（每 25 棵树一行）</summary><table id="traj-table"><thead><tr><th class="num">m</th><th class="num">F</th><th class="num">p</th></tr></thead><tbody></tbody></table></details>
+      </figure>
+      <figure class="chart">
+        <h3>最终分数 F = 0.196 的特征拆解</h3>
+        <div class="legend"><span><i style="background:var(--pos)"></i>把分推高</span><span><i style="background:var(--neg)"></i>把分拉低</span><span>基准分 −0.729（所有样本相同）</span></div>
+        <div class="chart-wrap" id="contrib-wrap"><div class="tip" id="contrib-tip"></div></div>
+        <figcaption><b>图 5b</b>　两个"用户历史率"特征就贡献了 +0.82：这个用户在 tab 1 的点击率 0.54、对无标签视频的点击率 0.60 都高于基率。其余 70 个特征合计只有 +0.03。模型给的 0.549 本质上是"这个人平时就爱点"，而不是"这个视频有多好"，这也是它在随机集上高估的来源。</figcaption>
+        <details><summary>数据表</summary><table id="contrib-table"><thead><tr><th>特征</th><th class="num">取值</th><th class="num">贡献</th></tr></thead><tbody></tbody></table></details>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ============ 8. toy ============ -->
+  <section>
+    <div class="col">
+      <h2><span class="no">8</span>一个能手算的例子：6 条曝光，3 棵桩树</h2>
+      <p>同一个用户的 6 条曝光，只有两个特征：作者历史点击率 a 和视频时长 d（秒）。用只有一次分裂的树（桩），λ = 1，学习率 0.3，走三轮。初始模型是常数 ln(3/3) = 0，所有人 p = 0.5。</p>
+    </div>
+    <div class="scroll">
+      <table id="toy-table">
+        <thead><tr><th>样本</th><th class="num">a</th><th class="num">d</th><th class="num">y</th>
+          <th class="num">g₁</th><th class="num">F₁</th><th class="num">p₁</th>
+          <th class="num">g₂</th><th class="num">F₂</th><th class="num">p₂</th>
+          <th class="num">g₃</th><th class="num">F₃</th><th class="num">p₃</th></tr></thead>
+        <tbody>
+          <tr><td>#1</td><td class="num">0.20</td><td class="num">5</td><td class="num">0</td><td class="num">+0.500</td><td class="num">−0.150</td><td class="num">0.463</td><td class="num">+0.463</td><td class="num">−0.278</td><td class="num">0.431</td><td class="num">+0.431</td><td class="num">−0.388</td><td class="num">0.404</td></tr>
+          <tr><td>#2</td><td class="num">0.65</td><td class="num">60</td><td class="num">0</td><td class="num">+0.500</td><td class="num">−0.150</td><td class="num">0.463</td><td class="num">+0.463</td><td class="num">−0.278</td><td class="num">0.431</td><td class="num">+0.431</td><td class="num">−0.388</td><td class="num">0.404</td></tr>
+          <tr><td>#3</td><td class="num">0.50</td><td class="num">20</td><td class="num">0</td><td class="num">+0.500</td><td class="num">−0.150</td><td class="num">0.463</td><td class="num">+0.463</td><td class="num">−0.278</td><td class="num">0.431</td><td class="num">+0.431</td><td class="num">−0.388</td><td class="num">0.404</td></tr>
+          <tr><td>#4</td><td class="num">0.80</td><td class="num">15</td><td class="num">1</td><td class="num">−0.500</td><td class="num">+0.200</td><td class="num">0.550</td><td class="num">−0.450</td><td class="num">+0.381</td><td class="num">0.594</td><td class="num">−0.406</td><td class="num">+0.545</td><td class="num">0.633</td></tr>
+          <tr class="hl"><td>#5</td><td class="num">0.30</td><td class="num">90</td><td class="num">1</td><td class="num">−0.500</td><td class="num">−0.150</td><td class="num">0.463</td><td class="num">−0.537</td><td class="num">−0.278</td><td class="num">0.431</td><td class="num">−0.569</td><td class="num">−0.388</td><td class="num">0.404</td></tr>
+          <tr><td>#6</td><td class="num">0.70</td><td class="num">30</td><td class="num">1</td><td class="num">−0.500</td><td class="num">+0.200</td><td class="num">0.550</td><td class="num">−0.450</td><td class="num">+0.381</td><td class="num">0.594</td><td class="num">−0.406</td><td class="num">+0.545</td><td class="num">0.633</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <figure>
+      <div class="scroll">
+      <svg viewBox="0 0 1100 250" width="1100" role="img" aria-label="三棵桩树，都在 author_ctr 是否不超过 0.675 处分裂。第一棵左叶 −0.500 右叶 +0.667，第二棵 −0.426 与 +0.602，第三棵 −0.365 与 +0.548，每个叶子值乘 0.3 后加到模型上。">
+        <g fill="none" stroke="currentColor" stroke-width="1.2">
+          <g transform="translate(40,0)">
+            <rect x="90" y="30" width="200" height="40" rx="3"/><text x="190" y="55" text-anchor="middle" font-size="12.5" fill="currentColor" stroke="none" class="mono">a ≤ 0.675 ?</text>
+            <path d="M150,70 L90,120"/><path d="M230,70 L290,120"/>
+            <rect x="20" y="120" width="140" height="56" rx="3"/><rect x="220" y="120" width="140" height="56" rx="3"/>
+            <g stroke="none" fill="currentColor" font-size="12" text-anchor="middle">
+              <text x="90" y="141">是：#1 #2 #3 #5</text><text x="90" y="162" class="mono">G=+1.0 H=1.0 → w=−0.500</text>
+              <text x="290" y="141">否：#4 #6</text><text x="290" y="162" class="mono">G=−1.0 H=0.5 → w=+0.667</text>
+              <text x="190" y="20" font-weight="600">第 1 棵　gain = 1.167</text>
+              <text x="190" y="210" opacity="0.75">× 0.3 → 左 −0.150，右 +0.200</text>
+            </g>
+          </g>
+          <g transform="translate(400,0)">
+            <rect x="90" y="30" width="200" height="40" rx="3"/><text x="190" y="55" text-anchor="middle" font-size="12.5" fill="currentColor" stroke="none" class="mono">a ≤ 0.675 ?</text>
+            <path d="M150,70 L90,120"/><path d="M230,70 L290,120"/>
+            <rect x="20" y="120" width="140" height="56" rx="3"/><rect x="220" y="120" width="140" height="56" rx="3"/>
+            <g stroke="none" fill="currentColor" font-size="12" text-anchor="middle">
+              <text x="90" y="141">是：#1 #2 #3 #5</text><text x="90" y="162" class="mono">G=+0.852 H=1.0 → w=−0.426</text>
+              <text x="290" y="141">否：#4 #6</text><text x="290" y="162" class="mono">G=−0.900 H=0.5 → w=+0.602</text>
+              <text x="190" y="20" font-weight="600">第 2 棵　gain = 0.904</text>
+              <text x="190" y="210" opacity="0.75">× 0.3 → 累计 −0.278，+0.381</text>
+            </g>
+          </g>
+          <g transform="translate(760,0)">
+            <rect x="90" y="30" width="200" height="40" rx="3"/><text x="190" y="55" text-anchor="middle" font-size="12.5" fill="currentColor" stroke="none" class="mono">a ≤ 0.675 ?</text>
+            <path d="M150,70 L90,120"/><path d="M230,70 L290,120"/>
+            <rect x="20" y="120" width="140" height="56" rx="3"/><rect x="220" y="120" width="140" height="56" rx="3"/>
+            <g stroke="none" fill="currentColor" font-size="12" text-anchor="middle">
+              <text x="90" y="141">是：#1 #2 #3 #5</text><text x="90" y="162" class="mono">G=+0.724 H=0.98 → w=−0.365</text>
+              <text x="290" y="141">否：#4 #6</text><text x="290" y="162" class="mono">G=−0.812 H=0.48 → w=+0.548</text>
+              <text x="190" y="20" font-weight="600">第 3 棵　gain = 0.706</text>
+              <text x="190" y="210" opacity="0.75">× 0.3 → 累计 −0.388，+0.545</text>
+            </g>
+          </g>
+        </g>
+      </svg>
+      </div>
+      <figcaption><b>图 6</b>　每一轮都在"a ≤ 0.675"处切，因为它把三个负样本和两个正样本分干净了。LogLoss 从 0.693 降到 0.562。表里高亮的 #5（a = 0.30 但 y = 1）每轮都被分到"是"那一边，它的梯度 −0.500、−0.537、−0.569 越来越大，桩树永远修不好它，因为修它需要在左叶子里再按 d &gt; 60 切一刀。这就是真实模型用 127 个叶子、而不是 2 个的原因。</figcaption>
+    </figure>
+    <div class="col">
+      <h3>手算第 1 轮</h3>
+      <p>p = 0.5 时每条样本 h = 0.25，g = +0.5（y = 0）或 −0.5（y = 1）。切分 a ≤ 0.675 的左侧有三个 +0.5 和一个 −0.5，G<sub>L</sub> = 1.0，H<sub>L</sub> = 1.0，叶子值 w<sub>L</sub> = −1.0 / (1.0 + 1) = −0.500；右侧 G<sub>R</sub> = −1.0，H<sub>R</sub> = 0.5，w<sub>R</sub> = 1.0 / 1.5 = +0.667。增益 = 1.0²/2 + 1.0²/1.5 − 0²/2.5 = 1.167，比在 d 上任何切分都大。乘学习率 0.3 后左侧 F = −0.150，p = 0.463；右侧 F = +0.200，p = 0.550。第 2 轮用新的 p 重新算 g、h，再来一遍。</p>
+    </div>
+  </section>
+
+  <!-- ============ 9. fit & limits ============ -->
+  <section class="col">
+    <h2><span class="no">9</span>为什么它适合这份数据，以及边界</h2>
+    <p>这份数据的三个特点正好落在 GBDT 的长处上。第一，特征是异构的表格：类别、计数、比率、缺失混在一起，树模型不需要归一化、分桶或独热。第二，test 里 85% 的视频在训练集没出现过，靠 id 记忆的方法失效，而树只用泛化特征和历史统计。第三，502 万行、84 列在 16 线程上三分钟一个模型，一天能做十几组消融。</p>
+    <p>边界也清楚。树给出的是分段常数函数，对"用户历史序列"这种结构没有表达能力，只能通过我们预先聚合的统计量看到它；用户 × 作者、用户 × 类目这些交叉也要靠人工枚举 key 才能进模型。图 5b 还提醒一件事：分数主要来自用户级的基率特征，这在用户内排序时没有贡献。Day 2 的深度模型要回答的正是这两个问题：让模型自己学交叉，以及把序列直接喂进去。</p>
+    <ol class="refs">
+      <li>Ke, G. et al. LightGBM: A Highly Efficient Gradient Boosting Decision Tree. NeurIPS 2017.（直方图、leaf-wise、GOSS、EFB）</li>
+      <li>Chen, T. &amp; Guestrin, C. XGBoost: A Scalable Tree Boosting System. KDD 2016.（二阶近似下的叶子值与增益公式）</li>
+      <li>Friedman, J. Greedy Function Approximation: A Gradient Boosting Machine. Annals of Statistics 2001.（梯度提升的原始框架）</li>
+      <li>Lundberg, S. &amp; Lee, S.-I. A Unified Approach to Interpreting Model Predictions. NeurIPS 2017.（图 5b 的 SHAP 式贡献）</li>
+    </ol>
+  </section>
+</main>
+
+<script>
+(function () {
+  const RAW = [-0.4372,-0.3809,-0.3423,-0.3009,-0.2544,-0.2138,-0.1765,-0.1537,-0.1326,-0.1006,-0.0749,-0.0564,-0.043,-0.029,-0.0003,0.0216,0.0293,0.0519,0.0625,0.0757,0.0658,0.077,0.0883,0.1102,0.1188,0.1361,0.144,0.1516,0.1665,0.1738,0.1887,0.2057,0.218,0.2269,0.2361,0.2408,0.2526,0.2599,0.2653,0.2739,0.2778,0.2811,0.2842,0.2912,0.2958,0.2967,0.3037,0.3068,0.3114,0.3248,0.3251,0.3245,0.3275,0.3342,0.3345,0.3341,0.3332,0.332,0.3311,0.3318,0.3322,0.3333,0.3371,0.3392,0.3412,0.3559,0.3587,0.3577,0.3587,0.3576,0.3628,0.3661,0.3665,0.3644,0.3651,0.36,0.3625,0.3617,0.3647,0.3628,0.3626,0.3592,0.3612,0.362,0.3599,0.361,0.3607,0.3635,0.3693,0.3703,0.3682,0.3753,0.3782,0.3783,0.3734,0.3669,0.3644,0.367,0.3681,0.3672,0.376,0.3732,0.3687,0.3676,0.3712,0.3771,0.3732,0.3731,0.373,0.3754,0.3693,0.371,0.3725,0.3729,0.3806,0.3777,0.3795,0.3778,0.3687,0.3678,0.3649,0.3631,0.3593,0.3569,0.3557,0.3531,0.3473,0.3473,0.3452,0.3432,0.3432,0.3443,0.3424,0.3406,0.3392,0.3387,0.3409,0.341,0.3418,0.3415,0.3393,0.343,0.338,0.3365,0.3361,0.3385,0.3353,0.3357,0.3372,0.335,0.3337,0.3322,0.3346,0.3356,0.3357,0.336,0.3361,0.3329,0.3314,0.3306,0.3301,0.3252,0.3175,0.3184,0.3156,0.3179,0.3157,0.3155,0.3152,0.3163,0.3162,0.3135,0.3136,0.3083,0.3052,0.3017,0.3023,0.3043,0.3019,0.3012,0.302,0.3017,0.3021,0.302,0.3034,0.3013,0.3008,0.2989,0.2898,0.2904,0.2984,0.2984,0.2969,0.2975,0.2961,0.2957,0.294,0.2926,0.2856,0.2839,0.2839,0.2839,0.2817,0.2817,0.2808,0.2815,0.2804,0.2778,0.2785,0.2805,0.2713,0.2684,0.2708,0.2706,0.2712,0.2709,0.272,0.2738,0.271,0.2703,0.2702,0.2706,0.2711,0.2698,0.2701,0.2658,0.2649,0.2664,0.2656,0.2652,0.2654,0.2648,0.2648,0.2648,0.2646,0.2648,0.2653,0.2668,0.2667,0.2654,0.2655,0.2669,0.2639,0.2641,0.2627,0.2627,0.2626,0.26,0.2603,0.2602,0.2583,0.2574,0.2572,0.2539,0.2538,0.2537,0.254,0.2534,0.252,0.246,0.2445,0.2452,0.2451,0.2429,0.2431,0.2432,0.2428,0.243,0.2424,0.2422,0.2415,0.2413,0.2414,0.2439,0.2434,0.243,0.2418,0.2363,0.2326,0.2331,0.2329,0.2318,0.2321,0.2321,0.233,0.2338,0.2343,0.234,0.2349,0.2338,0.2337,0.2339,0.2339,0.2342,0.234,0.2337,0.2358,0.2359,0.236,0.2362,0.2359,0.2326,0.2336,0.2335,0.2191,0.215,0.2145,0.2155,0.2154,0.2152,0.2154,0.2145,0.2152,0.2223,0.2221,0.2237,0.2276,0.228,0.228,0.2281,0.2282,0.2276,0.2227,0.2224,0.2205,0.2214,0.2209,0.2206,0.2207,0.2206,0.2188,0.2186,0.2157,0.2156,0.2153,0.2154,0.2161,0.2173,0.2175,0.2172,0.2172,0.2148,0.2147,0.2058,0.2056,0.2039,0.204,0.2037,0.2037,0.2037,0.2036,0.2047,0.2045,0.2023,0.2026,0.2026,0.2026,0.2026,0.2036,0.2037,0.2036,0.2037,0.2043,0.2043,0.2126,0.213,0.2143,0.214,0.2111,0.2109,0.2109,0.2109,0.2108,0.2107,0.2102,0.2101,0.2101,0.2068,0.2041,0.2042,0.2038,0.2037,0.2039,0.2038,0.2038,0.204,0.2041,0.2041,0.2035,0.2007,0.2019,0.2023,0.1958,0.1969,0.1969,0.197,0.1974,0.197,0.1951,0.197,0.1971,0.1972,0.1972,0.1977,0.1976,0.198,0.196];
+  const P = RAW.map((r) => 1 / (1 + Math.exp(-r)));
+  const CONTRIB = [["utab_ctr_all",0.5424,0.5199],["utag_ctr_all",0.6021,0.2968],["user_n_1d",1224,-0.0918],["tab_prior_click",0.4478,0.0551],["user_gap_s",89,0.0525],["tab",1,0.0477],["user_lv_1d",283,0.0456],["duration_ms",72966,0.0429],["video_age_days",12,-0.0427],["tag_first",-1,0.0415],["onehot_feat3",622,-0.0386],["author_ctr_all",0.5068,0.0375],["utab_n_all",10969,-0.0354],["user_lv_7d",2610,-0.0347],["其余 70 个特征合计",null,0.0291]];
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
+  const fmt = (v, d) => (v < 0 ? "−" : "") + Math.abs(v).toFixed(d);
+
+  // ---------- Fig 5a: trajectory line chart ----------
+  (function () {
+    const W = 520, H = 300, L = 48, R = 16, T = 18, B = 40;
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "只用前 m 棵树时样本的预测概率 p，从 0.392 升到第 115 棵树的 0.594，再降到 0.549。" });
+    svg.style.width = "100%";
+    const n = P.length, ymin = 0.38, ymax = 0.62;
+    const x = (m) => L + (m - 1) / (n - 1) * (W - L - R);
+    const y = (p) => T + (ymax - p) / (ymax - ymin) * (H - T - B);
+    for (let v = 0.40; v <= 0.60 + 1e-9; v += 0.05) {
+      el("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), stroke: "currentColor", "stroke-opacity": "0.15", "stroke-width": "1" }, svg);
+      const t = el("text", { x: L - 8, y: y(v) + 4, "text-anchor": "end", "font-size": "11", fill: "var(--muted)" }, svg); t.textContent = v.toFixed(2);
+    }
+    [1, 100, 200, 300, 407].forEach((m) => { const t = el("text", { x: x(m), y: H - B + 18, "text-anchor": "middle", "font-size": "11", fill: "var(--muted)" }, svg); t.textContent = m; });
+    const xl = el("text", { x: (L + W - R) / 2, y: H - 6, "text-anchor": "middle", "font-size": "11.5", fill: "var(--muted)" }, svg); xl.textContent = "树的数量 m";
+    el("line", { x1: L, x2: W - R, y1: y(ymin), y2: y(ymin), stroke: "currentColor", "stroke-opacity": "0.4" }, svg);
+    const d = P.map((p, i) => (i ? "L" : "M") + x(i + 1).toFixed(1) + "," + y(p).toFixed(1)).join("");
+    el("path", { d, fill: "none", stroke: "var(--accent)", "stroke-width": "2", "stroke-linejoin": "round" }, svg);
+    // annotations: start, peak, end
+    const mark = (m, label, dx, dy, anchor) => {
+      el("circle", { cx: x(m), cy: y(P[m - 1]), r: 4.5, fill: "var(--accent)", stroke: "var(--bg)", "stroke-width": "2" }, svg);
+      const t = el("text", { x: x(m) + dx, y: y(P[m - 1]) + dy, "font-size": "11.5", "text-anchor": anchor, fill: "var(--fg)", "font-family": "var(--font-mono)" }, svg); t.textContent = label;
+    };
+    mark(1, "m=1  p=0.392", 8, 4, "start");
+    mark(115, "m=115  p=0.594", 0, -10, "middle");
+    mark(407, "m=407  p=0.549", -8, 16, "end");
+    // hover
+    const wrap = document.getElementById("traj-wrap"), tip = document.getElementById("traj-tip");
+    const cross = el("line", { x1: 0, x2: 0, y1: T, y2: H - B, stroke: "currentColor", "stroke-opacity": "0.5", "stroke-dasharray": "3 3", visibility: "hidden" }, svg);
+    const dot = el("circle", { r: 4, fill: "var(--bg)", stroke: "var(--accent)", "stroke-width": "2", visibility: "hidden" }, svg);
+    const hit = el("rect", { x: L, y: T, width: W - L - R, height: H - T - B, fill: "transparent" }, svg);
+    hit.addEventListener("mousemove", (ev) => {
+      const r = svg.getBoundingClientRect(); const px = (ev.clientX - r.left) * W / r.width;
+      const m = Math.max(1, Math.min(n, Math.round(1 + (px - L) / (W - L - R) * (n - 1))));
+      cross.setAttribute("x1", x(m)); cross.setAttribute("x2", x(m)); cross.setAttribute("visibility", "visible");
+      dot.setAttribute("cx", x(m)); dot.setAttribute("cy", y(P[m - 1])); dot.setAttribute("visibility", "visible");
+      tip.style.display = "block"; tip.textContent = `前 ${m} 棵树：F = ${fmt(RAW[m - 1], 3)}，p = ${P[m - 1].toFixed(3)}`;
+      const wr = wrap.getBoundingClientRect(); tip.style.left = Math.min(ev.clientX - wr.left + 12, wr.width - 230) + "px"; tip.style.top = (ev.clientY - wr.top - 34) + "px";
+    });
+    hit.addEventListener("mouseleave", () => { cross.setAttribute("visibility", "hidden"); dot.setAttribute("visibility", "hidden"); tip.style.display = "none"; });
+    wrap.insertBefore(svg, tip);
+    const tb = document.querySelector("#traj-table tbody");
+    [1, 25, 50, 75, 100, 125, 150, 200, 250, 300, 350, 407].forEach((m) => { const tr = document.createElement("tr"); tr.innerHTML = `<td class="num">${m}</td><td class="num">${fmt(RAW[m - 1], 4)}</td><td class="num">${P[m - 1].toFixed(4)}</td>`; tb.appendChild(tr); });
+  })();
+
+  // ---------- Fig 5b: contribution bars ----------
+  (function () {
+    const rowH = 19, L = 150, R = 60, T = 10, B = 30, W = 520, H = T + CONTRIB.length * rowH + B;
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "各特征对最终分数的贡献：utab_ctr_all +0.520，utag_ctr_all +0.297，user_n_1d −0.092，其余特征绝对值均小于 0.06。" });
+    svg.style.width = "100%";
+    const vmin = -0.14, vmax = 0.58;
+    const x = (v) => L + (v - vmin) / (vmax - vmin) * (W - L - R);
+    [-0.1, 0, 0.1, 0.2, 0.3, 0.4, 0.5].forEach((v) => {
+      el("line", { x1: x(v), x2: x(v), y1: T, y2: H - B, stroke: "currentColor", "stroke-opacity": v === 0 ? "0.5" : "0.12" }, svg);
+      const t = el("text", { x: x(v), y: H - B + 16, "text-anchor": "middle", "font-size": "11", fill: "var(--muted)" }, svg); t.textContent = v === 0 ? "0" : fmt(v, 1);
+    });
+    const wrap = document.getElementById("contrib-wrap"), tip = document.getElementById("contrib-tip");
+    const tb = document.querySelector("#contrib-table tbody");
+    CONTRIB.forEach(([name, val, c], i) => {
+      const yy = T + i * rowH, g = el("g", { class: "bar" }, svg);
+      const lab = el("text", { x: L - 8, y: yy + 13, "text-anchor": "end", "font-size": "11.5", fill: "var(--fg)", "font-family": name.startsWith("其余") ? "var(--font-body)" : "var(--font-mono)" }, g); lab.textContent = name;
+      const x0 = x(Math.min(0, c)), w = Math.max(1, Math.abs(x(c) - x(0)));
+      el("rect", { x: x0 + (c >= 0 ? 1 : 0), y: yy + 3, width: Math.max(0, w - 1), height: rowH - 7, rx: 2, fill: c >= 0 ? "var(--pos)" : "var(--neg)" }, g);
+      const vt = el("text", { x: c >= 0 ? x(c) + 5 : x(c) - 5, y: yy + 13, "text-anchor": c >= 0 ? "start" : "end", "font-size": "11", fill: "var(--fg)", "font-family": "var(--font-mono)" }, g); vt.textContent = (c >= 0 ? "+" : "−") + Math.abs(c).toFixed(3);
+      const hit = el("rect", { x: 0, y: yy, width: W, height: rowH, fill: "transparent" }, g);
+      hit.addEventListener("mousemove", (ev) => { tip.style.display = "block"; tip.textContent = (val === null ? name : `${name} = ${Number.isInteger(val) ? val : val.toFixed(3)}`) + `  贡献 ${(c >= 0 ? "+" : "−")}${Math.abs(c).toFixed(4)}`;
+        const wr = wrap.getBoundingClientRect(); tip.style.left = Math.min(ev.clientX - wr.left + 12, wr.width - 260) + "px"; tip.style.top = (ev.clientY - wr.top - 34) + "px"; });
+      hit.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+      const tr = document.createElement("tr"); tr.innerHTML = `<td class="mono">${name}</td><td class="num">${val === null ? "" : (Number.isInteger(val) ? val : val.toFixed(4))}</td><td class="num">${(c >= 0 ? "+" : "−")}${Math.abs(c).toFixed(4)}</td>`; tb.appendChild(tr);
+    });
+    const tr = document.createElement("tr"); tr.innerHTML = `<td>基准分（期望输出）</td><td class="num"></td><td class="num">−0.7294</td>`; tb.appendChild(tr);
+    const tr2 = document.createElement("tr"); tr2.innerHTML = `<td><b>合计 F</b></td><td class="num"></td><td class="num"><b>+0.1960</b></td>`; tb.appendChild(tr2);
+    wrap.insertBefore(svg, tip);
+  })();
+})();
+</script>
+
+</body>
+</html>

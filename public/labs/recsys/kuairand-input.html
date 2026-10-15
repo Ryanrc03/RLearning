@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>一条曝光的 84 维输入</title>
+<style>
+  /* Layout: a single reading column (max 1180px); figures may scroll sideways on phones. */
+  :root {
+    --bg: #faf8ef;
+    --fg: #30332c;
+    --muted: #76796f;
+    --line: #e4dfcb;
+    --panel: #ffffff;
+    --accent: #927014;
+    --g-ctx: #0e7f84;
+    --g-user: #4f55c4;
+    --g-video: #b9731a;
+    --g-roll: #b53a57;
+    --future: #e4e7e2;
+    --font-body: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --font-mono: "Cascadia Code", Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15191b; --fg: #e4e8e6; --muted: #9aa6aa; --line: #38424a; --panel: #1d2326; --accent: #e5905a;
+      --g-ctx: #3fbcc0; --g-user: #8f94ea; --g-video: #e0a04a; --g-roll: #e5718b; --future: #262d31; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #15191b; --fg: #e4e8e6; --muted: #9aa6aa; --line: #38424a; --panel: #1d2326; --accent: #e5905a;
+    --g-ctx: #3fbcc0; --g-user: #8f94ea; --g-video: #e0a04a; --g-roll: #e5718b; --future: #262d31; color-scheme: dark;
+  }
+  body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.65;
+         padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 12px 24px; }
+  main { max-width: 1180px; margin: 0 auto; display: grid; gap: 40px; }
+  h1 { font-size: 30px; font-weight: 700; margin: 0 0 6px; letter-spacing: -0.01em; text-wrap: balance; }
+  h2 { font-size: 20px; font-weight: 700; margin: 0 0 10px; text-wrap: balance; }
+  p { margin: 0; max-width: 72ch; }
+  .lede { color: var(--muted); }
+  .sample { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 14px; font-family: var(--font-mono); font-size: 13px; }
+  .sample span b { font-weight: 600; color: var(--fg); }
+  .sample span { color: var(--muted); }
+  figure { margin: 0; display: grid; gap: 10px; }
+  .scroll { overflow-x: auto; }
+  svg { display: block; max-width: 100%; height: auto; font-family: var(--font-body); }
+  svg .mono { font-family: var(--font-mono); }
+  figcaption { color: var(--muted); font-size: 14px; max-width: 80ch; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 13px; color: var(--muted); }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -2px; margin-right: 6px; }
+  .strip { display: flex; flex-wrap: wrap; gap: 3px; }
+  .cell { width: 52px; height: 44px; border-radius: 3px; display: grid; place-items: center; font-family: var(--font-mono); font-size: 11px;
+          cursor: default; border: 1px solid transparent; color: var(--fg); background: color-mix(in srgb, var(--gc) 16%, var(--panel)); }
+  .cell small { display: block; font-size: 9px; color: var(--muted); line-height: 1; margin-top: 2px; }
+  .cell:hover, .cell.hot { border-color: var(--gc); background: color-mix(in srgb, var(--gc) 32%, var(--panel)); }
+  .cell.nan { color: var(--muted); font-style: italic; }
+  .filters { display: flex; flex-wrap: wrap; gap: 8px; }
+  .filters button { font: inherit; font-size: 13px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); cursor: pointer; }
+  .filters button[aria-pressed="true"] { border-color: var(--fg); font-weight: 600; }
+  .filters button:focus-visible, .cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 760px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
+  td.num, td.idx { font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.name { font-family: var(--font-mono); white-space: nowrap; }
+  tr.hot td { background: color-mix(in srgb, var(--gc) 14%, transparent); }
+  .tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--gc); color: var(--gc); }
+  .note { font-size: 14px; color: var(--muted); border-left: 3px solid var(--accent); padding-left: 12px; max-width: 80ch; }
+  @media (prefers-reduced-motion: no-preference) { .cell { transition: background .12s; } }
+</style>
+</head>
+<body>
+
+<main>
+  <header>
+    <h1>一条曝光的 84 维输入</h1>
+    <p class="lede">KuaiRand-1K 的每一行日志是一次曝光。下面三张图跟着同一条真实样本走一遍：原始 CSV 怎样变成 parquet，怎样算出滚动统计，最后模型看到的 84 个数各是什么。</p>
+    <div class="sample">
+      <span>样本 <b>row_id 5,131,746</b></span><span>集合 <b>random</b></span><span>用户 <b>427</b></span><span>视频 <b>3447</b></span>
+      <span>tab <b>1</b>（单列流）</span><span>时间 <b>2022-04-22 周五 12 时</b></span><span>标签 is_click <b>0</b>，long_view <b>0</b></span>
+    </div>
+  </header>
+
+  <!-- ===== Figure 1: data flow ===== -->
+  <figure>
+    <h2>1. 从五个 CSV 到一个 N × 84 的矩阵</h2>
+    <div class="scroll">
+    <svg viewBox="0 0 1180 400" width="1180" role="img" aria-label="数据流：三个日志 CSV 去重排序后成为 log.parquet，用户和视频 CSV 编码后成为 user.parquet 和 video.parquet；log 与 video 关联后按严格早于时间戳的规则算出七张 feat 表；四类来源按 row_id 对齐逐列填入 float32 矩阵 X，与标签 y 一起训练 LightGBM，输出点击概率 p。">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+        <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="6" stroke="currentColor" stroke-width="1" opacity="0.35"/>
+        </pattern>
+      </defs>
+      <g fill="none" stroke="currentColor" stroke-width="1.2">
+        <!-- column headers -->
+        <g stroke="none" fill="currentColor" font-size="12" opacity="0.65">
+          <text x="110" y="24" text-anchor="middle">原始 CSV（data/raw/data）</text>
+          <text x="400" y="24" text-anchor="middle">parquet（build_data.py）</text>
+          <text x="695" y="24" text-anchor="middle">滚动统计（build_features.py）</text>
+          <text x="960" y="24" text-anchor="middle">矩阵（load_split）</text>
+          <text x="1115" y="24" text-anchor="middle">模型</text>
+        </g>
+
+        <!-- col 1: raw csv -->
+        <g>
+          <rect x="20" y="40" width="180" height="46" rx="3"/>
+          <rect x="20" y="96" width="180" height="46" rx="3"/>
+          <rect x="20" y="152" width="180" height="46" rx="3"/>
+          <rect x="20" y="236" width="180" height="46" rx="3"/>
+          <rect x="20" y="304" width="180" height="46" rx="3"/>
+        </g>
+        <g stroke="none" fill="currentColor" font-size="11.5">
+          <text x="30" y="58" class="mono">log_standard 4/08–4/21</text><text x="30" y="76" opacity="0.7">374 MB · 19 列</text>
+          <text x="30" y="114" class="mono">log_standard 4/22–5/08</text><text x="30" y="132" opacity="0.7">492 MB · 19 列</text>
+          <text x="30" y="170" class="mono">log_random 4/22–5/08</text><text x="30" y="188" opacity="0.7">3 MB · 19 列 · 43,028 行</text>
+          <text x="30" y="254" class="mono">user_features_1k</text><text x="30" y="272" opacity="0.7">1,000 行 × 31 列</text>
+          <text x="30" y="322" class="mono">video_features_basic_1k</text><text x="30" y="340" opacity="0.7">4,371,868 行 × 12 列</text>
+        </g>
+
+        <!-- col 2: parquet -->
+        <rect x="300" y="78" width="200" height="86" rx="3"/>
+        <rect x="300" y="236" width="200" height="46" rx="3"/>
+        <rect x="300" y="304" width="200" height="46" rx="3"/>
+        <g stroke="none" fill="currentColor" font-size="11.5">
+          <text x="310" y="97" class="mono" font-weight="600">log.parquet</text>
+          <text x="310" y="115" opacity="0.8">11,661,848 行 × 22 列</text>
+          <text x="310" y="132" opacity="0.8">row_id · ts · split · 8 个标签</text>
+          <text x="310" y="149" opacity="0.8">tab · 播放/时长毫秒</text>
+          <text x="310" y="254" class="mono" font-weight="600">user.parquet</text><text x="310" y="272" opacity="0.8">1,000 × 26，全部整数编码</text>
+          <text x="310" y="322" class="mono" font-weight="600">video.parquet</text><text x="310" y="340" opacity="0.8">4,371,868 × 11</text>
+        </g>
+
+        <!-- arrows csv -> parquet -->
+        <path d="M200,63 C250,63 250,100 300,100" marker-end="url(#arrow)"/>
+        <path d="M200,119 L300,119" marker-end="url(#arrow)"/>
+        <path d="M200,175 C250,175 250,140 300,140" marker-end="url(#arrow)"/>
+        <path d="M200,259 L300,259" marker-end="url(#arrow)"/>
+        <path d="M200,327 L300,327" marker-end="url(#arrow)"/>
+        <g stroke="none" fill="currentColor" font-size="10.5" opacity="0.75">
+          <text x="250" y="48" text-anchor="middle">合并、去重 94,225 行</text>
+          <text x="250" y="190" text-anchor="middle">按 time_ms 排序，打 split</text>
+          <text x="250" y="250" text-anchor="middle">类别编码，-124 记未知</text>
+          <text x="250" y="318" text-anchor="middle">tag 取首个，upload_type 编码</text>
+        </g>
+
+        <!-- col 3: feat tables -->
+        <rect x="600" y="40" width="190" height="310" rx="3"/>
+        <g stroke="currentColor" stroke-width="0.8" opacity="0.5">
+          <line x1="600" y1="84" x2="790" y2="84"/><line x1="600" y1="124" x2="790" y2="124"/><line x1="600" y1="164" x2="790" y2="164"/>
+          <line x1="600" y1="204" x2="790" y2="204"/><line x1="600" y1="244" x2="790" y2="244"/><line x1="600" y1="284" x2="790" y2="284"/>
+        </g>
+        <g stroke="none" fill="currentColor" font-size="11.5">
+          <text x="610" y="60" class="mono">feat_video</text><text x="780" y="60" text-anchor="end" opacity="0.7">9 列 · 1d/7d/all</text>
+          <text x="610" y="78" opacity="0.7">key = video_id（437 万个）</text>
+          <text x="610" y="102" class="mono">feat_author</text><text x="780" y="102" text-anchor="end" opacity="0.7">9 列 · 1d/7d/all</text>
+          <text x="610" y="118" opacity="0.7">key = author_id（141 万个）</text>
+          <text x="610" y="142" class="mono">feat_user</text><text x="780" y="142" text-anchor="end" opacity="0.7">6 列 + gap · 1d/7d</text>
+          <text x="610" y="158" opacity="0.7">key = user_id（1,000 个）</text>
+          <text x="610" y="182" class="mono">feat_utab</text><text x="780" y="182" text-anchor="end" opacity="0.7">3 列 · all</text>
+          <text x="610" y="198" opacity="0.7">key = (user_id, tab)</text>
+          <text x="610" y="222" class="mono">feat_ua</text><text x="780" y="222" text-anchor="end" opacity="0.7">3 列 · all</text>
+          <text x="610" y="238" opacity="0.7">key = (user_id, author_id)</text>
+          <text x="610" y="262" class="mono">feat_utag</text><text x="780" y="262" text-anchor="end" opacity="0.7">3 列 · all</text>
+          <text x="610" y="278" opacity="0.7">key = (user_id, tag_first)</text>
+          <text x="610" y="302" class="mono">feat_uv</text><text x="780" y="302" text-anchor="end" opacity="0.7">1 列 · all</text>
+          <text x="610" y="318" opacity="0.7">key = (user_id, video_id)</text>
+          <text x="695" y="340" text-anchor="middle" opacity="0.7">每张都是 11,661,848 行，与 log 按 row_id 对齐</text>
+        </g>
+
+        <!-- arrows parquet -> feat -->
+        <path d="M500,120 L600,120" marker-end="url(#arrow)"/>
+        <path d="M500,327 C560,327 540,200 600,200" marker-end="url(#arrow)" stroke-dasharray="4 3"/>
+        <g stroke="none" fill="currentColor" font-size="10.5" opacity="0.75">
+          <text x="550" y="108" text-anchor="middle">每行只统计 ts 严格更早的行</text>
+          <text x="548" y="268" text-anchor="middle">借 author_id、tag_first</text>
+        </g>
+
+        <!-- col 4: matrix -->
+        <g>
+          <!-- X with four column bands proportional to 6 / 25 / 8 / 45 -->
+          <rect x="890" y="90" width="10" height="200" fill="var(--g-ctx)" stroke="none"/>
+          <rect x="900" y="90" width="42" height="200" fill="var(--g-user)" stroke="none"/>
+          <rect x="942" y="90" width="13" height="200" fill="var(--g-video)" stroke="none"/>
+          <rect x="955" y="90" width="75" height="200" fill="var(--g-roll)" stroke="none"/>
+          <rect x="890" y="90" width="140" height="200" rx="2"/>
+          <rect x="1040" y="90" width="18" height="200" rx="2"/>
+          <!-- one highlighted row = our sample -->
+          <line x1="890" y1="196" x2="1058" y2="196" stroke="var(--accent)" stroke-width="3"/>
+        </g>
+        <g stroke="none" fill="currentColor" font-size="11.5">
+          <text x="960" y="78" text-anchor="middle" font-weight="600">X：N × 84，float32</text>
+          <text x="1049" y="78" text-anchor="middle">y</text>
+          <text x="895" y="312" font-size="10.5">6</text><text x="915" y="312" font-size="10.5">25</text><text x="945" y="312" font-size="10.5">8</text><text x="985" y="312" font-size="10.5">45 列</text>
+          <text x="960" y="336" text-anchor="middle" opacity="0.7">NaN = 缺失；y = is_click 或 long_view</text>
+          <text x="960" y="354" text-anchor="middle" opacity="0.7">train 5,021,422 行 · valid 2,503,287 行</text>
+        </g>
+        <text x="1067" y="200" font-size="10.5" fill="var(--accent)" stroke="none">← 本样本</text>
+
+        <!-- arrows -> matrix -->
+        <path d="M500,100 C700,20 820,30 890,120" marker-end="url(#arrow)" stroke-dasharray="4 3"/>
+        <path d="M790,195 L890,195" marker-end="url(#arrow)"/>
+        <path d="M500,259 C760,259 820,250 890,250" marker-end="url(#arrow)" stroke-dasharray="4 3"/>
+        <path d="M500,345 C760,345 850,320 890,280" marker-end="url(#arrow)" stroke-dasharray="4 3"/>
+        <g stroke="none" fill="currentColor" font-size="10.5" opacity="0.75">
+          <text x="840" y="182" text-anchor="middle">按 row_id 对齐</text>
+          <text x="840" y="212" text-anchor="middle">逐列填入</text>
+          <text x="720" y="22" text-anchor="middle" opacity="0">.</text>
+        </g>
+
+        <!-- col 5: model -->
+        <rect x="1085" y="140" width="90" height="56" rx="3"/>
+        <g stroke="none" fill="currentColor" font-size="11.5">
+          <text x="1130" y="162" text-anchor="middle" font-weight="600">LightGBM</text>
+          <text x="1130" y="180" text-anchor="middle" opacity="0.8">407 棵树</text>
+          <text x="1130" y="258" text-anchor="middle" class="mono" font-weight="600">p ∈ (0, 1)</text>
+          <text x="1130" y="276" text-anchor="middle" opacity="0.7">同一用户内排序</text>
+        </g>
+        <path d="M1058,130 C1070,130 1075,140 1085,150" marker-end="url(#arrow)"/>
+        <path d="M1130,196 L1130,240" marker-end="url(#arrow)"/>
+        <text x="1138" y="222" font-size="10.5" fill="currentColor" stroke="none" opacity="0.75">sigmoid</text>
+      </g>
+    </svg>
+    </div>
+    <figcaption>实线箭头是主数据流，虚线是只借几列的关联。X 的四段颜色就是下面第 2 节的四组特征，宽度按列数 6 / 25 / 8 / 45 画。橙线标出本样本在矩阵里的那一行。</figcaption>
+  </figure>
+
+  <!-- ===== Figure 2: the 84 cells ===== -->
+  <figure>
+    <h2>2. 这一行的 84 个数</h2>
+    <div class="legend">
+      <span><i style="background:var(--g-ctx)"></i>上下文 6</span>
+      <span><i style="background:var(--g-user)"></i>用户静态 25</span>
+      <span><i style="background:var(--g-video)"></i>视频静态 8</span>
+      <span><i style="background:var(--g-roll)"></i>滚动统计 45</span>
+      <span>加粗边框 = 类别特征（26 个）；悬停或点击格子看含义</span>
+    </div>
+    <div class="strip" id="strip" aria-label="84 个特征格子"></div>
+    <figcaption id="hover-caption">把鼠标放到格子上，这里显示该特征的含义。</figcaption>
+    <div class="filters" id="filters" role="group" aria-label="按组筛选">
+      <button type="button" data-g="all" aria-pressed="true">全部 84</button>
+      <button type="button" data-g="ctx">上下文</button>
+      <button type="button" data-g="user">用户静态</button>
+      <button type="button" data-g="video">视频静态</button>
+      <button type="button" data-g="roll">滚动统计</button>
+    </div>
+    <div class="scroll">
+      <table id="table">
+        <thead><tr><th>#</th><th>特征</th><th>组</th><th>类型</th><th>本样本值</th><th>含义</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="note">读这一行：重度用户（过去 7 天 7,725 次曝光、点击率 51%，在 tab 1 累计 10,969 次、点击率 54%），看到一个无类目标签、12 天前上传、只被曝光过 4 次的 73 秒视频，作者历史 70 次曝光点击率 51%，用户以前看过这位作者 2 次点过 1 次，看过 461 条无标签视频点击率 60%。模型给它的分要和这个用户同一时段的其它曝光比高低，真实结果是没点。</p>
+  </figure>
+
+  <!-- ===== Figure 3: strictly-before windows ===== -->
+  <figure>
+    <h2>3. 滚动统计只看时间戳之前的数据</h2>
+    <div class="scroll">
+    <svg viewBox="0 0 1100 300" width="1100" role="img" aria-label="时间轴从 4 月 8 日到 5 月 8 日，样本时刻 t 在 4 月 22 日 12 时。三个嵌套的时间窗向左延伸：全部历史、过去 7 天、过去 1 天，分别统计到作者 70、44、2 次曝光；t 右侧的数据不可见；与 t 同一请求的其它曝光也不计入。">
+      <defs>
+        <pattern id="hatch2" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="6" stroke="currentColor" stroke-width="1" opacity="0.3"/>
+        </pattern>
+        <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g fill="none" stroke="currentColor" stroke-width="1.2">
+        <!-- future region -->
+        <rect x="534" y="40" width="506" height="190" fill="var(--future)" stroke="none"/>
+        <rect x="534" y="40" width="506" height="190" fill="url(#hatch2)" stroke="none"/>
+        <text x="787" y="70" text-anchor="middle" font-size="12.5" fill="currentColor" stroke="none" opacity="0.75">t 之后的所有日志：对这一行不可见</text>
+        <text x="787" y="90" text-anchor="middle" font-size="11" fill="currentColor" stroke="none" opacity="0.6">包括同一次请求里的其它曝光（它们的时间戳等于 t）</text>
+
+        <!-- axis -->
+        <line x1="60" y1="230" x2="1040" y2="230" marker-end="url(#arrow2)"/>
+        <g stroke="none" fill="currentColor" font-size="11.5" class="mono">
+          <text x="60" y="252" text-anchor="middle">4/08</text>
+          <text x="305" y="252" text-anchor="middle">4/15</text>
+          <text x="501" y="252" text-anchor="middle">4/21</text>
+          <text x="534" y="268" text-anchor="middle" font-weight="600">t = 4/22 12:00</text>
+          <text x="762" y="252" text-anchor="middle">4/29</text>
+          <text x="1040" y="252" text-anchor="middle">5/08</text>
+        </g>
+        <!-- schematic exposures of this author before t -->
+        <g stroke="var(--g-roll)" stroke-width="1.5" opacity="0.8">
+          <line x1="80" y1="222" x2="80" y2="238"/><line x1="112" y1="222" x2="112" y2="238"/><line x1="150" y1="222" x2="150" y2="238"/>
+          <line x1="190" y1="222" x2="190" y2="238"/><line x1="233" y1="222" x2="233" y2="238"/><line x1="270" y1="222" x2="270" y2="238"/>
+          <line x1="320" y1="222" x2="320" y2="238"/><line x1="347" y1="222" x2="347" y2="238"/><line x1="372" y1="222" x2="372" y2="238"/>
+          <line x1="399" y1="222" x2="399" y2="238"/><line x1="420" y1="222" x2="420" y2="238"/><line x1="446" y1="222" x2="446" y2="238"/>
+          <line x1="468" y1="222" x2="468" y2="238"/><line x1="488" y1="222" x2="488" y2="238"/><line x1="511" y1="222" x2="511" y2="238"/>
+          <line x1="524" y1="222" x2="524" y2="238"/>
+        </g>
+        <!-- the sample itself -->
+        <line x1="534" y1="40" x2="534" y2="238" stroke="var(--accent)" stroke-width="2"/>
+        <circle cx="534" cy="230" r="5" fill="var(--accent)" stroke="none"/>
+        <!-- windows (brackets) -->
+        <g stroke-width="1.5">
+          <path d="M60,120 L60,110 L532,110 L532,120"/>
+          <path d="M305,160 L305,150 L532,150 L532,160"/>
+          <path d="M501,200 L501,190 L532,190 L532,200"/>
+        </g>
+        <g stroke="none" fill="currentColor" font-size="12">
+          <text x="296" y="102" text-anchor="middle">全部历史 [4/08, t)：作者曝光 <tspan class="mono" font-weight="600">70</tspan> 次，点击 <tspan class="mono" font-weight="600">38</tspan>，长播 <tspan class="mono" font-weight="600">32</tspan></text>
+          <text x="418" y="142" text-anchor="middle">过去 7 天 [t−7d, t)：<tspan class="mono" font-weight="600">44</tspan> / <tspan class="mono" font-weight="600">25</tspan> / <tspan class="mono" font-weight="600">23</tspan></text>
+          <text x="470" y="182" text-anchor="end">过去 1 天 [t−1d, t)：<tspan class="mono" font-weight="600">2</tspan> / <tspan class="mono" font-weight="600">0</tspan> / <tspan class="mono" font-weight="600">0</tspan></text>
+        </g>
+        <!-- derived rate callout -->
+        <g stroke="none" fill="currentColor" font-size="11.5">
+          <text x="60" y="56" font-weight="600">得到的特征（author_* 13 列）</text>
+          <text x="60" y="74" class="mono">author_n_all 70 · author_click_all 38 · author_lv_all 32</text>
+          <text x="60" y="90" class="mono">author_ctr_all = (38 + 20 × 0.38) / (70 + 20) = 0.507</text>
+        </g>
+      </g>
+    </svg>
+    </div>
+    <figcaption>以本样本的作者为例：三个窗口都以 t 为右端且不含 t，所以同一请求里的其它几条曝光一律不算。平滑率把 20 条"先验样本"（训练集全局点击率 0.38）掺进去，让只曝光过几次的视频和作者不会出现 0 或 1 的极端值。竖线是作者历史曝光的示意位置，数量以标注为准。</figcaption>
+  </figure>
+</main>
+
+<script>
+(function () {
+  const GROUPS = { ctx: ["上下文", "--g-ctx"], user: ["用户静态", "--g-user"], video: ["视频静态", "--g-video"], roll: ["滚动统计", "--g-roll"] };
+  const CAT = new Set(["tab", "weekday", "user_active_degree", "is_live_streamer", "upload_type", "video_type", "tag_first", "music_type"]);
+  for (let i = 0; i < 18; i++) CAT.add("onehot_feat" + i);
+  const STATIC = {
+    tab: "场景 id。0 双列页（is_click 是真点击），1 单列流（is_click 是有效播放 ≥7 s），4 等其它场景",
+    hour: "曝光小时，北京时间，hourmin 除以 100",
+    weekday: "星期几，1 到 7",
+    duration_ms: "本次曝光视频的时长（毫秒），≤0 记为缺失",
+    tab_prior_click: "该 tab 在训练集（4/08–4/21）的平均点击率，一个常数",
+    user_gap_s: "距该用户上一次请求的秒数，第一条为缺失",
+    user_active_degree: "活跃度等级，7 类编码：0 full_active … 6 30day_retention",
+    is_live_streamer: "是否主播：0 否，1 是，2 未知（原值 -124）",
+    is_video_author: "是否发过视频",
+    follow_user_num: "关注数", fans_user_num: "粉丝数", friend_user_num: "好友数",
+    register_days: "注册天数",
+    upload_type: "上传方式，32 类按频次编码，0 是最常见的 LongImport",
+    video_type: "0 NORMAL，1 AD，2 未知",
+    tag_first: "第一个类目标签，58 个取值，-1 表示没有标签",
+    n_tags: "标签个数，0 到 5",
+    music_type: "背景音乐类型编码，-1 缺失",
+    aspect: "视频高宽比，1.78 即竖屏 16:9",
+    visible_status: "视频当前可见状态，99% 为 0",
+    video_age_days: "曝光日期减上传日期，天",
+  };
+  for (let i = 0; i < 18; i++) STATIC["onehot_feat" + i] = "加密的用户属性 " + i + "，整数类别（feat3 有 394 个取值、feat8 有 283 个，几乎能唯一标识用户）";
+  const KEY = { video: "该视频", author: "该作者", user: "该用户", utab: "该用户在该 tab", ua: "该用户对该作者", utag: "该用户对该类目标签", uv: "该用户对该视频" };
+  const WIN = { "1d": "过去 1 天", "7d": "过去 7 天", all: "全部历史" };
+  const STAT = { n: "曝光次数", click: "点击次数", lv: "长播次数", ctr: "平滑点击率 (click + 20·0.38)/(n + 20)", lvr: "平滑长播率 (lv + 20·0.26)/(n + 20)" };
+  function meaning(name) {
+    const m = name.match(/^(video|author|user|utab|ua|utag|uv)_(n|click|lv|ctr|lvr)_(1d|7d|all)$/);
+    if (m) return KEY[m[1]] + WIN[m[3]] + "的" + STAT[m[2]] + "，只算时间戳早于本行的曝光";
+    return STATIC[name] || "";
+  }
+  const names = ["tab","hour","weekday","duration_ms","tab_prior_click","user_gap_s",
+    "user_active_degree","is_live_streamer","is_video_author","follow_user_num","fans_user_num","friend_user_num","register_days",
+    "onehot_feat0","onehot_feat1","onehot_feat2","onehot_feat3","onehot_feat4","onehot_feat5","onehot_feat6","onehot_feat7","onehot_feat8","onehot_feat9","onehot_feat10","onehot_feat11","onehot_feat12","onehot_feat13","onehot_feat14","onehot_feat15","onehot_feat16","onehot_feat17",
+    "upload_type","video_type","tag_first","n_tags","music_type","aspect","visible_status","video_age_days",
+    "video_n_1d","video_click_1d","video_lv_1d","video_n_7d","video_click_7d","video_lv_7d","video_n_all","video_click_all","video_lv_all","video_ctr_7d","video_ctr_all","video_lvr_7d","video_lvr_all",
+    "author_n_1d","author_click_1d","author_lv_1d","author_n_7d","author_click_7d","author_lv_7d","author_n_all","author_click_all","author_lv_all","author_ctr_7d","author_ctr_all","author_lvr_7d","author_lvr_all",
+    "user_n_1d","user_click_1d","user_lv_1d","user_n_7d","user_click_7d","user_lv_7d","user_ctr_7d","user_lvr_7d",
+    "utab_n_all","utab_click_all","utab_ctr_all","ua_n_all","ua_click_all","ua_lv_all","ua_ctr_all","utag_n_all","utag_click_all","utag_ctr_all","uv_n_all"];
+  const values = [1,12,5,72966,0.4478,89, 0,2,1,59,2,2,1190, 0,1,19,622,1,0,0,24,264,4,2,0,1,0,0,0,0,0, 0,0,-1,0,9,1.7778,0,12,
+    0,0,0,0,0,0,4,2,2,0.3806,0.4005,0.2646,0.3038, 2,0,0,44,25,23,70,38,32,0.5095,0.5068,0.4421,0.4144,
+    1224,488,283,7725,3957,2610,0.5119,0.3377, 10969,5953,0.5424,2,1,1,0.3914,461,282,0.6021,0];
+  const group = (i) => i < 6 ? "ctx" : i < 31 ? "user" : i < 39 ? "video" : "roll";
+  const fmt = (v) => Number.isNaN(v) ? "NaN" : Number.isInteger(v) ? v.toLocaleString("en-US") : v.toFixed(v < 10 ? 3 : 1);
+  const feats = names.map((n, i) => ({ i, n, g: group(i), c: CAT.has(n), v: values[i], m: meaning(n) }));
+
+  const strip = document.getElementById("strip");
+  const tbody = document.querySelector("#table tbody");
+  const cap = document.getElementById("hover-caption");
+  const cells = [], rows = [];
+  feats.forEach((f) => {
+    const cell = document.createElement("div");
+    cell.className = "cell" + (Number.isNaN(f.v) ? " nan" : "");
+    cell.style.setProperty("--gc", "var(" + GROUPS[f.g][1] + ")");
+    if (f.c) cell.style.borderColor = "var(--gc)";
+    cell.tabIndex = 0;
+    cell.title = f.n + " = " + fmt(f.v);
+    cell.innerHTML = "<span>" + fmt(f.v) + "<small>" + f.i + "</small></span>";
+    strip.appendChild(cell);
+    cells.push(cell);
+    const tr = document.createElement("tr");
+    tr.dataset.g = f.g;
+    tr.style.setProperty("--gc", "var(" + GROUPS[f.g][1] + ")");
+    tr.innerHTML = "<td class='idx'>" + f.i + "</td><td class='name'>" + f.n + "</td><td><span class='tag'>" + GROUPS[f.g][0] + "</span></td><td>" + (f.c ? "类别" : "数值") + "</td><td class='num'>" + fmt(f.v) + "</td><td>" + f.m + "</td>";
+    tbody.appendChild(tr);
+    rows.push(tr);
+    const on = () => { cells.forEach((c) => c.classList.remove("hot")); rows.forEach((r) => r.classList.remove("hot")); cell.classList.add("hot"); tr.classList.add("hot");
+      cap.textContent = "#" + f.i + " " + f.n + " = " + fmt(f.v) + "（" + GROUPS[f.g][0] + (f.c ? "，类别" : "") + "）：" + f.m; };
+    cell.addEventListener("mouseenter", on); cell.addEventListener("focus", on); cell.addEventListener("click", () => { on(); tr.scrollIntoView({ block: "nearest" }); });
+    tr.addEventListener("mouseenter", on);
+  });
+  document.getElementById("filters").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    document.querySelectorAll("#filters button").forEach((x) => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+    const g = b.dataset.g;
+    rows.forEach((r) => { r.hidden = g !== "all" && r.dataset.g !== g; });
+    cells.forEach((c, i) => { c.style.opacity = g === "all" || feats[i].g === g ? "1" : "0.25"; });
+  });
+})();
+</script>
+
+</body>
+</html>

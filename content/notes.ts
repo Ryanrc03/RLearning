@@ -42,6 +42,48 @@ export const noteEntries: NoteEntry[] = [
     readingMinutes: 2,
     tags: ["operating systems", "memory", "paging"],
   },
+  {
+    slug: "ml/recsys/kuairand-input",
+    title: "一条曝光的 84 维输入",
+    description:
+      "KuaiRand-1K 的曝光日志怎样变成排序模型的输入：数据流、一条真实样本的 84 个特征、只看过去的时间窗统计。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Recommender Systems",
+    created: "2026-10-14",
+    updated: "2026-10-14",
+    status: "growing",
+    readingMinutes: 6,
+    tags: ["recommender systems", "feature engineering", "KuaiRand", "LightGBM"],
+  },
+  {
+    slug: "ml/recsys/lightgbm-explained",
+    title: "梯度提升树如何给曝光打分",
+    description:
+      "以真实训练的 LightGBM click 模型为例：目标函数与梯度、一轮迭代、直方图与 leaf-wise、第一棵树的结构、一条样本的 407 步轨迹与特征贡献。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Recommender Systems",
+    created: "2026-10-14",
+    updated: "2026-10-14",
+    status: "growing",
+    readingMinutes: 14,
+    tags: ["gradient boosting", "LightGBM", "CTR", "interpretability"],
+  },
+  {
+    slug: "ml/recsys/boosting-lab",
+    title: "提升树训练实验台",
+    description:
+      "16 个点、一个特征，按一轮长一棵树：看残差被压小、LogLoss 下降、森林长出、分数累加；GBDT / XGBoost / LightGBM 的差别做成开关。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Recommender Systems",
+    created: "2026-10-14",
+    updated: "2026-10-14",
+    status: "growing",
+    readingMinutes: 12,
+    tags: ["gradient boosting", "XGBoost", "LightGBM", "interactive"],
+  },
 ];
 
 export function getNote(slug: string): NoteEntry | undefined {

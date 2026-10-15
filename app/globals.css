@@ -133,6 +133,11 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
 .prose blockquote { margin: 22px 0; padding: 1px 19px; background: #fdf9e9; border-left: 3px solid #ddc776; border-radius: 0 6px 6px 0; color: #8a825f; }
 .prose a { color: #997b25; text-decoration: underline; text-decoration-color: #d9cd9f; text-underline-offset: 4px; }
 .prose a:hover { text-decoration-color: currentColor; }
+.prose table { width: 100%; margin: 22px 0; border-collapse: collapse; font-size: 12.5px; line-height: 1.65; }
+.prose th, .prose td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.prose th { font-size: 11px; font-weight: 600; color: #8e8d78; border-bottom-color: #e4dfcb; }
+.lab-frame { margin: 22px 0; border: 1px solid #eceadc; border-radius: 8px; overflow: hidden; background: var(--cream); }
+.lab-frame iframe { display: block; width: 100%; border: 0; }
 .note-toc { position: sticky; top: 107px; align-self: start; margin-top: 7px; }
 .toc-label { text-transform: uppercase; letter-spacing: 1.4px; font-size: 9px; font-weight: 600; color: #959582; margin-bottom: 16px; }
 .toc-links { border-left: 1px solid #efedde; list-style: none; }
