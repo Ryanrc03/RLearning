@@ -84,6 +84,62 @@ export const noteEntries: NoteEntry[] = [
     readingMinutes: 12,
     tags: ["gradient boosting", "XGBoost", "LightGBM", "interactive"],
   },
+  {
+    slug: "ai-infra/agent-harness/agent-loop",
+    title: "Agent 的最小循环",
+    description:
+      "agent = 模型 + 工具 + while 循环，循环之外的一切是 harness。逐步模拟一次修复测试的循环，看消息列表怎样增长、什么让它停下。",
+    categoryId: "ai-infra",
+    category: "AI Infrastructure",
+    section: "Agent Harness",
+    created: "2026-10-15",
+    updated: "2026-10-15",
+    status: "growing",
+    readingMinutes: 10,
+    tags: ["agent", "harness", "context", "interactive"],
+  },
+  {
+    slug: "ai-infra/agent-harness/tools-permissions-hooks",
+    title: "工具调用、权限与 Hook",
+    description:
+      "模型只产生 JSON，执行在 harness 里。权限模式与 deny → ask → allow 规则、hook 的事件与退出码；用模拟器看一次调用在哪一层被放行或拦下。",
+    categoryId: "ai-infra",
+    category: "AI Infrastructure",
+    section: "Agent Harness",
+    created: "2026-10-15",
+    updated: "2026-10-15",
+    status: "growing",
+    readingMinutes: 12,
+    tags: ["agent", "harness", "permissions", "hooks", "interactive"],
+  },
+  {
+    slug: "ai-infra/agent-harness/subagents-skills-mcp",
+    title: "Subagent、Skill 与 MCP：三种扩展方式",
+    description:
+      "subagent 是另一个循环，skill 是按需加载的说明书，MCP 是统一协议。三个可视化：委派省了什么、渐进披露加载了什么、一个 MCP 工具的完整时序。",
+    categoryId: "ai-infra",
+    category: "AI Infrastructure",
+    section: "Agent Harness",
+    created: "2026-10-15",
+    updated: "2026-10-15",
+    status: "growing",
+    readingMinutes: 12,
+    tags: ["agent", "harness", "subagents", "skills", "MCP", "interactive"],
+  },
+  {
+    slug: "ai-infra/agent-harness/goals-and-harness-design",
+    title: "Goal、停止条件与设计自己的 Harness",
+    description:
+      "循环的三种停法，Stop hook 与 /goal 怎样当验证闸门；三个问题决定模式和规则；五个任务原型的 harness 设计器。",
+    categoryId: "ai-infra",
+    category: "AI Infrastructure",
+    section: "Agent Harness",
+    created: "2026-10-15",
+    updated: "2026-10-15",
+    status: "growing",
+    readingMinutes: 11,
+    tags: ["agent", "harness", "verification", "design", "interactive"],
+  },
 ];
 
 export function getNote(slug: string): NoteEntry | undefined {

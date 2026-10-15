@@ -4,7 +4,7 @@ export const categories = [
   { id: "cs", title: "CS Foundations", description: "回到基础，理解计算机如何工作。", icon: "code", topics: "Operating Systems · Networks" },
   { id: "systems", title: "Systems", description: "从单个组件到协作运行的系统。", icon: "layers", topics: "Distributed Systems · Architecture" },
   { id: "ml", title: "ML & LLM", description: "理解模型，也理解学习本身。", icon: "brain", topics: "Reinforcement Learning · Recommender Systems · LLMs" },
-  { id: "ai-infra", title: "AI Infrastructure", description: "让模型高效运行的工程细节。", icon: "cpu", topics: "GPU · Inference · vLLM" },
+  { id: "ai-infra", title: "AI Infrastructure", description: "让模型高效运行的工程细节。", icon: "cpu", topics: "Agent Harness · GPU · Inference" },
 ] as const;
 
 export const navigation = categories.map((category) => {

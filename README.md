@@ -13,7 +13,7 @@ Open <http://localhost:3000>. Run `npm run build` to generate the static site in
 
 ## Current state
 
-The site uses Next.js App Router, TypeScript, Tailwind CSS, MDX, and static export. It includes a white and pale-yellow reading layout, a persistent desktop sidebar, a mobile navigation drawer, an article table of contents, a topic homepage, and two notes. Search, math rendering, and interactive visualizations remain future work.
+The site uses Next.js App Router, TypeScript, Tailwind CSS, MDX, and static export. It includes a white and pale-yellow reading layout, a persistent desktop sidebar, a mobile navigation drawer, an article table of contents, a topic homepage, and a growing set of notes. Interactive visualizations exist in two forms: self-contained lab pages under `public/labs/` embedded with `LabFrame`, and React client components under `components/visualization/` (wrapped in `VisualizationFrame`, styled by `styles/visualization.css`) imported directly from MDX. Search and math rendering remain future work.
 
 The top activity grid summarizes the recorded creation and latest-update dates in `content/notes.ts`; it is not a GitHub commit feed. The header uses the public avatar from the configured `Ryanrc03` GitHub profile, saved in `public/avatar.jpg`. Update `content/profile.ts` to change the displayed name, avatar URL, or GitHub link.
 

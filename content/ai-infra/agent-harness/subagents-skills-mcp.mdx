@@ -1,0 +1,142 @@
+import SubagentContextViz from "@/components/visualization/agent-harness/SubagentContextViz";
+import SkillDisclosureViz from "@/components/visualization/agent-harness/SkillDisclosureViz";
+import McpSequenceViz from "@/components/visualization/agent-harness/McpSequenceViz";
+
+# Subagent、Skill 与 MCP：三种扩展方式
+
+有了循环和闸门，agent 已经能干活了。接下来的问题是怎样让它干更多、更难的活，而不把一个上下文塞爆、不把所有流程写死在系统提示里、不为每个外部系统改一遍 harness 代码。三个机制各解决一个问题：
+
+```text
+问题                        机制        本质
+────────────────────────────────────────────────────────────
+一个上下文装不下             Subagent    再开一个循环，只把结论带回来
+流程知识太多，不能全载入     Skill       按需读取的说明书
+外部系统太多，不能逐个硬编码 MCP         统一协议描述工具，harness 只认协议
+```
+
+## Subagent: another loop with its own context
+
+subagent 就是第一篇里的那个循环再跑一个实例：独立的系统提示、独立的消息列表、自己的工具集和预算。父代理用一个 `Agent` 工具把任务描述发过去，等它跑完，**只收到最后那份报告**。子代理读过的文件、跑过的命令、中间的试错，父代理一概看不见。
+
+这个“看不见”既是代价也是全部价值：
+
+- **上下文隔离。** 要在 40 个文件里找某个函数的所有调用点，让子代理去读，主上下文只多一份摘要。
+- **并行。** 几个子代理可以同时跑，各看一块。
+- **风险隔离。** 子代理可以只给只读工具、更严的权限模式、更小的预算。Claude Code 内置的 `Explore` 子代理就是只读的，而且不加载 CLAUDE.md 和 git 状态，起步更轻。
+- **信息损失。** 报告漏了什么，父代理无从知道。所以给子代理的任务描述要像给一个没有任何上下文的新同事写的一样：目标、已排除的方向、要读的文件、期望的输出格式。
+
+在 Claude Code 里，自定义子代理是一个带 frontmatter 的 Markdown 文件，正文就是它的系统提示：
+
+```markdown
+---
+name: fact-checker
+description: 对照官方文档核对技术笔记里的事实，只读，不改文件
+tools: Read, Grep, Glob, WebFetch
+model: haiku
+maxTurns: 20
+---
+你是一个事实核对员。对每条待核对的说法……
+```
+
+放在 `.claude/agents/` 是项目级，放在 `~/.claude/agents/` 是个人级。可以指定 `tools`、`model`、`permissionMode`、`maxTurns`、自己的 `hooks` 和 `mcpServers`。子代理默认可以再开子代理，最多三层；默认最多 20 个并发。
+
+拖动下面的滑块，看委派到底省了什么、多花了什么。
+
+<SubagentContextViz />
+
+规律不依赖具体数字：委派省的是**主上下文**，多花的是**总 token**（每个子代理都要重新装一遍系统提示和工具 schema）和**细节**，换来的是并行和隔离。所以委派适合“读得多、结论短”的子任务；不适合“需要全部细节才能做决定”的事，那种还是自己读。
+
+## Skill: a manual that loads itself on demand
+
+skill 解决的是另一种膨胀：流程知识。“怎么写一篇符合这个站规范的笔记”“做图表前要跑哪个校验脚本”“发布版本的十二个步骤”，这些东西写进系统提示就永远占着上下文，而大多数对话用不到它们。
+
+skill 是一个目录，核心是一个 `SKILL.md`：
+
+```markdown
+---
+name: dataviz
+description: 做任何图表、仪表盘或数据可视化之前读。选形式、配色、跑校验脚本。
+---
+# Data Visualization
+1. 先选形式 …
+2. 按角色分配颜色 …
+3. 运行 scripts/validate_palette.js 校验 …
+详细规则见 references/color-formula.md。
+```
+
+关键机制叫**渐进披露**，分三层：
+
+1. 会话开始时，上下文里只有每个 skill 的 `name` 和 `description`。几十个 skill 也只占几百 token。
+2. 用户的请求和某个描述对上了，或者用户直接输入 `/dataviz`，这份 `SKILL.md` 的全文才进入对话。
+3. 正文里说“做 X 之前先读 `references/palette.md`”，模型才去读那个文件。附件、脚本、模板都在这一层。
+
+<SkillDisclosureViz />
+
+frontmatter 里有几个开关决定 skill 的性格：`disable-model-invocation: true` 表示只有用户能用斜杠触发，模型不会自己决定去部署；`allowed-tools` 限制 skill 运行时能用的工具；`context: fork` 让 skill 在一个独立的子代理里跑，不污染主对话。skill 放在 `.claude/skills/<name>/SKILL.md`（项目）或 `~/.claude/skills/`（个人），也可以随插件分发；旧的 `.claude/commands/*.md` 斜杠命令仍然可用，同名时 skill 优先。
+
+和另外两个“常驻”的东西比较一下：CLAUDE.md 每次都加载，适合放**项目约定**这种每轮都要知道的事；skill 按需加载，适合放**流程**；subagent 是独立上下文，适合放**子任务**。三者经常被混用，分清楚能省很多 token。
+
+Hermes Agent 把 skill 做得更激进一些：它兼容 agentskills.io 的开放格式，并且在完成复杂任务后会自己写一个 skill 存起来，下次遇到类似任务时触发。那是“把经验变成流程知识”的闭环，但原理和这里一样。
+
+## MCP: one protocol instead of one integration per system
+
+要让 agent 操作 GitHub、数据库、浏览器、公司内部系统，传统做法是给每个系统写一组工具函数塞进 harness。系统一多就维护不过来，而且每个 harness 都要重写一遍。
+
+MCP（Model Context Protocol）把这件事反过来：每个外部系统提供一个 **server**，用标准协议描述自己有哪些工具、参数是什么；harness 扮演 **client**，只需要会说这门协议。接一个新系统变成写一行配置：
+
+```json
+{
+  "mcpServers": {
+    "github": { "type": "http", "url": "https://api.githubcopilot.com/mcp/" },
+    "browser": { "type": "stdio", "command": "npx", "args": ["@playwright/mcp@latest"] }
+  }
+}
+```
+
+`stdio` 是 harness 拉起的本地子进程，`http` 是远程服务（旧的 `sse` 已不推荐）。配置可以放在项目的 `.mcp.json`（随仓库走）、用户级或本地。接入后的工具以 `mcp__<server>__<tool>` 命名，进入和内置工具同一个列表，走同一道权限闸门：可以写 `allow mcp__github__*`，也可以只放行其中一两个。
+
+按步骤看一个 MCP 工具从接入到被调用的完整时序：
+
+<McpSequenceViz />
+
+MCP 的隔离价值常被忽略：GitHub 的 token 只在 server 进程里，harness 和模型都碰不到。但它的代价也很具体，**每个工具的 schema 都要占上下文**。三个 server 各 20 个工具，就是上万 token 在模型做任何事之前先花掉。Claude Code 默认开 tool search：开始只给模型工具名，要用时再把 schema 载入。另一个上限是输出：单次 MCP 工具输出默认最多 25,000 token，超过 10,000 就会警告，再大的文本会落盘而不是进上下文。
+
+## Which one to reach for
+
+| 你遇到的问题 | 用 | 不要用 |
+| --- | --- | --- |
+| 要读很多东西，结论很短 | subagent | 自己读（上下文爆炸） |
+| 几件事互不依赖，可以同时做 | 并行的 subagent | 串行 |
+| 一段流程会反复用，但不是每次都用 | skill | 写进 CLAUDE.md（每轮都付钱） |
+| 每一轮都必须知道的项目约定 | CLAUDE.md | skill（可能没被触发） |
+| 要操作一个外部系统 | MCP server | 让模型用 curl 拼 API（凭证进上下文） |
+| 需要全部细节才能决定 | 自己读 | subagent（报告会丢细节） |
+
+## Trade-offs
+
+- **subagent 用总 token 换主上下文，用细节换并行。** 任务描述写得差，省下的上下文会被返工吃掉。
+- **skill 的触发依赖描述写得准。** 描述太窄，该用的时候没触发；太宽，不该用的时候占上下文。描述是 skill 最重要的一行。
+- **MCP 让接入变便宜，让上下文变贵。** 接了不等于该全开，工具该按任务挑。
+- **三者都在增加系统的层数。** 每多一层，出问题时就多一个要查的地方：是子代理没读到文件，还是 skill 没触发，还是 MCP server 没起来。
+
+## Key ideas to remember
+
+1. subagent 是另一个循环；父代理只拿到报告，看不到过程。
+2. skill 分三层加载：目录常驻，正文触发后进，附件按需读。
+3. MCP 把“接系统”变成“写配置”，代价是工具 schema 占上下文，所以要延迟加载。
+4. CLAUDE.md 放约定，skill 放流程，subagent 放子任务。
+5. 三者都走同一道权限闸门，扩展能力不等于扩展权限。
+
+## Related notes
+
+- [Agent 的最小循环](/notes/ai-infra/agent-harness/agent-loop/)：subagent 就是它的另一个实例。
+- [工具调用、权限与 Hook](/notes/ai-infra/agent-harness/tools-permissions-hooks/)：MCP 工具走的同一道闸门。
+- [Goal、停止条件与设计自己的 Harness](/notes/ai-infra/agent-harness/goals-and-harness-design/)：把三种扩展放进一个具体任务的设计里。
+
+## Further reading
+
+- [Claude Code: Subagents](https://code.claude.com/docs/en/sub-agents)
+- [Claude Code: Skills](https://code.claude.com/docs/en/skills)
+- [Claude Code: MCP](https://code.claude.com/docs/en/mcp)
+- [Model Context Protocol specification](https://modelcontextprotocol.io/)
+- [Agent Skills open standard](https://agentskills.io)

@@ -1,0 +1,93 @@
+import AgentLoopSim from "@/components/visualization/agent-harness/AgentLoopSim";
+import HarnessAnatomy from "@/components/visualization/agent-harness/HarnessAnatomy";
+
+# Agent 的最小循环
+
+“agent”这个词被用得太多，以至于很难看清它到底是什么。拆开看其实只有三样东西：一个只会读 token、写 token 的模型；一组模型可以“请求”但不能亲自执行的工具；还有一个 while 循环，把两者连起来。循环之外的所有代码，叫 **harness**。这组笔记从这个最小循环出发，一层层加上权限、hook、subagent、skill、MCP 和目标验证，最后回答一个问题：给一个具体任务，该怎么设计它的 harness。
+
+## What is an agent?
+
+把聊天机器人变成 agent，只需要在模型外面套一个循环：
+
+```python
+messages = [system_prompt, memory_files, user_task]
+
+while True:
+    reply = model(messages, tools=tool_schemas)   # 模型只产生文本或 tool_use
+    messages.append(reply)
+    if not reply.tool_calls:                       # 没有 tool_use = 模型认为做完了
+        return reply.text
+    for call in reply.tool_calls:
+        result = run_tool(call)                    # 真正的副作用发生在这里
+        messages.append(tool_result(call, result))
+```
+
+模型在每一轮看到的是**到目前为止的整个消息列表**。它不记得上一轮，它只是重新读了一遍。工具的输出被追加回去，于是下一轮它“知道”了测试失败在哪一行。所谓的“自主”，就是这个循环跑了很多轮。
+
+下面的模拟把这件事按步骤拆开。任务是修一个失败的测试，模型需要五次调用。
+
+<AgentLoopSim />
+
+几个值得盯着看的地方：
+
+- **模型从不执行任何东西。** `tool_use` 只是一段 JSON；`Edit` 真正改文件、`Bash` 真正跑进程，都发生在 harness 里。这也是为什么权限和 hook 可以插在中间：harness 完全有机会不执行。
+- **循环的终止条件是模型自己说的。** 没有 tool_use 就停，这意味着“任务完成”与“模型认为完成”是同一件事。第四篇笔记会讲 harness 怎样不信这句话。
+- **上下文只增不减。** 固定部分（系统提示、项目约定、工具 schema）在第一轮就占了大头，之后的增长几乎全来自工具输出。读一个 88 行的文件就是 1,800 token，读十个就接近窗口的十分之一。
+
+## Why does the loop need a harness?
+
+如果循环只有上面那十行，剩下的事全得由 harness 补上。它至少要回答四个问题：
+
+| 问题 | harness 的回答 | 没有它会怎样 |
+| --- | --- | --- |
+| 模型这一轮看什么？ | 组装系统提示、项目约定文件（CLAUDE.md、AGENTS.md）、记忆、对话历史；上下文快满时压缩 | 不知道项目约定，或者上下文涨到请求失败 |
+| 模型的请求能不能执行？ | 权限规则、hook、人工确认 | 模型读到的任何文本都能变成 `rm -rf` |
+| 什么时候必须停？ | 最大轮数、费用上限、超时 | 卡在死循环里反复重试同一条失败的命令 |
+| 怎么算做完了？ | 测试、验证脚本、Stop hook、评估集 | 模型说“已修复”就结束，测试其实还红着 |
+
+把这些职责画成层，就是一个 harness 的解剖图。点每一层看它负责什么，以及在 Claude Code 和 Hermes Agent 里分别对应什么。
+
+<HarnessAnatomy />
+
+两个真实的 harness 可以对照着看。Claude Code 的 headless 模式用 `--max-turns` 限制轮数，Agent SDK 用 `maxTurns` 和 `maxBudgetUsd`；上下文接近上限时自动压缩，压缩前后各有一个 hook 事件。Hermes Agent 的 `run_conversation()` 里就是一个 `while api_call_count < max_iterations` 的循环，`max_iterations` 默认 90，另有一个迭代预算对象在每一轮递减。两个项目的名字不同，结构一样。
+
+## What grows, and what stops it
+
+循环有三个会“失控”的量，对应三种刹车：
+
+```text
+量            失控的样子                      刹车
+──────────────────────────────────────────────────────────────
+上下文长度     工具输出堆到窗口上限             压缩：把旧消息换成摘要；
+                                                subagent：别让大输出进主上下文
+轮数          反复重试、来回修改同一个文件      max_turns / 迭代预算
+费用与时间     无人值守时跑一夜                 费用上限、超时、升级给人
+```
+
+其中压缩最值得单独记一笔：它是有损的。被摘要掉的那段工具输出，模型以后再也看不到原文。所以 Claude Code 在压缩后会重新读一遍项目根目录的 CLAUDE.md，而一个写得好的 harness 会在压缩前把要点落盘（第四篇的 PreCompact hook）。
+
+## Trade-offs
+
+- **自治程度与可控性是同一个旋钮的两端。** 循环跑得越久、越少打断，能完成的任务越大，出错的半径也越大。后面三篇笔记讲的权限、验证、预算，全是在这个旋钮上找位置。
+- **上下文是最贵的资源。** 每一轮都要把整个消息列表重新发给模型，所以第 20 轮的成本不是第 1 轮的 20 倍，而是更多。设计 harness 时“什么该进主上下文”是第一个要回答的问题。
+- **循环本身很简单，复杂度全在 harness。** 这是好消息：你可以一层一层加，每一层都能单独理解和测试。
+
+## Key ideas to remember
+
+1. agent = 模型 + 工具 + while 循环；循环之外的一切是 harness。
+2. 模型只产生 `tool_use`，执行永远在 harness 里，所以 harness 有机会说不。
+3. 循环默认在模型“不再调用工具”时停止，这等于信了模型的“做完了”。
+4. 上下文只增不减，工具输出是主要增长来源；压缩是有损的。
+5. 轮数、费用、时间是循环唯一的硬刹车。
+
+## Related notes
+
+- [工具调用、权限与 Hook](/notes/ai-infra/agent-harness/tools-permissions-hooks/)：闸门那一层展开讲。
+- [Subagent、Skill 与 MCP](/notes/ai-infra/agent-harness/subagents-skills-mcp/)：怎样加能力而不把上下文塞爆。
+- [Goal、停止条件与设计自己的 Harness](/notes/ai-infra/agent-harness/goals-and-harness-design/)：怎样不信模型的“做完了”。
+
+## Further reading
+
+- [Claude Agent SDK: The agent loop](https://code.claude.com/docs/en/agent-sdk/agent-loop)
+- [Anthropic, *Building effective agents*](https://www.anthropic.com/engineering/building-effective-agents)
+- [Hermes Agent: Architecture](https://hermes-agent.nousresearch.com/docs/developer-guide/architecture)

@@ -1,0 +1,124 @@
+import GoalLoopSim from "@/components/visualization/agent-harness/GoalLoopSim";
+import HarnessDesigner from "@/components/visualization/agent-harness/HarnessDesigner";
+
+# Goal、停止条件与设计自己的 Harness
+
+前三篇是零件：循环、闸门、三种扩展。这篇讲怎么装。起点是第一篇留下的那个问题：循环在模型“不再调用工具”时停止，也就是说 harness 默认相信模型的“做完了”。一个好的 harness 不信这句话，它有自己的“做完了”的定义，这就是 **goal**。
+
+## What is a goal in a harness?
+
+循环有三种停法：
+
+```text
+停法          谁说了算        例子
+────────────────────────────────────────────────────────────────
+模型自己停    模型            回复里没有 tool_use
+预算停        harness 的计数  max_turns 到了、费用到了、超时
+验证停        harness 的检查  测试跑过了、脚本返回 0、评估模型说“满足”
+```
+
+前两种任何 harness 都有，第三种是设计出来的。它要求你在写任务之前先回答：**怎么判定这个任务完成了，而且判定不能由模型自己做？** 对代码任务，答案通常是测试和构建；对数据任务，是校验脚本；对写作任务，是“每条结论有出处”这种可以抽查的性质；对运维任务，是监控指标。写不出这个判定，就只能信模型，那和没有闸门是一样的。
+
+## How does a verification gate work?
+
+Claude Code 的 Stop hook 在模型想停下的那一刻运行。脚本可以说“不行，继续”：
+
+```bash
+#!/usr/bin/env bash
+# verify-done.sh — Stop hook
+input=$(cat)
+# 已经是被 Stop hook 推回来的那一轮，就别再无限推了
+if [ "$(echo "$input" | jq -r .stop_hook_active)" = "true" ]; then exit 0; fi
+
+if ! npm test --silent >/tmp/test.log 2>&1; then
+  jq -n --arg r "测试未通过：$(tail -n 5 /tmp/test.log)" '{"decision":"block","reason":$r}'
+  exit 0
+fi
+if ! npm run lint --silent >/tmp/lint.log 2>&1; then
+  jq -n --arg r "lint 有错误：$(tail -n 5 /tmp/lint.log)" '{"decision":"block","reason":$r}'
+  exit 0
+fi
+exit 0   # 什么都不输出 = 放行
+```
+
+返回 `decision: block` 时 `reason` 是必填的，它会作为新的输入交给模型，所以要写成模型能据此行动的样子：失败的测试名、错误的那几行，而不是一句“没过”。为了不陷入死循环，Claude Code 对连续的 block 有上限：连续 8 次没有任何工具调用的推回之后，下一次 block 会被忽略。这个上限的意义是，一个永远过不了的检查不该把预算烧光；触发了就该让人来看。
+
+另一种验证器不跑命令，而是让一个小模型读 transcript 判断条件是否满足，这就是 `/goal`：
+
+```text
+/goal 所有测试通过，且 lint 没有错误
+```
+
+每一轮结束时评估器返回“满足”“尚未满足”或“不可能”，尚未满足就继续。它灵活，什么条件都能写；但它**看不见没发生的事**，如果 transcript 里只有模型说“lint 也过了”而没有 lint 的输出，它可能就信了。命令验证器不会被这样骗，但它要求你有一个可运行的检查。下面的模拟把两种验证器和“没有闸门”放在一起比较。
+
+<GoalLoopSim />
+
+验证不一定要等到 Stop 才做。PostToolUse hook 在每次 Edit 之后跑类型检查，是把验证前移到循环内部：错误在它产生的那一轮就被发现，成本最低。Stop hook 是最后的闸门，不是唯一的。
+
+## How to design a harness for a task
+
+设计一个 harness，不要从“用什么模型”开始，先回答三个问题：
+
+1. **有没有人在场？** 有，就可以用确认（`default`、ask 规则）；没有，就必须把所有决定写成规则（`dontAsk` + 精确 allow），或者把环境隔离到可以 `bypassPermissions`。
+2. **动作可逆吗？** 改一个工作区里的文件可逆（git 在），推到生产分支、删数据、发邮件不可逆。不可逆的动作要么 ask，要么 deny。
+3. **输入可信吗？** 模型会读网页、issue、日志、别人的 PR 吗？会，就要假设其中有恶意指令，缩小它能做的事的集合，并且关掉不需要的网络。
+
+三个答案基本决定了模式和规则。剩下的旋钮按一张清单过一遍：
+
+```text
+Goal / done    怎么判定完成？由谁判定？
+上下文          每轮都要知道的放 CLAUDE.md；流程放 skill；大输入交给 subagent
+工具集          最小集合；不需要的不给，尤其是网络和写入
+权限模式        三问的答案
+规则            allow 放行日常；ask 留给不可逆；deny 兜底危险
+Hooks           PreToolUse 硬约束；PostToolUse 前移验证；Stop 最后闸门；PreCompact 落盘
+Subagents       只读、并行、可隔离的子任务
+Skills          会反复用的流程
+MCP             要操作的外部系统，只开必要的工具
+预算            轮数、费用、时间；触顶后升级给人
+验证            一组样本任务做回归，改 prompt 或换模型时能看出变化
+```
+
+选一个任务原型，看每个旋钮该拧到哪里，然后试着拧错几个。
+
+<HarnessDesigner />
+
+## A worked example: the harness that wrote these notes
+
+这组笔记本身就是最后一个原型跑出来的。它的 harness 长这样：
+
+- **上下文**：仓库的 AGENTS.md 和设计文档说明了站点的风格和约束；已有的三篇笔记作为格式范例。
+- **工具与权限**：`acceptEdits` 改文件不问；`npm run build` 这类命令预先放行；`git push` 要确认；`.env` 不许读。
+- **扩展**：一个只读的子代理去对照 Claude Code 官方文档核对本篇和前几篇里的每一条事实（权限求值顺序、hook 退出码、subagent 的嵌套层数、MCP 的输出上限），把修正带回来；一个 dataviz skill 规定了图里的配色和图形规范。
+- **验证**：类型检查、lint、静态构建三个闸门都过了才算写完；部署后逐个 URL 请求确认线上可达。
+- **预算**：一篇带可视化的笔记要几十次调用，所以轮数上限放得宽，靠验证闸门而不是靠轮数来收口。
+
+它也有明显的弱点：事实核对子代理只核对了它被告知要核对的说法，没被列出的说法就靠模型自己；可视化“看起来对”和“真的对”之间的差距，最后还是要人打开页面看。harness 能把这类差距缩小，缩不到零。
+
+## Trade-offs
+
+- **验证越硬越可靠，也越贵。** 每次 Edit 都跑完整测试可能让一轮多等一分钟。把快的检查放 PostToolUse，慢的放 Stop。
+- **约束过度，agent 什么也做不了。** 规则写得太窄、预算给得太紧，模型会在反复碰壁中耗尽轮数。先在宽松模式下看它想做什么，再收紧。
+- **评估集是长期资产。** 一组带已知答案的样本任务，是唯一能告诉你“换了模型 / 改了提示之后变好还是变坏”的东西。它的成本在前期，收益在每一次改动。
+- **harness 不替代判断，它把判断固定下来。** 你在规则和 hook 里写的，是你今天对这个任务的理解。任务变了，harness 要跟着改。
+
+## Key ideas to remember
+
+1. 循环有三种停法：模型自己停、预算停、验证停；只有第三种是设计出来的。
+2. Stop hook 用 `decision: block` 把模型推回循环，`reason` 要写成可行动的；连续 block 有上限。
+3. 命令验证器不会被口头声明骗，prompt 验证器灵活但看不见没发生的事。
+4. 设计 harness 先问三件事：有没有人在场、动作可逆吗、输入可信吗。
+5. 能把验证前移就前移：PostToolUse 比 Stop 便宜，Stop 比人工 review 便宜。
+
+## Related notes
+
+- [Agent 的最小循环](/notes/ai-infra/agent-harness/agent-loop/)：默认的停止条件是什么。
+- [工具调用、权限与 Hook](/notes/ai-infra/agent-harness/tools-permissions-hooks/)：Stop hook 和 PreToolUse hook 用的是同一套协议。
+- [Subagent、Skill 与 MCP](/notes/ai-infra/agent-harness/subagents-skills-mcp/)：清单里三种扩展各自的位置。
+
+## Further reading
+
+- [Claude Code: Hooks reference（Stop 事件）](https://code.claude.com/docs/en/hooks)
+- [Claude Code: /goal](https://code.claude.com/docs/en/goal)
+- [Claude Code: Headless mode](https://code.claude.com/docs/en/headless)
+- [Anthropic, *Building effective agents*](https://www.anthropic.com/engineering/building-effective-agents)

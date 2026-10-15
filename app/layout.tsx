@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import NotebookShell from "@/components/layout/NotebookShell";
 import LearningActivity from "@/components/layout/LearningActivity";
 import "./globals.css";
+import "@/styles/visualization.css";
 
 export const metadata: Metadata = {
   title: { default: "RLearning", template: "%s | RLearning" },

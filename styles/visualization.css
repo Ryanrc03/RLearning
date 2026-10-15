@@ -1,0 +1,95 @@
+/* Interactive visualizations embedded in notes. Light theme only, matching globals.css.
+   Series colors follow the dataviz reference palette (slots 1-4) and its fixed status colors. */
+.viz { --v1: #2a78d6; --v2: #eb6834; --v3: #1baf7a; --v4: #eda100; --vgood: #0ca30c; --vwarn: #fab219; --vcrit: #d03b3b; --vline: #e4dfcb; --vfixed: #cfcab4; margin: 24px 0; border: 1px solid #eceadc; border-radius: 8px; background: var(--cream); padding: 18px 20px 16px; font-size: 13px; line-height: 1.6; color: var(--ink); }
+.viz-head { margin-bottom: 14px; }
+.viz-head h4 { margin: 0; font-size: 14px; font-weight: 600; color: #3b4234; }
+.prose .viz p, .viz p { margin: 0; }
+.viz-head p { margin-top: 4px; color: var(--muted); font-size: 12.5px; max-width: 72ch; }
+.prose .viz ul, .viz ul { margin: 0; padding: 0; list-style: none; }
+.viz-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 14px; font-size: 12.5px; }
+.viz-controls label, .viz-check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.viz-controls select, .viz-controls input { font: inherit; }
+.viz-controls select { font-size: 12.5px; padding: 3px 6px; border: 1px solid var(--vline); border-radius: 4px; background: #fff; color: var(--ink); }
+.viz-controls input[type="range"] { width: 120px; accent-color: #3b4234; }
+.viz-controls input[type="checkbox"], .viz-check input[type="checkbox"] { accent-color: #3b4234; }
+.viz-btn { font: inherit; font-size: 12.5px; padding: 5px 13px; border-radius: 999px; border: 1px solid #d9d3bb; background: #fff; color: var(--ink); cursor: pointer; }
+.viz-btn:hover:not(:disabled) { border-color: #b79536; }
+.viz-btn:disabled { opacity: .45; cursor: default; }
+.viz-btn.primary { background: #3b4234; color: #fff; border-color: #3b4234; }
+.viz-btn.is-on { background: var(--yellow); border-color: #d7b64b; }
+.viz-k { color: var(--muted); font-size: 12px; }
+.viz-mono { font-family: "Cascadia Code", Consolas, "Liberation Mono", monospace; font-size: 12px; }
+.viz-grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.viz-grid2.wide-left { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
+.viz-panel { background: #fff; border: 1px solid var(--vline); border-radius: 6px; padding: 12px 14px; min-width: 0; }
+.viz-panel h5 { margin: 0 0 8px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #8e8d78; }
+.viz-narr { margin-top: 14px; padding: 10px 14px; border-left: 3px solid var(--v1); background: #fff; border-radius: 0 6px 6px 0; font-size: 13px; }
+.viz-narr.is-bad { border-left-color: var(--vcrit); }
+.viz-narr.is-good { border-left-color: var(--vgood); }
+.viz-narr.is-warn { border-left-color: var(--v4); }
+.viz svg { display: block; max-width: 100%; height: auto; font-family: inherit; }
+.viz svg .mono { font-family: "Cascadia Code", Consolas, "Liberation Mono", monospace; }
+.viz-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+.viz-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 6px; }
+.prose .viz table, .viz-table { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 1.5; margin: 8px 0 0; }
+.prose .viz th, .prose .viz td, .viz-table th, .viz-table td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--vline); vertical-align: top; }
+.prose .viz th, .viz-table th { font-size: 11px; font-weight: 600; color: #8e8d78; }
+.viz-table td.num, .viz-table th.num { text-align: right; font-family: "Cascadia Code", Consolas, monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.viz-msgs { display: grid; gap: 4px; max-height: 330px; overflow-y: auto; scrollbar-width: thin; }
+.viz-msg { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; padding: 5px 8px; border-radius: 4px; border: 1px solid transparent; font-size: 12px; }
+.viz-msg.is-new { border-color: var(--v1); background: #eef5fd; }
+.viz-msg .role { font-size: 10px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.viz-msg .tok { font-family: "Cascadia Code", Consolas, monospace; font-size: 11px; color: var(--muted); white-space: nowrap; }
+.viz-stack { display: flex; height: 14px; border-radius: 4px; overflow: hidden; background: #efede4; }
+.viz-stack span { display: block; height: 100%; }
+.viz-stack span + span { margin-left: 2px; }
+.viz-foot { margin-top: 12px; color: var(--muted); font-size: 12px; }
+.viz-stages { display: grid; gap: 6px; }
+.viz-stage { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; align-items: start; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--vline); background: #fff; }
+.viz-stage .dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #c9c4ad; margin-top: 3px; background: #fff; }
+.viz-stage.is-pass .dot { background: var(--vgood); border-color: var(--vgood); }
+.viz-stage.is-block .dot { background: var(--vcrit); border-color: var(--vcrit); }
+.viz-stage.is-ask .dot { background: var(--v4); border-color: var(--v4); }
+.viz-stage.is-skip { opacity: .55; }
+.viz-stage.is-current { border-color: var(--v1); box-shadow: 0 0 0 1px var(--v1); }
+.viz-stage b { font-weight: 600; }
+.viz-stage small { display: block; color: var(--muted); font-size: 11.5px; }
+.viz-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.viz-chip { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid #d9d3bb; background: #fff; cursor: pointer; color: var(--ink); }
+.viz-chip.is-on { background: #3b4234; color: #fff; border-color: #3b4234; }
+.viz-chip.mono { font-family: "Cascadia Code", Consolas, monospace; font-size: 11.5px; }
+.viz-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.viz-card { background: #fff; border: 1px solid var(--vline); border-radius: 6px; padding: 10px 12px; }
+.viz-card.is-changed { border-color: var(--v4); }
+.viz-card h6 { margin: 0 0 4px; font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: #8e8d78; }
+.viz-card p { font-size: 12.5px; }
+.viz-card .why { color: var(--muted); font-size: 11.5px; margin-top: 4px; }
+.viz-layers { display: grid; gap: 6px; }
+.viz-layer { display: block; width: 100%; text-align: left; font: inherit; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--vline); background: #fff; color: var(--ink); cursor: pointer; }
+.viz-layer:hover { border-color: #b79536; }
+.viz-layer.is-on { border-color: var(--v1); box-shadow: 0 0 0 1px var(--v1); }
+.viz-layer b { display: block; font-size: 13px; }
+.viz-layer small { color: var(--muted); font-size: 11.5px; }
+.viz-endcap { text-align: center; padding: 8px 12px; border-radius: 6px; font-size: 12.5px; }
+.viz-endcap.user { background: #fdf9e9; border: 1px solid #ddc776; }
+.viz-endcap.model { background: #3b4234; color: #fff; }
+.viz-arrow { text-align: center; color: var(--muted); font-size: 12px; line-height: 1.2; padding: 2px 0; }
+.viz-turns { display: grid; gap: 8px; }
+.viz-turn { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 10px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--vline); background: #fff; }
+.viz-turn.is-dim { opacity: .4; }
+.viz-turn .no { font-family: "Cascadia Code", Consolas, monospace; font-size: 11.5px; color: var(--muted); }
+.viz-turn .verdict { margin-top: 4px; font-size: 12px; }
+.viz-turn .verdict.is-block { color: var(--vcrit); }
+.viz-turn .verdict.is-good { color: #087a08; }
+.viz-turn .verdict.is-warn { color: #8a6d00; }
+.viz-bars { display: grid; gap: 8px; }
+.viz-bar-row { display: grid; grid-template-columns: 190px minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 12px; }
+.viz-bar-label { text-align: right; }
+.viz-bar-track { height: 22px; background: #efede4; border-radius: 4px; overflow: hidden; }
+.viz-bar-track span { display: block; height: 100%; border-radius: 4px; }
+.viz-bar-val { font-family: "Cascadia Code", Consolas, monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.viz-scroll { overflow-x: auto; scrollbar-width: thin; }
+.viz-scroll svg { min-width: 480px; }
+@media (max-width: 700px) { .viz-grid2, .viz-grid2.wide-left { grid-template-columns: 1fr; } }
+@media (max-width: 580px) { .viz-bar-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 2px; } .viz-bar-label { grid-column: 1 / -1; text-align: left; color: var(--muted); } }
+@media (max-width: 580px) { .viz { padding: 14px 13px 12px; border-radius: 6px; } .viz-msg { grid-template-columns: 52px minmax(0, 1fr) auto; } .viz-controls input[type="range"] { width: 96px; } }
