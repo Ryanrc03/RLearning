@@ -1,0 +1,78 @@
+import AggregateVsProjectFirstDiagram from "@/components/visualization/gpu/AggregateVsProjectFirstDiagram";
+import GcnModelFigure from "@/components/visualization/gpu/GcnModelFigure";
+import MeasuredBars from "@/components/visualization/gpu/MeasuredBars";
+
+# Aggregate-first vs Project-first
+
+## 一句话
+
+**GCN 的一层是 Â·H·W：aggregate-first 按 (ÂH)W 先在图上聚合邻居再降维，project-first 按 Â(HW) 先降维再聚合；两种顺序结果相同，但稀疏乘法要处理的宽度不同。**
+
+输入特征维度远大于 hidden 时，先降维能让最慢的稀疏乘法只处理很窄的矩阵；两者接近时，换顺序就省不了多少。
+
+## 一张图
+
+<AggregateVsProjectFirstDiagram />
+
+图里只有两条规律：
+
+| | aggregate-first | project-first |
+| --- | --- | --- |
+| 输入特征维度变大 | SpMM 跟着变宽变慢 | SpMM 宽度不变 |
+| hidden 变大 | SpMM 宽度不变 | SpMM 变宽，优势缩小 |
+
+所以换顺序**不改变结果和 GEMM 的计算量**，只改变**稀疏乘法要搬多少数据**。
+
+## 一个真实的例子：课程实验 exp7 的 GCN
+
+### 实验想做什么
+
+exp7 用 cuSPARSE 和 cuBLAS 搭一个两层 GCN 的推理过程，比较同一个公式的两种计算顺序哪个快。
+
+- **任务**：在两个论文引用网络上做节点分类：Cora（2,708 篇论文，每篇 1,433 维特征，7 个主题）和 Citeseer（3,312 篇论文，3,703 维特征，6 个主题）。
+- **对比**：(ÂH)W（先聚合）对比 Â(HW)（先降维），就是上面那张图里的两种顺序。
+- **改变的变量**：数据集（输入维度 1,433 和 3,703）和 hidden 维度（64、128、256），一共 6 种组合。
+
+### 模型是什么
+
+<GcnModelFigure />
+
+一层 GCN 做两件事：先让每个节点把自己和邻居的特征平均一下（乘稀疏矩阵 Â，用 cuSPARSE 的 SpMM），再乘一个权重矩阵 W 把特征压到 hidden 维（用 cuBLAS 的 GEMM）。矩阵乘满足结合律，所以这两步谁先谁后，算出来的结果完全一样。
+
+### 两边怎么做
+
+上面「一张图」里画的就是两种顺序。先聚合时，SpMM 要处理的是原始特征，Cora 上宽 1,433 列；先降维时，SpMM 处理的是已经乘过 W 的矩阵，只有 hidden 那么宽，比如 64 列。
+
+### 你会观察到什么
+
+1. **Â(HW) 在 6 种配置里全部更快**，快 1.5–3.4 倍，而且两种顺序的预测结果完全一样。
+2. **Citeseer 上快得更多。** 同样 hidden = 64，Cora 快 2.14 倍，Citeseer 快 3.40 倍。
+3. **hidden 越大，加速越小。** Citeseer 从 hidden 64 的 3.40 倍降到 hidden 256 的 1.77 倍。
+
+<MeasuredBars
+  title="exp7 实测：两种顺序的吞吐"
+  description="课程 Slurm GPU 节点，两层 GCN 推理，预热 10 次后取 100 次的平均。吞吐是每秒处理的边数（越长越好）。"
+  series={[{ name: "(ÂH)W 先聚合", color: "#2a78d6" }, { name: "Â(HW) 先降维", color: "#eb6834" }]}
+  unit="百万条边/秒"
+  decimals={1}
+  groups={[
+    { label: "Cora · hidden 64", values: [48.6, 104.0] },
+    { label: "Cora · hidden 128", values: [40.8, 73.6] },
+    { label: "Cora · hidden 256", values: [31.6, 47.9] },
+    { label: "Citeseer · hidden 64", values: [18.4, 62.5] },
+    { label: "Citeseer · hidden 128", values: [16.2, 38.5] },
+    { label: "Citeseer · hidden 256", values: [12.4, 21.9] },
+  ]}
+/>
+
+### 为什么会这样
+
+- **先降维总是更快**，因为两种顺序的 GEMM 一样大，差别全在 SpMM：先降维让 SpMM 处理的矩阵窄了几十倍。SpMM 本身是 memory-bound 的（第 2 页），要搬的数据少了，时间就少了。
+- **输入维度越大，收益越大。** 输入维度和 hidden 之比，就是先降维给 SpMM 压缩的倍数。Citeseer 是 3,703 ÷ 64 ≈ 58 倍，Cora 是 1,433 ÷ 64 ≈ 22 倍，所以 Citeseer 上快得更多。这就是图里「输入特征维度变大」的情况。
+- **hidden 越大，收益越小**，因为压缩倍数变小了：hidden 从 64 变成 256，压缩倍数缩小到原来的四分之一。这就是图里「hidden 变大」的情况。
+
+实测的加速比没有压缩倍数那么大，因为总时间里还有 GEMM、ReLU 和 kernel 启动这些不随顺序变化的部分。
+
+## 再往下看
+
+正确性检查、权重训练和完整数据，见 [exp7 的实验报告](https://github.com/Ryanrc03/DeepLearning-System-Optimze/blob/main/exp7_gcn/report.md)。

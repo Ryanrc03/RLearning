@@ -1,0 +1,81 @@
+import SeparateVsFusedDiagram from "@/components/visualization/gpu/SeparateVsFusedDiagram";
+import MlpStructureFigure from "@/components/visualization/gpu/MlpStructureFigure";
+import MlpLayerKernelsFigure from "@/components/visualization/gpu/MlpLayerKernelsFigure";
+import MeasuredBars from "@/components/visualization/gpu/MeasuredBars";
+
+# Separate Kernels vs Fused Kernel
+
+## 一句话
+
+**separate kernels 是每一步算完都把结果写回显存，再由下一个 kernel 读出来；fused kernel 是把几步合进一个 kernel，中间结果留在寄存器里一口气算完。**
+
+几步都是逐元素的小操作，或者矩阵本身很小时，合并的收益最明显；主计算占绝大部分时间时，合并只能省下一点零头。
+
+## 一张图
+
+<SeparateVsFusedDiagram />
+
+图里只有两条规律：
+
+| | separate kernels | fused kernel |
+| --- | --- | --- |
+| 矩阵变小 | 启动和往返的占比变大 | 省掉的比例变大 |
+| 矩阵变大 | 主计算占满时间线 | 省下的时间几乎可以忽略 |
+
+所以 fusion 用**更复杂、更难复用的 kernel**，换来**更少的显存往返和启动次数**。
+
+## 一个真实的例子：课程实验 exp2 的 MLP 推理
+
+### 实验想做什么
+
+exp2 用 cuBLAS 搭了一个小的推理引擎，比较「每一步一个 kernel」和「把后两步合成一个 kernel」哪个快、快多少。
+
+- **任务**：一个全连接网络的前向计算（只推理，不训练），在 NVIDIA L40S 上运行，开启 TF32。
+- **对比**：baseline（GEMM、bias、ReLU 三个 kernel）对比 fused（GEMM 加一个合并了 bias 和 ReLU 的 kernel）。
+- **改变的变量**：网络宽度和 batch（64、512），一共 7 种组合。「512 宽」表示三层都是 512；「1024–2048」表示输入和输出 1024、中间层 2048。
+
+### 模型是什么
+
+<MlpStructureFigure />
+
+### 两边怎么做
+
+<MlpLayerKernelsFigure />
+
+每一层最重的是第 ① 步矩阵乘，交给 cuBLAS。后两步都是逐元素操作，每个数只做一次加法或比较，非常轻。baseline 为这两个轻操作各启动一个 kernel，中间结果 Y 每次都要写回显存、再读出来；fused 把它们合并，少启动一次 kernel，Y 也少进出一次显存。
+
+### 你会观察到什么
+
+1. **fused 在 7 种配置里全部更快**，快 1.08–1.19 倍。
+2. **网络越窄，快得越多。** 512 宽的网络快约 1.18 倍，2048 宽的只快约 1.08 倍。
+3. **batch 对加速比几乎没有影响。** 同一个网络，batch 64 和 batch 512 的加速比差不多。
+
+<MeasuredBars
+  title="exp2 实测：一次前向的耗时"
+  description="L40S，TF32。每组两根条，上面是 baseline，下面是 fused；越短越好。“快几倍”是 baseline 时间除以 fused 时间。"
+  series={[{ name: "baseline（三个 kernel）", color: "#2a78d6" }, { name: "fused（两个 kernel）", color: "#eb6834" }]}
+  unit="ms"
+  decimals={3}
+  better="lower"
+  groups={[
+    { label: "512 宽 · B64", values: [0.020, 0.017] },
+    { label: "512 宽 · B512", values: [0.025, 0.021] },
+    { label: "1024–2048 · B64", values: [0.030, 0.026] },
+    { label: "1024–2048 · B512", values: [0.074, 0.066] },
+    { label: "1024–4096 · B512", values: [0.127, 0.116] },
+    { label: "2048 宽 · B64", values: [0.049, 0.045] },
+    { label: "2048 宽 · B512", values: [0.109, 0.101] },
+  ]}
+/>
+
+### 为什么会这样
+
+- **fused 总是更快**，因为它每层少启动一个 kernel，中间结果也少在显存里进出一次，这两样都是纯开销。
+- **网络越宽，收益越小。** 矩阵乘的计算量是 B × n × n，逐元素操作的计算量只有 B × n，两者之比是 n。网络宽度从 512 变成 2048，矩阵乘相对变重了 4 倍，fusion 能省下的那部分在总时间里的占比就小了。这就是图里「矩阵变大」的情况。
+- **batch 不影响加速比**，因为 B 同时出现在矩阵乘和逐元素操作的计算量里，比值里被约掉了。
+
+所以 fusion 最值钱的地方，是那些逐元素操作相对主计算不算小的位置：窄的层、轻的模型，以及很多个逐元素操作连在一起的时候。
+
+## 再往下看
+
+各配置的吞吐和行主序、列主序的处理细节，见 [exp2 的实验报告](https://github.com/Ryanrc03/DeepLearning-System-Optimze/blob/main/exp2_mlp/report.md)。

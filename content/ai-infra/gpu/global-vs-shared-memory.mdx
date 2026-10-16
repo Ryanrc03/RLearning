@@ -1,0 +1,83 @@
+import GlobalVsSharedMemoryDiagram from "@/components/visualization/gpu/GlobalVsSharedMemoryDiagram";
+import ConvLayerFigure from "@/components/visualization/gpu/ConvLayerFigure";
+import ConvKernelsFigure from "@/components/visualization/gpu/ConvKernelsFigure";
+import MeasuredBars from "@/components/visualization/gpu/MeasuredBars";
+
+# Global Memory vs Shared Memory
+
+## 一句话
+
+**global memory 是所有 thread 都能读的显存，容量大但远而慢；shared memory 是一个 block 内部共用的片上小内存，容量小但近而快。**
+
+相邻 thread 要的数据大量重叠时，先让 block 把这块数据搬进 shared memory，大家再反复从片上读，这个做法叫 tiling。数据互不重叠时，tiling 帮不上什么忙。
+
+## 一张图
+
+<GlobalVsSharedMemoryDiagram />
+
+图里只有两条规律：
+
+| | 直接读 global memory | 先搬进 shared memory |
+| --- | --- | --- |
+| 相邻 thread 要同一块数据 | 每个 thread 各读一遍 | 只从显存读一遍，片上复用 |
+| 卷积核变大 | 显存读取按 k² 增长 | 显存读取增长得慢得多 |
+
+所以 tiling 用**一点片上空间和同步开销**，换来**少得多的显存流量**。
+
+## 一个真实的例子：课程实验 exp5 的 2D 卷积
+
+### 实验想做什么
+
+exp5 自己手写 CUDA kernel 实现卷积层，比较「直接读显存」和「先搬进 shared memory」两种写法，看后者能快多少。
+
+- **任务**：一层 3×3 卷积，输入 32 个通道，在 V100 上运行。
+- **对比**：baseline（每个 thread 直接从显存读）对比 tiled（先把输入块搬进 shared memory）。tiled 前后写了两版，第一版只加了 shared memory，最终版又加了两处复用。
+- **改变的变量**：图像尺寸（256、512、1024）和输出通道数 Cout（32、64、128），一共 9 种组合。
+
+### 模型是什么
+
+<ConvLayerFigure />
+
+卷积核每停一个位置，要把 3×3×32 = 288 个输入和权重逐个相乘再加起来。关键在于相邻两个输出点要读的 3×3 块大部分是重叠的，所以同一个输入会被好几个输出点读到。
+
+### 三个版本怎么做
+
+<ConvKernelsFigure />
+
+### 你会观察到什么
+
+1. **baseline 的吞吐一直停在约 740 GFLOP/s**，不管图像多大、输出通道多少都差不多。
+2. **第一版 tiled 几乎没变快**，只有 0.96–1.10 倍。只把数据搬进 shared memory 是不够的。
+3. **最终版快 2.6–4.3 倍**，而且图越大、输出通道越多，快得越多，最高达到 3,208 GFLOP/s。
+
+<MeasuredBars
+  title="exp5 实测：三个版本的吞吐"
+  description="V100，输入 32 通道，3×3 卷积核。每组三根条，从上到下是 baseline、第一版、最终版；“快几倍”是最终版对 baseline。"
+  footnote="baseline 和最终版来自报告里的最终扫描；第一版来自更早的一次扫描（报告里描述过这个版本），它和同一次运行的 baseline 相比是 0.96–1.10 倍。"
+  series={[{ name: "baseline", color: "#2a78d6" }, { name: "第一版 tiled（只加 shared）", color: "#eb6834" }, { name: "最终版 tiled", color: "#1baf7a" }]}
+  unit="GFLOP/s"
+  groups={[
+    { label: "256² · Cout 32", values: [727.3, 709.3, 1860.6] },
+    { label: "256² · Cout 64", values: [745.2, 749.2, 2286.1] },
+    { label: "256² · Cout 128", values: [759.5, 766.9, 2550.6] },
+    { label: "512² · Cout 32", values: [723.2, 757.9, 2531.4] },
+    { label: "512² · Cout 64", values: [734.9, 767.5, 2738.6] },
+    { label: "512² · Cout 128", values: [741.0, 768.9, 2843.4] },
+    { label: "1024² · Cout 32", values: [713.4, 759.7, 2834.8] },
+    { label: "1024² · Cout 64", values: [714.2, 760.4, 3070.0] },
+    { label: "1024² · Cout 128", values: [748.2, 827.3, 3207.7] },
+  ]}
+/>
+
+### 为什么会这样
+
+- **baseline 卡在显存上。** 相邻 thread 反复读重叠的输入，带宽被重复的数据占满，所以吞吐不随问题规模变化。
+- **第一版几乎没变快**，有两个原因。第一，baseline 那些重复读取有一部分已经被 GPU 的 L1/L2 cache 接住了，shared memory 只省下剩下的那一部分。第二，每个 thread 只算 1 个输出点，每算完一个通道都要等全 block 同步一次，这个开销把省下的时间吃掉了。
+- **最终版快在复用次数多。** 每个 thread 算 2×2 个点，同一块 4×4 输入被 4 个点共用；一个 block 同时算 4 个输出通道，搬进 shared memory 的同一块输入又被 4 个卷积核共用。每从显存搬 1 个字节，能做的计算多了很多倍，正是上一页说的算术强度变高了。
+- **图越大、通道越多越快**，是因为工作量足够把 GPU 喂饱，搬数据和同步的固定开销被摊得更薄。
+
+所以这个实验的结论比「用 shared memory 就快」更具体：shared memory 只是提供了复用的地方，真正的收益来自让每份数据被用足够多次。
+
+## 再往下看
+
+各版本的实现细节，见 [exp5 的实验报告](https://github.com/Ryanrc03/DeepLearning-System-Optimze/blob/main/exp5_conv/report.md)。

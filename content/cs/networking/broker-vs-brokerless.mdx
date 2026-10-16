@@ -1,0 +1,30 @@
+import BrokerVsBrokerlessDiagram from "@/components/visualization/net/BrokerVsBrokerlessDiagram";
+
+# Broker vs Brokerless
+
+## 一句话
+
+**broker 是 pub/sub 里的中间人，消息先存到它的日志里再分发，晚来的能补读、读慢了也不丢；brokerless 是发送方直接送到订阅者手里，最快，但没人存，错过就没了。**
+
+云端的日志、训练数据、订单流用 broker（Kafka）。车内传感器到感知、感知到规划这种“只要最新一帧”的流用 brokerless（ROS2 的 DDS、ZeroMQ）。
+
+## 一张图
+
+<BrokerVsBrokerlessDiagram />
+
+| | broker（Kafka） | brokerless（DDS、ZeroMQ） |
+| --- | --- | --- |
+| 订阅者晚到 10 秒 | 从日志里补读，想读多久前都行 | 只能从下一条开始 |
+| 每秒 1 万条 | 多一跳一落盘，毫秒级 | 直达，几十微秒 |
+
+所以 broker 换来的是**可回放、扛吞吐**，brokerless 换来的是**延迟最低**。有没有中间人、要不要持久化，是选消息系统时第一个要回答的问题。
+
+## 一个真实的例子：微信消息和对讲机
+
+微信消息是有 broker 的：你手机关机一天，开机后昨天的消息全补回来，因为它们一直存在腾讯的服务器上。服务器就是 broker，代价是每条消息多走一跳。
+
+对讲机是 brokerless 的：对方说话时你没开机，那句话就没了，没有任何地方存它。但一按就说、一说就到，没有中间环节。车上传感器流要的正是对讲机，云端数据管道要的是微信。
+
+## 再往下看
+
+一条数据从车上到云端会经过以上每一种方式，深入的权衡看 [进程、线程、协程，以及 CUDA 里的“线程”](/notes/cs/os/processes-threads-coroutines/) 这一类长文；网络部分的长文还没写。

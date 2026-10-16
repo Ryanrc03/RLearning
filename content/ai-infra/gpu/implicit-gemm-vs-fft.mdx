@@ -1,0 +1,86 @@
+import ImplicitGemmVsFftDiagram from "@/components/visualization/gpu/ImplicitGemmVsFftDiagram";
+import LenetModelFigure from "@/components/visualization/gpu/LenetModelFigure";
+import MeasuredBars from "@/components/visualization/gpu/MeasuredBars";
+
+# Implicit GEMM vs FFT
+
+## 一句话
+
+**implicit GEMM 和 FFT 是 cuDNN 计算卷积的两种算法：implicit GEMM 边读输入边按矩阵乘的方式直接算，不需要额外显存；FFT 先把数据变换到频域逐点相乘再变回来，要占用一块 workspace。**
+
+卷积核小、显存紧张时选 implicit GEMM；卷积核很大时，FFT 节省的计算量才能抵过变换的开销和额外的显存。
+
+## 一张图
+
+<ImplicitGemmVsFftDiagram />
+
+图里只有两条规律：
+
+| | implicit GEMM | FFT |
+| --- | --- | --- |
+| batch 翻倍 | workspace 仍为 0 | workspace 跟着翻倍 |
+| 卷积核变大 | 计算量按 k² 增长 | 计算量几乎不变 |
+
+所以 FFT 是用**额外显存**换**大卷积核下更少的计算**。
+
+## 一个真实的例子：课程实验 exp6 的 LeNet
+
+### 实验想做什么
+
+exp6 用 cuDNN 和 cuBLAS 搭出 LeNet-5 的推理过程，然后让 cuDNN 用不同的算法算卷积，比较速度和额外显存。
+
+- **任务**：LeNet-5 前向推理，输入是 32×32 的灰度图，在 V100 上运行。
+- **对比**：卷积层用 implicit GEMM 对比 FFT，就是上面那张图里的两种算法。实验还测了第三种 implicit precomp GEMM（implicit GEMM 的变体），它在每个 batch 下也都比 implicit GEMM 慢，这里不展开。
+- **改变的变量**：batch（32、64、128）。
+
+### 模型是什么
+
+<LenetModelFigure />
+
+### 两边怎么做
+
+两个卷积层的卷积核都是 5×5，换算法只改变这两层怎么算，结果完全一样（和 CPU 参考实现的误差在 1e-8 量级）。implicit GEMM 直接从输入里取数，按矩阵乘的方式累加，不需要中间缓冲；FFT 要先把输入和卷积核都变换到频域，这些中间结果得放在 workspace 里，batch 越大，要同时变换的图越多，workspace 越大。
+
+### 你会观察到什么
+
+1. **implicit GEMM 的 workspace 始终是 0**；FFT 的 workspace 随 batch 线性增长，从 1.7 MB 涨到 6.7 MB。
+2. **implicit GEMM 在每个 batch 下都更快**，batch 128 时 872.85 GFLOP/s，FFT 只有 616.52 GFLOP/s。
+3. **FFT 多占了显存，却没有换来速度。**
+
+<MeasuredBars
+  title="exp6 实测：卷积层需要的额外显存（workspace）"
+  description="V100，cuDNN 报告的卷积 workspace，越短越好。implicit GEMM 一直是 0，所以看不到条。"
+  series={[{ name: "FFT", color: "#eb6834" }, { name: "implicit GEMM", color: "#2a78d6" }]}
+  unit="MB"
+  decimals={2}
+  better="lower"
+  showRatio={false}
+  groups={[
+    { label: "batch 32", values: [1.67, 0] },
+    { label: "batch 64", values: [3.34, 0] },
+    { label: "batch 128", values: [6.69, 0] },
+  ]}
+/>
+
+<MeasuredBars
+  title="exp6 实测：整个网络的吞吐"
+  description="V100，fused 版本（bias 和激活已合并），越长越好。“快几倍”是 implicit GEMM 对 FFT。"
+  series={[{ name: "FFT", color: "#eb6834" }, { name: "implicit GEMM", color: "#2a78d6" }]}
+  unit="GFLOP/s"
+  decimals={1}
+  groups={[
+    { label: "batch 32", values: [214.9, 328.3] },
+    { label: "batch 64", values: [485.7, 585.0] },
+    { label: "batch 128", values: [616.5, 872.9] },
+  ]}
+/>
+
+### 为什么会这样
+
+- **workspace 的差别来自算法本身。** implicit GEMM 边读边算，不需要缓冲；FFT 必须把变换后的数据先存下来，存多少和 batch 成正比。这就是图里「batch 翻倍」的情况。
+- **FFT 没有更快**，因为 LeNet 的卷积核只有 5×5，图也只有 32×32。FFT 省计算的前提是卷积核足够大，让 k² 次乘加变得很贵；5×5 时直接算本来就不贵，变换到频域再变回来的开销反而更大。图里「卷积核变大」的按钮演示的就是 FFT 什么时候才会占优。
+- **所以 cuDNN 才会提供好几种算法**，并且允许程序按卷积的形状、batch 和可用显存挑一个。对 LeNet 这样的小卷积，答案是 implicit GEMM：不占额外显存，还最快。
+
+## 再往下看
+
+三种算法加上 fused 前后的完整对比，见 [exp6 的实验报告](https://github.com/Ryanrc03/DeepLearning-System-Optimze/blob/main/exp6_LeNet/report.md)。

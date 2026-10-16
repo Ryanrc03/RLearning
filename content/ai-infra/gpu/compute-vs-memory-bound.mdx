@@ -1,0 +1,62 @@
+import ComputeVsMemoryBoundDiagram from "@/components/visualization/gpu/ComputeVsMemoryBoundDiagram";
+import ArithmeticIntensityFigure from "@/components/visualization/gpu/ArithmeticIntensityFigure";
+import RooflineSimulator from "@/components/visualization/gpu/RooflineSimulator";
+
+# Compute-bound vs Memory-bound
+
+## 一句话
+
+**compute-bound 的 kernel 卡在算不过来，memory-bound 的 kernel 卡在数据搬不过来；先判断是哪一种，才知道该往哪个方向优化。**
+
+判断的依据是每从显存搬 1 个字节要做几次计算，这个比值叫算术强度。比值低就是 memory-bound，该想办法少搬数据；比值高就是 compute-bound，该想办法让计算单元跑满。
+
+## 一张图
+
+<ComputeVsMemoryBoundDiagram />
+
+图里只有两条规律：
+
+| | memory-bound | compute-bound |
+| --- | --- | --- |
+| 算力翻倍 | 不变 | 变快 |
+| 带宽翻倍 | 变快 | 不变 |
+
+所以优化之前先**诊断**：资源加在不是瓶颈的那一边，完全没有效果。
+
+## 一个模拟实验：数组相加 vs 矩阵乘
+
+### 实验想做什么
+
+在同一块 GPU（NVIDIA L40S）上放两类任务，看它们各自被什么卡住。
+
+- **任务 1：数组相加**，`C[i] = A[i] + B[i]`，就是上一页的那个实验。
+- **任务 2：矩阵乘**，两个 N×N 的矩阵相乘，深度学习里最常见的计算。
+- **改变的变量**：矩阵大小 N，从 64 到 4096。
+
+### 两边怎么做
+
+<ArithmeticIntensityFigure />
+
+数组相加的每个数只用一次就扔掉，所以搬 12 个字节只换来 1 次加法。矩阵乘里，A 的一行要和 B 的每一列都乘一遍，同一个数会被反复用 N 次，所以 N 越大，每个字节换来的计算越多。
+
+### 你会观察到什么
+
+在下面的模拟器里，从左往右依次点各个任务，应该能看到三件事：
+
+1. **数组相加的点在斜线最左下。** 吞吐只有约 72 GFLOP/s，不到峰值算力的千分之一：计算单元几乎一直在等数据。
+2. **矩阵乘的 N 越大，点沿着斜线往右上走。** N=64 和 N=256 仍然在斜线上，吞吐跟着 N 变大而上涨。
+3. **N 到 1024 以后，点碰到平顶。** 它变成了 compute-bound，吞吐停在 91.6 TFLOP/s，N 再大也不会再涨。
+
+<RooflineSimulator />
+
+### 为什么会这样
+
+- **斜线部分**，吞吐等于「每字节能算几次 × 带宽」。带宽是固定的，所以每字节算得越少，吞吐越低。数组相加的比值永远是 1/12，不管数组多长，它都只能待在左下角。这正是上一页 CPU 和 GPU 的差距最后停在带宽之比的原因。
+- **平顶部分**，数据来得够快了，瓶颈变成计算单元本身。这时再加带宽没用，只能靠更强的算力（比如 Tensor Core）。
+- **拐点约在 106 次/字节**，就是峰值算力除以带宽。任务的算术强度在拐点左边就是 memory-bound，在右边就是 compute-bound。
+
+模拟器里的矩阵乘假设每个数只从显存搬一次。朴素的写法做不到这一点，同一个数会被反复从显存读出来，实际的点会往左移、掉回斜线上。怎样让每个数只搬一次，就是下一页 shared memory 和 tiling 要解决的问题。
+
+## 再往下看
+
+课程实验 exp2 在 L40S 上测过一个 MLP 的 batch 扫描，报告里分析了 batch 变大时算术强度怎样升高，见 [exp2 的实验报告](https://github.com/Ryanrc03/DeepLearning-System-Optimze/blob/main/exp2_mlp/report.md)。

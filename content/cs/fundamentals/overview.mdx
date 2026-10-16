@@ -1,0 +1,19 @@
+import SectionMapViz from "@/components/visualization/SectionMapViz";
+
+# CS Fundamentals Overview
+
+## 一句话
+
+**这一章回答一个问题：一台机器怎样同时干很多事。三页分别讲谁在跑（process 和 thread）、等的时候怎么办（coroutine）、数据放在哪（memory hierarchy）。**
+
+每页都是三段：一句话定义，一张能点的对比图，一个你用过的产品当例子。看完每页用自己的话说一遍那句定义，说不出来就再点一遍图。
+
+## 一张图
+
+<SectionMapViz section="fundamentals" />
+
+## 怎么读
+
+按顺序读。第 1 页给出“process 是内存的容器、thread 是执行的单位”这个框架，第 2 页在 thread 下面再分一层，第 3 页换到数据那一侧。三页加起来，就是面试里“一帧数据从驱动到推理经过了什么”的全部词汇。
+
+想深入每个概念的成本和内核机制，去 [Operating Systems](/notes/cs/os/overview/) 那一章。
