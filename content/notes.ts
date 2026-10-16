@@ -253,6 +253,34 @@ export const noteEntries: NoteEntry[] = [
     tags: ["gradient boosting", "XGBoost", "LightGBM", "interactive"],
   },
   {
+    slug: "systems/distributed/core",
+    title: "分布式系统：机器多了，就一定有机器在出事",
+    description:
+      "五节五个演示：网线断了选一致还是选可用，回复丢了怎么安全重试，八张卡怎么凑齐一起启动，一千张卡挂一张从 checkpoint 丢多少，下游慢了攒还是顶回去。最后是那道“一张卡挂了怎么办”。",
+    categoryId: "systems",
+    category: "Systems",
+    section: "Distributed Systems",
+    created: "2026-10-16",
+    updated: "2026-10-16",
+    status: "growing",
+    readingMinutes: 12,
+    tags: ["distributed systems", "CAP", "idempotency", "scheduling", "checkpoint", "backpressure", "interactive"],
+  },
+  {
+    slug: "systems/backend/serverless",
+    title: "Serverless",
+    description:
+      "你只写函数，不管服务器。一次调用的生命周期（冷启动、热实例、回收），一个按流量形状比较常驻机器、容器扩缩和 serverless 成本与延迟的模拟器，以及它在 autonomy infra 里该放在哪。",
+    categoryId: "systems",
+    category: "Systems",
+    section: "Backend Systems",
+    created: "2026-10-16",
+    updated: "2026-10-16",
+    status: "growing",
+    readingMinutes: 9,
+    tags: ["serverless", "FaaS", "cloud", "cost", "interactive"],
+  },
+  {
     slug: "ai-infra/agent-harness/agent-loop",
     title: "Agent 的最小循环",
     description:
