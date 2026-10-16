@@ -1,0 +1,30 @@
+import JsonVsProtobufDiagram from "@/components/visualization/net/JsonVsProtobufDiagram";
+
+# JSON vs Protobuf
+
+## 一句话
+
+**JSON 是人能读的文本，每条消息都带着字段名，机器要逐字符解析；Protobuf 是机器读的二进制，字段只带一个编号，小、快，而且字段改名不影响线上。**
+
+调试接口、前端和浏览器之间用 JSON，看得懂最重要。服务之间每秒几十万条、接口要维护很多年，用 Protobuf。
+
+## 一张图
+
+<JsonVsProtobufDiagram />
+
+| | JSON | Protobuf |
+| --- | --- | --- |
+| 大小和解析 | 52 字节，逐字符扫描 | 15 字节，按编号直接取 |
+| 服务端把字段改名 | 老客户端找不到字段，悄悄出错 | 线上字节不变，谁都不受影响 |
+
+所以 JSON 换来的是**人能看**，Protobuf 换来的是**小、快、接口能演进**。序列化的成本常被低估：消息大了，解析 JSON 可能比网络传输本身还慢。
+
+## 一个真实的例子：微信每条消息的字段名
+
+一条微信消息至少有发送者、内容、时间三个字段。用 JSON，每条消息都要把 sender_id 这 9 个字母原样发一遍，一天几百亿条消息，光字段名就是几百 TB 的流量。用 Protobuf，发送者就是编号 1，一个字节。
+
+而且微信的客户端有几十个版本同时在线。服务端想把字段改个名，JSON 会让老版本当场读不到数据；Protobuf 只认编号，名字只在各自的代码里，改了也没事。
+
+## 再往下看
+
+把 Protobuf 装进 HTTP/2 就是 gRPC，看 [HTTP vs gRPC](/notes/cs/networking/http-vs-grpc/)。

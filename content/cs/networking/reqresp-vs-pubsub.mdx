@@ -1,0 +1,30 @@
+import ReqRespVsPubSubDiagram from "@/components/visualization/net/ReqRespVsPubSubDiagram";
+
+# Request/Response vs Pub/Sub
+
+## 一句话
+
+**request/response 是我问你答，发的人知道收的人是谁、等它回话；pub/sub 是我往一个 topic 喊一声，谁订阅谁听，发的人不知道也不关心有多少人在听。**
+
+“查一下、拿结果”用 request/response。一份数据要给很多人、而且收的人会变，用 pub/sub。
+
+## 一张图
+
+<ReqRespVsPubSubDiagram />
+
+| | request/response | pub/sub |
+| --- | --- | --- |
+| 新加一个消费者 | 改发送方代码，重新部署 | 新模块自己订阅，发送方不动 |
+| 一个消费者崩了 | 发送方卡着等超时，别人也拿不到 | 其他订阅者照常收 |
+
+所以 request/response 换来的是**确定拿到回复**，pub/sub 换来的是**发收双方互不牵连**。
+
+## 一个真实的例子：微信群
+
+你在群里发一条消息，不需要知道群里 200 个人谁在线、谁开了免打扰，发完就完了。新人进群自动能收到，有人退群你也不用改什么。这就是 pub/sub，群就是 topic。
+
+反过来，你问某个人“到了吗”，等他回“到了”，这是 request/response，你明确在等一个人的一个答复。车上感知模块的结果给规划、录制、显示，用的是群发的方式；车上为什么不用 HTTP，答案就在这张图里：HTTP 是一问一答，而传感器数据是一个发、很多人收的流。
+
+## 再往下看
+
+pub/sub 的消息要不要在中间存一下，看 [Broker vs Brokerless](/notes/cs/networking/broker-vs-brokerless/)。

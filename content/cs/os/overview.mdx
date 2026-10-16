@@ -1,0 +1,19 @@
+import SectionMapViz from "@/components/visualization/SectionMapViz";
+
+# Operating Systems Overview
+
+## 一句话
+
+**内核替程序管两件事：谁用 CPU（调度），谁看到哪块内存（虚拟内存）。这一章是 CS Fundamentals 的深入版，讲切换一次多贵、页表怎么翻译、CUDA 的线程为什么不是线程。**
+
+先读 [CS Fundamentals](/notes/cs/fundamentals/overview/) 建立词汇，再来这里看机制。
+
+## 一张图
+
+<SectionMapViz section="os" />
+
+## 怎么读
+
+第 1 页是长文，带两个可以调参数的模拟器：一个比较进程、线程、协程在不同负载下的时间线，一个拆开 CUDA 的 warp。第 2 页目前是一篇种子笔记，会随着学习长出页表和 TLB 的可视化。
+
+这一章还会继续加：CPU 调度算法、文件系统、进程间通信。

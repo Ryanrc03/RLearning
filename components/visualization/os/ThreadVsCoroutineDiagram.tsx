@@ -17,7 +17,6 @@ const AXIS_W = COL_W - AXIS_X - 10;
 const ROW_H = 18;
 const ROWS_Y = 40;
 
-const G = ["A", "B", "C"];
 
 const STATES: Record<Action, { left: Side; right: Side; narr: string; tone?: string }> = {
   none: {

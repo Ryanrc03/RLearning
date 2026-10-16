@@ -37,8 +37,8 @@ One client component in `components/visualization/os/` (or the matching area), w
 
 ## Registration checklist
 
-1. `content/cs/fundamentals/<slug>.mdx`
-2. `content/notes.ts`: entry with `categoryId: "cs"`, `section: "CS Fundamentals"`, `readingMinutes` 3–5, tags include `"fundamentals"`.
+1. `content/cs/fundamentals/<slug>.mdx` for general concepts; a topic that has its own section uses that section's folder instead (networking notes: `content/cs/networking/<slug>.mdx`, section `Computer Networks`).
+2. `content/notes.ts`: entry with `categoryId: "cs"`, `section: "CS Fundamentals"` (or the topic's section), `readingMinutes` 3–5, tags include `"fundamentals"`.
 3. `app/notes/[...slug]/page.tsx`: import + `noteComponents` entry. Navigation derives from the registry; do not edit `navigation.ts`.
 4. `npm run typecheck && npm run lint && npm run build`, then open the page with the `dev` launch config and click every button.
 

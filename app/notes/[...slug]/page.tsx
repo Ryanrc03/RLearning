@@ -1,9 +1,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import FundamentalsOverview from "@/content/cs/fundamentals/overview.mdx";
+import NetworkingOverview from "@/content/cs/networking/overview.mdx";
+import OsOverview from "@/content/cs/os/overview.mdx";
 import ProcessVsThread from "@/content/cs/fundamentals/process-vs-thread.mdx";
 import ThreadVsCoroutine from "@/content/cs/fundamentals/thread-vs-coroutine.mdx";
 import MemoryHierarchy from "@/content/cs/fundamentals/memory-hierarchy.mdx";
+import TcpVsUdp from "@/content/cs/networking/tcp-vs-udp.mdx";
+import JsonVsProtobuf from "@/content/cs/networking/json-vs-protobuf.mdx";
+import HttpVsGrpc from "@/content/cs/networking/http-vs-grpc.mdx";
+import ReqRespVsPubSub from "@/content/cs/networking/reqresp-vs-pubsub.mdx";
+import BrokerVsBrokerless from "@/content/cs/networking/broker-vs-brokerless.mdx";
 import ProcessesThreadsCoroutines from "@/content/cs/os/processes-threads-coroutines.mdx";
 import VirtualMemory from "@/content/cs/os/virtual-memory.mdx";
 import UCB from "@/content/ml/reinforcement-learning/ucb.mdx";
@@ -20,9 +28,17 @@ import TableOfContents from "@/components/layout/TableOfContents";
 import Icon from "@/components/ui/Icon";
 
 const noteComponents = {
+  "cs/fundamentals/overview": FundamentalsOverview,
+  "cs/networking/overview": NetworkingOverview,
+  "cs/os/overview": OsOverview,
   "cs/fundamentals/process-vs-thread": ProcessVsThread,
   "cs/fundamentals/thread-vs-coroutine": ThreadVsCoroutine,
   "cs/fundamentals/memory-hierarchy": MemoryHierarchy,
+  "cs/networking/tcp-vs-udp": TcpVsUdp,
+  "cs/networking/json-vs-protobuf": JsonVsProtobuf,
+  "cs/networking/http-vs-grpc": HttpVsGrpc,
+  "cs/networking/reqresp-vs-pubsub": ReqRespVsPubSub,
+  "cs/networking/broker-vs-brokerless": BrokerVsBrokerless,
   "cs/os/processes-threads-coroutines": ProcessesThreadsCoroutines,
   "cs/os/virtual-memory": VirtualMemory,
   "ml/reinforcement-learning/ucb": UCB,
