@@ -10,6 +10,7 @@ import UCB from "@/content/ml/reinforcement-learning/ucb.mdx";
 import KuairandInput from "@/content/ml/recsys/kuairand-input.mdx";
 import LightgbmExplained from "@/content/ml/recsys/lightgbm-explained.mdx";
 import BoostingLab from "@/content/ml/recsys/boosting-lab.mdx";
+import Bert from "@/content/ml/transformers/bert.mdx";
 import AgentLoop from "@/content/ai-infra/agent-harness/agent-loop.mdx";
 import ToolsPermissionsHooks from "@/content/ai-infra/agent-harness/tools-permissions-hooks.mdx";
 import SubagentsSkillsMcp from "@/content/ai-infra/agent-harness/subagents-skills-mcp.mdx";
@@ -29,6 +30,7 @@ const noteComponents = {
   "ml/recsys/kuairand-input": KuairandInput,
   "ml/recsys/lightgbm-explained": LightgbmExplained,
   "ml/recsys/boosting-lab": BoostingLab,
+  "ml/transformers/bert": Bert,
   "ai-infra/agent-harness/agent-loop": AgentLoop,
   "ai-infra/agent-harness/tools-permissions-hooks": ToolsPermissionsHooks,
   "ai-infra/agent-harness/subagents-skills-mcp": SubagentsSkillsMcp,

@@ -196,6 +196,20 @@ export const noteEntries: NoteEntry[] = [
     readingMinutes: 11,
     tags: ["agent", "harness", "verification", "design", "interactive"],
   },
+  {
+    slug: "ml/transformers/bert",
+    title: "BERT：双向编码器怎样读懂一句话",
+    description:
+      "只有编码器的 Transformer：三个嵌入相加、双向注意力；MLM 的 15% 与 80/10/10 腐蚀、NSP；预训练与微调的全部超参；一条影评走完分类五步；最后和 GPT 比“看哪边”与“预测什么”。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Transformers",
+    created: "2026-10-16",
+    updated: "2026-10-16",
+    status: "growing",
+    readingMinutes: 15,
+    tags: ["BERT", "transformer", "pre-training", "fine-tuning", "GPT", "interactive"],
+  },
 ];
 
 export function getNote(slug: string): NoteEntry | undefined {

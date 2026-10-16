@@ -7,3 +7,4 @@
 - Preserve the quiet, readable documentation style described in the design.
 - Treat `NEXT_STEPS.md` as a handoff, not as a claim that its features already exist.
 - Beginner notes in CS Foundations › CS Fundamentals follow the project skill `.claude/skills/writing-fundamentals-note/SKILL.md` (one sentence, one comparison figure, one real example).
+- Model notes in ML & LLM (architecture, loss, training, worked example, comparison) follow the project skill `.claude/skills/writing-model-note/SKILL.md` (drawn SVG figures colored by meaning, numbers from the paper).
