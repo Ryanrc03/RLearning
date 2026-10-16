@@ -22,6 +22,13 @@ import AgentLoop from "@/content/ai-infra/agent-harness/agent-loop.mdx";
 import ToolsPermissionsHooks from "@/content/ai-infra/agent-harness/tools-permissions-hooks.mdx";
 import SubagentsSkillsMcp from "@/content/ai-infra/agent-harness/subagents-skills-mcp.mdx";
 import GoalsAndHarnessDesign from "@/content/ai-infra/agent-harness/goals-and-harness-design.mdx";
+import CpuVsGpu from "@/content/ai-infra/gpu/cpu-vs-gpu.mdx";
+import ComputeVsMemoryBound from "@/content/ai-infra/gpu/compute-vs-memory-bound.mdx";
+import GlobalVsSharedMemory from "@/content/ai-infra/gpu/global-vs-shared-memory.mdx";
+import SeparateVsFusedKernels from "@/content/ai-infra/gpu/separate-vs-fused-kernels.mdx";
+import ThreadVsWarpPerRow from "@/content/ai-infra/gpu/thread-vs-warp-per-row.mdx";
+import AggregateVsProjectFirst from "@/content/ai-infra/gpu/aggregate-vs-project-first.mdx";
+import ImplicitGemmVsFft from "@/content/ai-infra/gpu/implicit-gemm-vs-fft.mdx";
 import { getNote, noteEntries } from "@/content/notes";
 import { getNoteToc } from "@/lib/content";
 import TableOfContents from "@/components/layout/TableOfContents";
@@ -49,6 +56,13 @@ const noteComponents = {
   "ai-infra/agent-harness/tools-permissions-hooks": ToolsPermissionsHooks,
   "ai-infra/agent-harness/subagents-skills-mcp": SubagentsSkillsMcp,
   "ai-infra/agent-harness/goals-and-harness-design": GoalsAndHarnessDesign,
+  "ai-infra/gpu/cpu-vs-gpu": CpuVsGpu,
+  "ai-infra/gpu/compute-vs-memory-bound": ComputeVsMemoryBound,
+  "ai-infra/gpu/global-vs-shared-memory": GlobalVsSharedMemory,
+  "ai-infra/gpu/separate-vs-fused-kernels": SeparateVsFusedKernels,
+  "ai-infra/gpu/thread-vs-warp-per-row": ThreadVsWarpPerRow,
+  "ai-infra/gpu/aggregate-vs-project-first": AggregateVsProjectFirst,
+  "ai-infra/gpu/implicit-gemm-vs-fft": ImplicitGemmVsFft,
 };
 
 export const dynamicParams = false;

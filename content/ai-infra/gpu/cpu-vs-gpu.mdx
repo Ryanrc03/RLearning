@@ -1,0 +1,62 @@
+import CpuVsGpuDiagram from "@/components/visualization/gpu/CpuVsGpuDiagram";
+import VectorAddMappingFigure from "@/components/visualization/gpu/VectorAddMappingFigure";
+import VectorAddSimulator from "@/components/visualization/gpu/VectorAddSimulator";
+
+# CPU vs GPU
+
+## 一句话
+
+**CPU 是延迟优先：用几个快核，把每一件事尽快做完；GPU 是吞吐优先：用成千上万个慢核，把一大批事一起做完。**
+
+活少、一件接一件、每一步都要马上出结果，交给 CPU；同一种计算要对大量数据做很多遍，交给 GPU。
+
+## 一张图
+
+<CpuVsGpuDiagram />
+
+图里只有两条规律：
+
+| | CPU | GPU |
+| --- | --- | --- |
+| 只有 1 个任务 | 马上做完 | 先付启动开销，反而更慢 |
+| 来了 1 万个任务 | 排队，时间跟着任务数涨 | 一起开工，时间几乎不变 |
+
+所以 CPU 换来的是**单件快**，GPU 换来的是**总量大**。GPU 要先有足够多的活，才能体现出优势。
+
+## 一个模拟实验：两个数组相加
+
+### 实验想做什么
+
+找出「活要多到什么程度，GPU 才比 CPU 快」。
+
+- **任务**：两个长度为 N 的数组逐个相加，`C[i] = A[i] + B[i]`。这是最简单的 GPU 程序，课程第一个实验 exp0 跑的就是它。
+- **对比**：同一个任务，CPU（4 个核）做一遍，GPU 做一遍，比较耗时。
+- **改变的变量**：只改数组长度 N，从 10 一直到 1 亿。
+
+### 两边怎么做
+
+<VectorAddMappingFigure />
+
+CPU 把数组切成 4 段，每个核用循环算完自己那一段。GPU 给每个元素开一个 thread，每个 thread 只算一个加法，所有 thread 同时开工。GPU 开工前还有一笔固定的启动开销，不管数组多短都要付。
+
+### 你会观察到什么
+
+在下面的模拟器里，从左往右依次点 N，应该能看到三件事：
+
+1. **N 很小（10 到 1 万）时，CPU 更快。** GPU 的时间几乎全是那 5 µs 的启动开销，真正干活的时间可以忽略。
+2. **N 在 2 万左右，两条曲线相交。** 这是 GPU 开始划算的分界线。
+3. **N 很大（100 万以上）时，GPU 快十几倍，而且差距不再继续拉大。** 这个倍数停在两边内存带宽之比附近。
+
+<VectorAddSimulator />
+
+### 为什么会这样
+
+- **小 N 时 CPU 赢**，因为 GPU 的启动开销是固定的：只算 10 个加法也要先付 5 µs，而 CPU 几纳秒就算完了。这就是图里「只有 1 个任务」的情况。
+- **大 N 时 GPU 赢**，因为它能同时开工的 thread 多得多，启动开销被摊到了上亿个元素上。这就是图里「来了 1 万个任务」的情况。
+- **差距停在 17 倍左右**，因为数组相加几乎不需要计算，时间都花在读写内存上，所以最后比的是谁搬数据快：GPU 显存带宽 864 GB/s，CPU 内存带宽约 50 GB/s，相除正好约 17。这种卡在搬数据上的任务叫 memory-bound，下一页专门讲。
+
+模拟器假设数据已经放在各自的内存里。如果数据一开始在 CPU 内存中，还要先通过 PCIe 拷到显存，对数组相加这种计算很少的任务来说，光拷贝就比 CPU 直接算完还慢。所以实际系统会尽量让数据一直留在 GPU 上。
+
+## 再往下看
+
+warp 是什么、CUDA 的 thread 和操作系统的 thread 差在哪，见 [进程、线程、协程，以及 CUDA 里的“线程”](/notes/cs/os/processes-threads-coroutines/)。

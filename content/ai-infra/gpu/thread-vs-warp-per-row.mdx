@@ -1,0 +1,85 @@
+import ThreadVsWarpPerRowDiagram from "@/components/visualization/gpu/ThreadVsWarpPerRowDiagram";
+import SpmmCsrFigure from "@/components/visualization/gpu/SpmmCsrFigure";
+import MeasuredBars from "@/components/visualization/gpu/MeasuredBars";
+
+# Thread-per-row vs Warp-per-row
+
+## 一句话
+
+**thread-per-row 是把稀疏矩阵的每一行交给一个 thread 独自算完；warp-per-row 是把一行交给一个 warp，32 个 lane 各自负责输出的几列。**
+
+行数很多、每行要算的列很少时，thread-per-row 也够用；输出列数一多，warp-per-row 能同时调动的线程多得多，读内存的方式也更顺。
+
+## 一张图
+
+<ThreadVsWarpPerRowDiagram />
+
+图里只有两条规律：
+
+| | thread-per-row | warp-per-row |
+| --- | --- | --- |
+| 同一时刻读内存 | 地址分散，要发很多次访存 | 地址相邻，合并成一次访存 |
+| 输出列 N 变多 | 每个 thread 循环更久，吞吐不涨 | 多出来的列分给 lane，吞吐上涨 |
+
+所以 warp-per-row 用**更细的分工**，换来**更多并行和合并访存**。
+
+## 一个真实的例子：课程实验 exp3 的 SpMM
+
+### 实验想做什么
+
+exp3 手写稀疏矩阵乘稠密矩阵（SpMM）的 CUDA kernel，比较「一个 thread 管一行」和「一个 warp 管一行」两种分工。图神经网络、推荐系统里的稀疏计算，核心都是这个操作。
+
+- **任务**：稀疏矩阵 A（M×K，只有 1% 的数非零）乘稠密矩阵 B（K×N），在 NVIDIA L40S 上运行。
+- **对比**：thread-per-row 对比 warp-per-row，就是上面那张图里的两种写法。
+- **改变的变量**：实验 1 改矩阵大小（M = K 从 512 到 8192，N 固定为 64）；实验 2 改输出列数（N 从 32 到 256，M = K 固定为 2048）。
+
+### 模型是什么
+
+<SpmmCsrFigure />
+
+A 用 CSR 格式存：只存非零数，`row_ptr` 告诉你每一行的非零数从第几格开始。算 C 的一行时，先查出这一行有哪些非零数，再把 B 里对应的几行乘上这些数加起来。thread-per-row 让一个 thread 把 C 一整行的 N 个数都算完；warp-per-row 让 32 个 lane 分摊这 N 个数，lane j 负责第 j、j+32、j+64…列。
+
+### 你会观察到什么
+
+1. **warp-per-row 在所有尺寸下都快几十倍**，快 40–90 倍。
+2. **N 变大时，thread-per-row 的吞吐纹丝不动**，一直在 10 GFLOPS 左右；warp-per-row 从 656 涨到 1,183 GFLOPS。
+3. **矩阵大到 8192 时，加速比从 90 倍回落到 48 倍。** 这不是 warp-per-row 变差了，而是 thread-per-row 在追赶。
+
+<MeasuredBars
+  title="exp3 实验 1：矩阵变大"
+  description="L40S，N = 64，密度 1%。每组上面是 thread-per-row，下面是 warp-per-row。"
+  series={[{ name: "thread-per-row", color: "#2a78d6" }, { name: "warp-per-row", color: "#eb6834" }]}
+  unit="GFLOPS"
+  decimals={1}
+  groups={[
+    { label: "M = K = 512", values: [2.4, 96.1] },
+    { label: "M = K = 1024", values: [4.9, 300.7] },
+    { label: "M = K = 2048", values: [10.0, 892.1] },
+    { label: "M = K = 4096", values: [20.5, 1776.1] },
+    { label: "M = K = 8192", values: [41.7, 2012.0] },
+  ]}
+/>
+
+<MeasuredBars
+  title="exp3 实验 2：输出列 N 变多"
+  description="L40S，M = K = 2048，密度 1%。每组上面是 thread-per-row，下面是 warp-per-row。"
+  series={[{ name: "thread-per-row", color: "#2a78d6" }, { name: "warp-per-row", color: "#eb6834" }]}
+  unit="GFLOPS"
+  decimals={1}
+  groups={[
+    { label: "N = 32", values: [10.2, 656.4] },
+    { label: "N = 64", values: [10.0, 892.1] },
+    { label: "N = 128", values: [10.2, 1063.9] },
+    { label: "N = 256", values: [10.2, 1182.7] },
+  ]}
+/>
+
+### 为什么会这样
+
+- **快几十倍的主要原因是读内存的方式。** thread-per-row 时，同一个 warp 里的 32 个 thread 在处理 32 个不同的行，读的是 B 里 32 个不相干的位置，硬件只能拆成很多次访存。warp-per-row 时，32 个 lane 读的是 B 同一行里相邻的 32 个数，合并成一次访存。这就是图里「看一次读内存」的情况。
+- **N 变大时 thread-per-row 不涨**，因为它同时干活的 thread 只有 M 个，N 变大只是让每个 thread 的循环变长。warp-per-row 把多出来的列分给 32 个 lane，N 越大，每个 warp 里有活干的 lane 越满。这就是图里「输出列 N 变多」的情况。
+- **8192 时加速比回落**，是因为 thread-per-row 的 thread 数等于行数 M，矩阵越大，它能同时开工的 thread 越多，吞吐跟着 M 翻倍（2.4 → 41.7 GFLOPS）。warp-per-row 在 4096 以后已经接近这块 GPU 的上限，涨不动了，所以两者的差距缩小。
+
+## 再往下看
+
+稀疏度变化（0.1% 到 10%）的结果和分析，见 [exp3 的实验报告](https://github.com/Ryanrc03/DeepLearning-System-Optimze/blob/main/exp3_spmm/report.md)。
