@@ -1,0 +1,108 @@
+import GradientFlowExplorer from "@/components/visualization/multimodal/GradientFlowExplorer";
+import LossComparison from "@/components/visualization/multimodal/LossComparison";
+
+# 视觉与文本是怎么对齐的？
+
+上一篇说，ViT 输出 1024 维，加一个 projector 投影到 4096 维，就能和文本 token 排进同一条序列。可这个 projector 刚初始化时只是一个随机矩阵，LLM 收到的是一串它从没见过的向量。从“维度对得上”到“LLM 能看懂图”，中间到底训练了什么？
+
+**一句话答案：** 投影到相同维度只是对接形状。真正的对齐靠多模态数据和损失函数训练出来：让视觉表示变成 LLM 能有效利用的输入。冻结哪些模块，决定梯度会更新谁。
+
+## 维度对齐 vs 语义对齐
+
+记视觉特征 $V\in\mathbb{R}^{N_v\times d_v}$，文本 embedding $T\in\mathbb{R}^{N_t\times d_l}$。projector $f_\theta$ 负责对接：
+
+$$
+V'=f_\theta(V)\in\mathbb{R}^{N_v'\times d_l}
+$$
+
+这一步之后两者能放进同一个矩阵，但有三件事它**没有**保证：
+
+- **坐标的含义不同。** 文本 embedding 的第 17 维和视觉向量的第 17 维没有任何约定好的关系。随机初始化的 $f_\theta$ 输出的向量，对 LLM 来说是噪声。
+- **不要求数值靠近某个词。** 猫图的 visual token 并不需要和“猫”这个词的 embedding 重合。它只需要让 LLM 在读到它之后，能正确地预测出“猫”。
+- **目标是“可用”，不是“相同”。** 生成式 VLM 的对齐是功能性的：视觉表示要被后面的 LLM 有效利用。
+
+## 怎么训练：让 LLM 用图说对话
+
+最常用的信号就是语言模型本来的 next-token prediction。给一张图、一段 prompt 和目标回答，只对需要预测的目标 token 计算交叉熵：
+
+$$
+L_{\text{gen}}=-\sum_{t}\log p_\theta\left(y_t \mid I, x, y_{<t}\right)
+$$
+
+$I$ 是图像，$x$ 是 prompt，$y$ 是目标回答。prompt 和视觉占位的位置通常被 mask 掉、不计 loss（具体由训练配方决定）。这个 loss 本身就能把视觉信息“拉”进来：要把“沙发上有一只猫”预测对，LLM 必须从 visual token 里读出猫和沙发，而为了让它读得出来，梯度会反过来调整 projector 输出的向量。
+
+梯度的路径是 loss → LLM → projector/merger → vision encoder。这里有一个容易混的点：**冻结一个模块的参数，不等于梯度不能穿过它。** 在 PyTorch 里：
+
+```python
+llm.requires_grad_(False)       # 冻结 LLM 的权重：不为它们算梯度、不更新
+vit.requires_grad_(False)       # 冻结 ViT
+merger.requires_grad_(True)     # 只训练 merger
+
+with torch.no_grad():           # ViT 前面没有可训练参数，可以不保留计算图
+    v = vit(image)
+v_tok = merger(v)               # 有计算图
+logits = llm(splice(text_emb, v_tok))
+loss = cross_entropy(logits[answer_pos], answer_ids)
+loss.backward()                 # 梯度穿过冻结的 LLM，落到 merger 的参数上
+```
+
+`requires_grad_(False)` 只是不要这些**参数**的梯度；LLM 对其**输入**（也就是 merger 输出）的梯度照样要算，否则 merger 收不到信号。`detach()` 或 `no_grad()` 才是真正把计算图切断，在这里只能用在 ViT 输出上，因为 ViT 之前已经没有要训练的东西。
+
+<GradientFlowExplorer />
+
+两个对照值得记住：
+
+- **Adapter-only**：同一张图过冻结的 ViT，输出永远一样；但 merger 的参数在变，它的输出跟着变。LLM 的权重不变，可它读到的视觉输入变了，内部表示也会变。
+- **End-to-end**：三个模块都可能变，包括同一张图的 ViT 输出。
+
+## 实例：Qwen3-VL 的四个预训练阶段
+
+Qwen3-VL 的结构是 vision encoder（基于 SigLIP-2）+ 两层 MLP merger（把 2×2 视觉特征压成一个 token）+ Qwen3 LLM，另外用 DeepStack 把 ViT 三个中间层的特征分别经独立的 merger，加到 LLM 前三层的 hidden state 上。它的技术报告给出的预训练配方是：
+
+| 阶段 | 目的 | 训练哪些参数 | 序列长度 | 数据量 |
+| --- | --- | --- | --- | --- |
+| S0 | Vision-language alignment | 只训练 MLP merger，ViT 和 LLM 冻结 | 8K | 约 67B tokens |
+| S1 | 多模态预训练 | 全部参数 | 8K | 约 1T tokens |
+| S2 | 长上下文预训练 | 全部参数 | 32K | 约 1T tokens |
+| S3 | 超长上下文适应 | 全部参数 | 256K | 100B tokens |
+
+S0 正是上面的 Adapter-only：先让新初始化的 merger 学会“说 LLM 的语言”，再解冻全部参数联合训练。先只训练 adapter 的原因是 merger 刚初始化时输出接近噪声，此时如果把 LLM 也解冻，噪声梯度可能损害 LLM 已有的语言能力。
+
+这是 **Qwen3-VL 的方案，不是所有 VLM 的通例**。LLaVA 的第一阶段同样只训练投影层；也有模型从头联合训练，或者全程冻结 vision encoder。冻结什么、分几个阶段，取决于架构、数据和算力预算。
+
+## 另一种对齐：对比学习
+
+“对齐”这个词也用在 CLIP 上，但那是另一回事。
+
+<LossComparison />
+
+CLIP 的对比损失让正确图文对的**全局向量**在同一空间里相互靠近，适合检索和 zero-shot 分类，但它本身不会生成文字。生成式 VLM 的对齐目标是让 LLM 能利用 visual token 预测下一个词。两者可以组合：很多 VLM 的 vision encoder 就是用对比学习预训练出来的（CLIP、SigLIP），再接到 LLM 上用生成式 loss 继续对齐。数值例子见 [CLIP：图文对比学习实验台](/notes/ml/multimodal/clip-contrastive-learning/)。
+
+## 常见误区
+
+- **“视觉特征维度匹配就完成了语义对齐。”** 维度匹配只是让矩阵能拼起来。随机初始化的 projector 输出对 LLM 来说是噪声，要靠训练才有意义。
+- **“所有 VLM 都会训练整个 ViT + LLM。”** 不一定。阶段划分和冻结方案取决于架构和预算；Qwen3-VL 的 S0 就只训练 merger。
+- **“冻结 ViT 之后，视觉 tensor 就不参与后续计算了。”** 冻结的 ViT 依然对每张图做前向、产生输入表示，只是它的参数不更新。
+- **“冻结的模块会截断梯度。”** 冻结的是参数的梯度，不是穿过它的梯度。Adapter-only 时梯度必须穿过冻结的 LLM 才能到达 merger。
+- **“生成式 VLM 只能用图文 cosine similarity 的 loss 训练。”** 语言模型的交叉熵本身就是足够的学习信号，对比损失是另一种可选目标。
+
+## Key ideas to remember
+
+1. 维度对齐（形状对得上）≠ 语义/功能对齐（LLM 能用）。
+2. 生成式 VLM 的主要对齐信号是答案 token 上的 next-token 交叉熵。
+3. 梯度从 loss 经 LLM、merger 一路回传；冻结参数（`requires_grad=False`）不等于切断计算图（`detach`）。
+4. Adapter-only 时 ViT 输出不变、merger 输出会变；end-to-end 时都会变。
+5. Qwen3-VL 先只训练 merger（S0），再全参数联合训练（S1–S3）；这是一个具体方案，不是通例。
+
+## Related notes
+
+- [一张图片如何变成 Visual Tokens？](/notes/ml/multimodal/visual-tokens/)：projector 和 merger 的输入输出长什么样。
+- [CLIP：图文对比学习实验台](/notes/ml/multimodal/clip-contrastive-learning/)：对比学习式的对齐。
+- [Transformer 为什么比 RNN 更容易并行？](/notes/ml/llms/transformer-vs-rnn/)：teacher forcing 让生成式 loss 能一次算完所有位置。
+
+## Further reading
+
+- [Qwen Team (2025), *Qwen3-VL Technical Report*](https://arxiv.org/abs/2511.21631)：架构（SigLIP-2、MLP merger、DeepStack）与 S0–S3 训练配方。代码见 [QwenLM/Qwen3-VL](https://github.com/QwenLM/Qwen3-VL)。
+- [Liu et al. (2023), *Visual Instruction Tuning* (LLaVA)](https://arxiv.org/abs/2304.08485)：两阶段训练，第一阶段只训练投影层。
+- [Radford et al. (2021), *CLIP*](https://arxiv.org/abs/2103.00020)：对比学习式的图文对齐。
+- [PyTorch: Autograd mechanics — locally disabling gradient computation](https://pytorch.org/docs/stable/notes/autograd.html#locally-disabling-gradient-computation)：`requires_grad`、`no_grad` 与 `detach` 的区别。

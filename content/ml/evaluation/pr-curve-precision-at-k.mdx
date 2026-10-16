@@ -1,0 +1,39 @@
+import PrCurveFigure from "@/components/visualization/ml/evaluation/PrCurveFigure";
+
+# PR 曲线与 Precision@k
+
+## 一句话
+
+**PR 曲线以 recall 为横轴、precision 为纵轴扫阈值，Precision@k 只看排在最前面的 k 个里有几个正例；两者都只盯着正例那一侧，所以正例稀少时比 ROC 诚实。**
+
+类别不平衡、或者用户只看前几条的排序场景，用这两个。
+
+## 为什么需要它
+
+ROC 的横轴 FPR 把误报除以全部负例。欺诈检测里正例和负例是 1 : 999，模型找出 10 笔真欺诈，顺带报了 1000 笔假警报：FPR = 1000 / 999000，约 0.1%，ROC 上几乎贴着左边，看起来很好。但 precision = 10 / 1010，约 1%，每 100 条警报里 99 条是打扰。ROC 没撒谎，它只是没看你关心的那个分母。
+
+搜索和推荐还有另一层：用户只看前几条。排在第 50 位的正例再准也没人看到，Precision@k 直接量「前 k 条里有几条是对的」。
+
+## 怎么工作
+
+<PrCurveFigure />
+
+PR 曲线和 ROC 扫的是同一串阈值，只是换了坐标：横轴 recall（和 TPR 相同），纵轴 precision。瞎猜的基线不再是对角线，而是一条水平线，高度等于正例占比：随便抓 k 个，里面正例的比例平均就是这么多。曲线下面积用 average precision 来算，每次 recall 往右跳一格，就乘上当时的 precision：
+
+$$
+\text{AP} = \sum_{n} \left(R_n - R_{n-1}\right) P_n,\qquad
+\text{Precision@}k = \frac{\text{前 } k \text{ 个里的正例数}}{k}
+$$
+
+拖滑杆给固定的 40 个正例配越来越多的负例。AUC 几乎不动，因为被冤枉的负例比例没变，FPR 的分子和分母一起涨；PR-AUC 一路往下掉，因为误报的绝对数量涨了几十倍，而正例还是 40 个，precision 的分母被撑大了。Precision@10 同样往下掉：前 10 个位置被更多高分负例挤占。
+
+## 代价与取舍
+
+- PR 曲线不单调、锯齿多，比较时用 AP，或者在固定的 recall 下比 precision。
+- PR-AUC 的基线随正例占比变，不同数据集之间的 PR-AUC 不能直接比；ROC 的基线永远是 0.5。
+- Precision@k 只管前 k 个有没有命中，不管它们之间的顺序，也不管漏掉的。排序质量要看 NDCG 这类位置加权的指标，不在这一章。
+- 到底用哪个：类别平衡、两种错都要紧，用 ROC；正例稀少、只关心找出来的那一部分，用 PR；只展示前几条，用 Precision@k。
+
+## 再往下看
+
+离线指标说模型变好了，不等于上线真的更好。下一页 [A/B Test 与 p-value](/notes/ml/evaluation/ab-test-p-value/) 讲怎么拿一部分真实流量去验，以及怎么判断看到的差异不是运气。

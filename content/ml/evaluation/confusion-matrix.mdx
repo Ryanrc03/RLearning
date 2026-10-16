@@ -1,0 +1,42 @@
+import ConfusionMatrixFigure from "@/components/visualization/ml/evaluation/ConfusionMatrixFigure";
+
+# Confusion Matrix 与 Accuracy
+
+## 一句话
+
+**confusion matrix 把每一次预测按「真的是什么」和「模型猜成什么」放进四个格子；accuracy 是对角线上猜对的两格占全部的比例。**
+
+它是这一章所有指标的起点：后面的 precision、recall、ROC，都是从这四个格子里挑几格算出来的。
+
+## 为什么需要它
+
+只报一个「猜对了百分之几」，会把两种完全不同的错混在一起。把一只 cat 当成 dog，和把一只 dog 当成 cat，在很多场景下代价差得很远：垃圾邮件漏过去一封只是烦人，把老板的邮件扔进垃圾箱会出事。四个格子先把两种错分开，后面才谈得上取舍。
+
+另一个原因是 accuracy 本身会骗人。笔记里的例子：1000 只动物里 990 只是 dog，一个什么都不看、一律回答 dog 的模型，accuracy 也有 99%。下面的图可以切过去看。
+
+## 怎么工作
+
+<ConfusionMatrixFigure />
+
+四个格子的名字由两个词拼成：第一个词说猜得对不对（True / False），第二个词说模型猜的是什么（Positive / Negative）。这里把 dog 当 positive：
+
+| | 真的是 dog | 真的是 cat |
+| --- | --- | --- |
+| 猜 dog | TP：猜 dog，对了 | FP：猜 dog，错了 |
+| 猜 cat | FN：猜 cat，错了 | TN：猜 cat，对了 |
+
+$$
+\text{accuracy} = \frac{TP + TN}{TP + TN + FP + FN}
+$$
+
+笔记里的 10 只动物：TP 4、FP 3、FN 2、TN 1，accuracy 5/10 = 50%。点任意一只动物翻转模型的猜测，会看到一个预测只会在同一列的两个格子之间挪动：真实标签不变，变的只是猜测。
+
+## 代价与取舍
+
+- accuracy 只在类别大致平衡、两种错代价相近时才可信。990 : 10 的数据上，全猜多数类就能拿到 99%。
+- 四个格子的数字依赖阈值。模型输出的通常是一个分数，「分数多高算 dog」一变，TP 和 FP 就跟着变，下一页会把这条线拖起来看。
+- 多分类时矩阵是 K × K，对角线仍然是猜对的，但「positive」要逐类来定：算 cat 这一类的指标时，cat 才是 positive。
+
+## 再往下看
+
+四个格子分开看，自然会问：模型说是 dog 的那些里有多少真的是，真的是 dog 的那些里又找出了多少。这两个比例就是下一页的 [Precision / Recall / F1](/notes/ml/evaluation/precision-recall-f1/)。

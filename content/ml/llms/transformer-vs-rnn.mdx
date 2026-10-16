@@ -1,0 +1,115 @@
+import SequenceDependencyTimeline from "@/components/visualization/llm/SequenceDependencyTimeline";
+import AttentionMaskExplorer from "@/components/visualization/llm/AttentionMaskExplorer";
+import TrainPrefillDecodeSwitch from "@/components/visualization/llm/TrainPrefillDecodeSwitch";
+
+# Transformer 为什么比 RNN 更容易并行？
+
+常听到的说法是“RNN 要一个词一个词地算，Transformer 可以并行”。可 GPT 也是一个词一个词往外蹦的，它的 causal attention 也规定位置 $i$ 只能看 $\le i$ 的词。Transformer 一样在利用顺序，并行到底是从哪来的？
+
+**一句话答案：** 区别不在“是否利用顺序”，而在计算依赖。RNN 要先算出 $h_{t-1}$ 才能算 $h_t$；Transformer 同一层的所有位置只依赖**上一层**，所以对已知序列能一次矩阵乘法算完一整层。训练能并行，不等于自回归生成能并行。
+
+## RNN：每一步都在等上一步
+
+RNN 用一个 hidden state 把过去压缩起来，每读一个词更新一次：
+
+$$
+h_t=f\left(W_x x_t+W_h h_{t-1}+b\right)
+$$
+
+$h_4$ 的公式里有 $h_3$，$h_3$ 里有 $h_2$。对同一个序列、同一层来说，这是一条链：$n$ 个词就要 $n$ 轮顺序计算，哪怕 GPU 上有几千个核在等着。RNN 能并行的维度是 batch（不同的句子之间）和每一步内部的矩阵运算，但沿着时间轴不行。
+
+## Transformer：一层只依赖上一层
+
+Self-attention 把整层的输入 $X\in\mathbb{R}^{n\times d}$ 一次投影成 Query、Key、Value：
+
+$$
+Q=XW_Q,\quad K=XW_K,\quad V=XW_V
+$$
+
+$$
+\mathrm{Attention}(Q,K,V)=\mathrm{softmax}\left(\frac{QK^{\top}}{\sqrt{d_k}}+M\right)V
+$$
+
+关键在依赖关系：第 $l$ 层位置 $i$ 的输出，读的是**第 $l-1$ 层**所有（或 $\le i$ 的）位置。“位置 $i$ 关注位置 $j$”不需要等同一层的位置 $j$ 先算完，因为它读的是下面那一层已经算好的值。于是一整层是几次矩阵乘法，$n$ 个位置同时得到结果。层与层之间仍然有先后，$L$ 层就要 $L$ 轮。
+
+下面把两种模型放在一起数步数。每一步做掉所有已经满足依赖的计算。
+
+<SequenceDependencyTimeline />
+
+试着把 $n$ 从 4 换成 8：RNN 的步数跟着翻倍，Transformer 不变。两层 RNN 的 hidden state 沿对角线亮起，因为第 2 层的 $h_t$ 要同时等第 1 层的 $h_t$ 和自己层的 $h_{t-1}$。
+
+## 原论文的复杂度表
+
+*Attention Is All You Need* 的 Table 1 比较了每层的计算量和沿序列的依赖。以下是原论文对标准 full attention 的**每层理论分析**，$n$ 是序列长度，$d$ 是表示维度：
+
+| 层类型 | 每层计算量 | 最少顺序操作数 | 任意两位置间的最长路径 |
+| --- | --- | --- | --- |
+| Recurrent | $O(n\cdot d^2)$ | $O(n)$ | $O(n)$ |
+| Self-Attention | $O(n^2\cdot d)$ | $O(1)$ | $O(1)$ |
+
+读这张表要小心三件事：
+
+- **$O(1)$ 是“一层之内沿序列方向要等几轮”，不是运行时间。** 一层 self-attention 仍要算 $n^2$ 个位置对，序列长了计算量和注意力矩阵的显存都按平方增长。
+- 一个真实的 Transformer block 还有 Q/K/V 投影、输出投影和 FFN，这些是 $O(n\cdot d^2)$ 的，短序列时它们反而是大头。
+- 最长路径 $O(1)$ 是 Transformer 的另一个好处：第 1 个词和第 1000 个词之间只隔一次 attention，RNN 却要传 999 次，梯度容易衰减。
+
+## 位置编码和 Causal Mask 是两回事
+
+Self-attention 本身不知道顺序：把输入的行打乱，输出也只是跟着打乱。顺序信息靠两样东西补上，它们解决的问题不同：
+
+- **Position encoding** 告诉模型“这个词在第几个位置”。原始 Transformer 把正弦位置编码加到输入 embedding 上；现代 LLM 常用 RoPE，把位置写进 Q、K 的旋转里，使 $q_i^{\top}k_j$ 只依赖相对位置 $i-j$。
+- **Mask** 决定“这个位置能读哪些位置”。在 softmax 之前加一个矩阵 $M$：允许的地方 $M_{ij}=0$，禁止的地方 $M_{ij}=-\infty$，$e^{-\infty}=0$，权重就是 0。
+
+只有 position encoding 没有 mask，模型知道顺序但能偷看后面的词；只有 mask 没有 position encoding，模型知道不能看未来，却分不清前面那些词的远近次序（causal mask 本身会泄露一点位置信息，但这不是它的设计目的）。
+
+<AttentionMaskExplorer />
+
+两种 mask 对应两类模型。BERT 这类 encoder 用 bidirectional：输入全部已知，任务是理解整句话。GPT 这类 decoder 用 causal：它要学的是“根据前文预测下一个词”，读到下一个词就等于看答案。Bidirectional 不是 GPT 的生成设置。
+
+## 训练、Prefill、Decode
+
+Causal mask 限制的是**信息流**，不是计算顺序。整张 $n\times n$ 的注意力矩阵仍然一次算出，只是上三角被置为 $-\infty$。所以同一个 decoder-only 模型在三个阶段的表现完全不同：
+
+- **Training**：整句话已知。用 teacher forcing，目标就是输入左移一位。一次前向得到所有位置的 logits 和交叉熵。
+- **Prefill**：推理时 prompt 已知，同样一次前向处理完，把每层的 K、V 存进 KV Cache。
+- **Decode**：未来的词还不存在。每生成一个 token 都要做一次前向，下一个 token 要等这一个采样出来。KV Cache 让每步不必重算旧位置的 K/V，但没有消除“下一个依赖上一个”。
+
+<TrainPrefillDecodeSwitch />
+
+```python
+# 训练：一次前向，所有位置的 loss
+logits = model(tokens[:, :-1])                    # [B, n-1, vocab]，causal mask 在内部
+loss = F.cross_entropy(logits.flatten(0, 1), tokens[:, 1:].flatten())
+
+# 推理：prefill 一次，decode 逐个
+cache = model.prefill(prompt)                     # 并行处理整个 prompt
+for _ in range(max_new_tokens):
+    next_tok = sample(model.decode_step(cache))   # 每步 1 个新位置
+    if next_tok == eos:
+        break
+```
+
+## 常见误区
+
+- **“Transformer 不是 sequence model。”** 它依然建模顺序，靠 position encoding 和 mask；只是不再用递归的 hidden state 去逐步处理一个已知序列。
+- **“Causal mask 导致训练也只能逐 token 计算。”** Mask 只是在 softmax 前加了一个常数矩阵，整个计算仍是一次矩阵乘法。
+- **“Transformer 在任何情况下都比 RNN 快。”** Full attention 的计算量和显存随 $n^2$ 增长；生成时 decode 仍然是串行的，每步还要读整个 KV Cache。RNN 每生成一步只要更新一个固定大小的状态，这正是 Mamba 这类线性递归模型想重新拿回的优势。
+
+## Key ideas to remember
+
+1. RNN 沿时间轴有链式依赖：$h_t$ 要等 $h_{t-1}$，$n$ 个位置要 $n$ 轮。
+2. Transformer 的第 $l$ 层只读第 $l-1$ 层，一整层可以一次矩阵运算算完；层与层之间仍是顺序的。
+3. 原论文的 $O(1)$ 是每层沿序列的最少顺序操作数，不是运行时间；每层计算量是 $O(n^2 d)$。
+4. Position encoding 提供顺序，mask 限制能读谁，两者作用不同。
+5. 训练和 prefill 能并行，自回归 decode 不能；KV Cache 省的是重复计算，不是依赖。
+
+## Related notes
+
+- [一张图片如何变成 Visual Tokens？](/notes/ml/multimodal/visual-tokens/)：图片怎样变成 Transformer 能读的 token 序列。
+- [CLIP：图文对比学习实验台](/notes/ml/multimodal/clip-contrastive-learning/)：两个 Transformer encoder 怎样被训练到同一个空间。
+
+## Further reading
+
+- [Vaswani et al. (2017), *Attention Is All You Need*](https://arxiv.org/abs/1706.03762)：Table 1 是本页复杂度表的出处，§3.5 是正弦位置编码。[NeurIPS PDF](https://proceedings.neurips.cc/paper_files/paper/2017/file/3f5ee243547dee91fbd053c1c4a845aa-Paper.pdf)
+- [Su et al. (2021), *RoFormer: Enhanced Transformer with Rotary Position Embedding*](https://arxiv.org/abs/2104.09864)：RoPE。
+- [Devlin et al. (2018), *BERT*](https://arxiv.org/abs/1810.04805)：bidirectional encoder 的代表。

@@ -2,7 +2,7 @@ export type NoteEntry = {
   slug: string;
   title: string;
   description: string;
-  categoryId: "cs" | "systems" | "ml" | "ai-infra";
+  categoryId: "cs" | "systems" | "ml" | "ai-infra" | "algorithms";
   category: string;
   section: string;
   created: string;
@@ -10,24 +10,12 @@ export type NoteEntry = {
   status: "seed" | "growing" | "stable";
   readingMinutes: number;
   tags: string[];
+  /** Notes in the same series get previous/next links in reading order. */
+  series?: { id: string; title: string; order: number };
 };
 
 // Published notes share this metadata across navigation, search, and article pages.
 export const noteEntries: NoteEntry[] = [
-  {
-    slug: "ml/reinforcement-learning/ucb",
-    title: "Upper Confidence Bound (UCB)",
-    description:
-      "用不确定性指导探索：从 UCB 的直觉与公式，到适应奖励变化的 Discounted UCB。",
-    categoryId: "ml",
-    category: "ML & LLM",
-    section: "Reinforcement Learning",
-    created: "2026-09-29",
-    updated: "2026-09-29",
-    status: "growing",
-    readingMinutes: 8,
-    tags: ["bandits", "exploration", "reinforcement learning"],
-  },
   {
     slug: "cs/fundamentals/overview",
     title: "CS Fundamentals Overview",
@@ -211,6 +199,169 @@ export const noteEntries: NoteEntry[] = [
     tags: ["operating systems", "memory", "paging"],
   },
   {
+    slug: "ml/overview",
+    title: "ML & LLM 知识树",
+    description:
+      "ML & LLM 的全部笔记按一棵树组织：每行一章、章内是问题链、虚线是跨章先修。点节点看一句话，从这里进任何一页。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Knowledge Tree",
+    created: "2026-10-16",
+    updated: "2026-10-16",
+    status: "seed",
+    readingMinutes: 4,
+    tags: ["overview", "ml-fundamentals", "interactive"],
+  },
+  {
+    slug: "ml/evaluation/overview",
+    title: "Evaluation Overview",
+    description:
+      "这一章回答「模型好不好」：四个格子、两个比例、一条曲线、一次线上验证。五页的问题链和阅读顺序。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Evaluation",
+    created: "2026-10-16",
+    updated: "2026-10-16",
+    status: "seed",
+    readingMinutes: 3,
+    tags: ["overview", "ml-fundamentals", "evaluation"],
+  },
+  {
+    slug: "ml/evaluation/confusion-matrix",
+    title: "Confusion Matrix 与 Accuracy",
+    description:
+      "四个格子把两种错分开，accuracy 是对角线的占比。点动物翻转猜测看格子怎么挪；切到 990 : 10 看 accuracy 怎么骗人。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Evaluation",
+    created: "2026-10-16",
+    updated: "2026-10-16",
+    status: "seed",
+    readingMinutes: 5,
+    tags: ["ml-fundamentals", "evaluation", "interactive"],
+    series: { id: "ml-evaluation", title: "Evaluation：模型好不好", order: 1 },
+  },
+  {
+    slug: "ml/evaluation/precision-recall-f1",
+    title: "Precision / Recall / F1",
+    description:
+      "一条阈值线，两边各算一个比例：precision 看说是的里对了多少，recall 看真的里找出多少。拖阈值看它们此消彼长，F1 为什么用调和平均。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Evaluation",
+    created: "2026-10-16",
+    updated: "2026-10-16",
+    status: "seed",
+    readingMinutes: 6,
+    tags: ["ml-fundamentals", "evaluation", "interactive"],
+    series: { id: "ml-evaluation", title: "Evaluation：模型好不好", order: 2 },
+  },
+  {
+    slug: "ml/evaluation/roc-auc",
+    title: "ROC 与 AUC",
+    description:
+      "把阈值扫一遍，每个阈值一个 (FPR, TPR) 点。两个模型同一批数据，拖阈值看点在曲线上走而 AUC 不动；AUC 就是正例排在负例前面的概率。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Evaluation",
+    created: "2026-10-16",
+    updated: "2026-10-16",
+    status: "seed",
+    readingMinutes: 6,
+    tags: ["ml-fundamentals", "evaluation", "interactive"],
+    series: { id: "ml-evaluation", title: "Evaluation：模型好不好", order: 3 },
+  },
+  {
+    slug: "ml/evaluation/pr-curve-precision-at-k",
+    title: "PR 曲线与 Precision@k",
+    description:
+      "40 个正例固定，负例从 1 倍加到 99 倍：AUC 几乎不动，PR-AUC 和 Precision@k 一路下掉。为什么不平衡时 ROC 不诚实。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Evaluation",
+    created: "2026-10-16",
+    updated: "2026-10-16",
+    status: "seed",
+    readingMinutes: 6,
+    tags: ["ml-fundamentals", "evaluation", "interactive"],
+    series: { id: "ml-evaluation", title: "Evaluation：模型好不好", order: 4 },
+  },
+  {
+    slug: "ml/evaluation/ab-test-p-value",
+    title: "A/B Test 与 p-value",
+    description:
+      "control 和 treatment 两组转化率的抽样分布，拖样本量看它们能不能分开；p-value、power 和四步流程跟着变。p = 0.05 到底在说什么。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Evaluation",
+    created: "2026-10-16",
+    updated: "2026-10-16",
+    status: "seed",
+    readingMinutes: 7,
+    tags: ["ml-fundamentals", "evaluation", "interactive"],
+    series: { id: "ml-evaluation", title: "Evaluation：模型好不好", order: 5 },
+  },
+  {
+    slug: "ml/llms/transformer-vs-rnn",
+    title: "Transformer 为什么比 RNN 更容易并行？",
+    description:
+      "仍是 Sequence Model，却不再对已知序列逐步更新递归 Hidden State。用时间线、Mask 和推理阶段开关看清依赖到底在哪里。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "LLMs",
+    created: "2026-10-15",
+    updated: "2026-10-15",
+    status: "growing",
+    readingMinutes: 12,
+    tags: ["transformer", "rnn", "self-attention", "parallelism", "causal-mask", "rope", "interactive"],
+    series: { id: "multimodal-path", title: "从 Transformer 到多模态", order: 1 },
+  },
+  {
+    slug: "ml/multimodal/visual-tokens",
+    title: "一张图片如何变成 Visual Tokens？",
+    description:
+      "图片先切 Patch，再经过 ViT 和 Merger 生成可以送入语言模型的视觉向量。交互式切网格与 Token 序列展示完整路径。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Multimodal Learning",
+    created: "2026-10-15",
+    updated: "2026-10-15",
+    status: "growing",
+    readingMinutes: 11,
+    tags: ["vlm", "vit", "patch-embedding", "visual-tokens", "qwen-vl", "interactive"],
+    series: { id: "multimodal-path", title: "从 Transformer 到多模态", order: 2 },
+  },
+  {
+    slug: "ml/multimodal/vision-language-alignment",
+    title: "视觉与文本是怎么对齐的？",
+    description:
+      "对齐不仅是把两种 Embedding 变成相同维度。看 Projector、生成式 Loss、冻结与端到端训练如何建立多模态理解能力。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Multimodal Learning",
+    created: "2026-10-15",
+    updated: "2026-10-15",
+    status: "growing",
+    readingMinutes: 11,
+    tags: ["multimodal-alignment", "projector", "merger", "finetuning", "cross-entropy", "interactive"],
+    series: { id: "multimodal-path", title: "从 Transformer 到多模态", order: 3 },
+  },
+  {
+    slug: "ml/multimodal/clip-contrastive-learning",
+    title: "CLIP：图文对比学习实验台",
+    description:
+      "用三张图、三句话和一个 3×3 矩阵，亲手调整 Temperature，观察图文匹配概率与双向 Contrastive Loss 如何变化。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Multimodal Learning",
+    created: "2026-10-15",
+    updated: "2026-10-15",
+    status: "growing",
+    readingMinutes: 12,
+    tags: ["clip", "contrastive-learning", "infonce", "temperature", "image-text-retrieval", "interactive"],
+    series: { id: "multimodal-path", title: "从 Transformer 到多模态", order: 4 },
+  },
+  {
     slug: "ml/recsys/kuairand-input",
     title: "一条曝光的 84 维输入",
     description:
@@ -253,6 +404,20 @@ export const noteEntries: NoteEntry[] = [
     tags: ["gradient boosting", "XGBoost", "LightGBM", "interactive"],
   },
   {
+    slug: "ml/reinforcement-learning/ucb",
+    title: "Upper Confidence Bound (UCB)",
+    description:
+      "用不确定性指导探索：从 UCB 的直觉与公式，到适应奖励变化的 Discounted UCB。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Reinforcement Learning",
+    created: "2026-09-29",
+    updated: "2026-09-29",
+    status: "growing",
+    readingMinutes: 8,
+    tags: ["bandits", "exploration", "reinforcement learning"],
+  },
+  {
     slug: "systems/distributed/core",
     title: "分布式系统：机器多了，就一定有机器在出事",
     description:
@@ -265,6 +430,20 @@ export const noteEntries: NoteEntry[] = [
     status: "growing",
     readingMinutes: 12,
     tags: ["distributed systems", "CAP", "idempotency", "scheduling", "checkpoint", "backpressure", "interactive"],
+  },
+  {
+    slug: "systems/data/overview",
+    title: "数据基础设施：从一条日志到一个数据集",
+    description:
+      "五道关五对选择，各配一个演示：Spark 还是 Flink，Kafka 还是消息队列，SQL 还是 NoSQL，行存还是列存（Parquet、Arrow），数据仓库还是数据湖。最后是“每天 50 TB 日志怎么变成数据集”。",
+    categoryId: "systems",
+    category: "Systems",
+    section: "Data Infrastructure",
+    created: "2026-10-16",
+    updated: "2026-10-16",
+    status: "growing",
+    readingMinutes: 12,
+    tags: ["data infrastructure", "Spark", "Flink", "Kafka", "SQL", "NoSQL", "Parquet", "data lake", "interactive"],
   },
   {
     slug: "systems/backend/serverless",
@@ -434,8 +613,47 @@ export const noteEntries: NoteEntry[] = [
     readingMinutes: 8,
     tags: ["gpu", "cudnn", "convolution", "interactive"],
   },
+  {
+    slug: "algorithms/binary-search/templates",
+    title: "Binary Search：从查找目标到查找边界",
+    description:
+      "为什么有时候用 l <= r，有时候用 l < r？Exact Match 与 Lower Bound 两个模板的区间定义、循环条件和指针更新为什么必须成套；交互 Dry Run 逐步复现 Search Insert，并演示只改循环条件不改边界会漏掉哪个候选。",
+    categoryId: "algorithms",
+    category: "Algorithms",
+    section: "Binary Search",
+    created: "2026-10-16",
+    updated: "2026-10-16",
+    status: "growing",
+    readingMinutes: 12,
+    tags: ["binary search", "lower bound", "search space", "boundary", "LeetCode", "interactive"],
+    series: { id: "binary-search", title: "Binary Search", order: 1 },
+  },
+  {
+    slug: "algorithms/binary-search/on-answer",
+    title: "Binary Search on Answer：Koko Eating Bananas",
+    description:
+      "在答案上二分，而不是在数组上二分。把 LeetCode 875 翻译成边界、单调性和 feasible(k) 三件事，解释 (p + k - 1) // k 为什么是向上取整，交互 Dry Run 逐步展示搜索空间如何收缩、为什么可行时必须写 r = mid。",
+    categoryId: "algorithms",
+    category: "Algorithms",
+    section: "Binary Search",
+    created: "2026-10-16",
+    updated: "2026-10-16",
+    status: "growing",
+    readingMinutes: 12,
+    tags: ["binary search", "binary search on answer", "first true", "LeetCode", "interactive"],
+    series: { id: "binary-search", title: "Binary Search", order: 2 },
+  },
 ];
 
 export function getNote(slug: string): NoteEntry | undefined {
   return noteEntries.find((note) => note.slug === slug);
+}
+
+export function getSeriesNeighbors(slug: string): { prev?: NoteEntry; next?: NoteEntry } {
+  const note = getNote(slug);
+  if (!note?.series) return {};
+  const id = note.series.id;
+  const series = noteEntries.filter((n) => n.series?.id === id).sort((a, b) => a.series!.order - b.series!.order);
+  const index = series.indexOf(note);
+  return { prev: series[index - 1], next: series[index + 1] };
 }

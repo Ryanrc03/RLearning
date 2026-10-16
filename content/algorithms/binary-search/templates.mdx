@@ -1,0 +1,163 @@
+import BinarySearchVisualizer from "@/components/visualization/algorithms/BinarySearchVisualizer";
+
+# Binary Search：从查找目标到查找边界
+
+> 为什么有时候用 `l <= r`，有时候用 `l < r`？
+
+## The Big Idea
+
+Binary Search 的本质不是“在有序数组里找一个数”，而是**利用单调性，每一步排除一半不可能的答案**。数组有序只是单调性最常见的一种形式；后面一篇会在“答案的取值范围”上做同样的事。
+
+最重要的不是怎么算 `mid`，而是**正确维护搜索区间**：区间里装的是“还可能是答案的位置”，每一步都要保证答案不会被扔出去，同时区间必须严格变小。
+
+## When to Use
+
+三个条件同时满足，就可以二分：
+
+1. **搜索空间有明确边界**：一个下标范围，或一个数值范围。
+2. **存在单调性**：某个判定沿着搜索空间只会从 False 变成 True 一次（或反过来）。
+3. **给定一个候选值，能判断该往左还是往右**：比较 `nums[mid]` 和 target，或者调用一个 `feasible(mid)`。
+
+按任务分，常见的是三种：
+
+```text
+Exact Match                 First True / Lower Bound          Last True
+
+[1, 3, 5, 7, 9]              F   F   F   T   T   T              T   T   T   T   F   F
+       ↑                                 ↑                                  ↑
+    target=5                         boundary                           boundary
+```
+
+- **Exact Match**：找某个具体元素在哪，找不到报告“不存在”。
+- **Lower Bound / First True**：找第一个满足条件的位置。插入位置、第一个 `>= target`、第一个可行速度都是它。
+- **Binary Search on Answer**：在答案范围内找最小或最大的可行值，判定函数由题意给出。
+
+一句话记住这篇笔记：**没有哪一种 `while` 写法永远正确，正确的是“循环条件、区间定义、指针更新”三者一致。**
+
+## Core Templates
+
+### Template A：Exact Match（闭区间，`l <= r`）
+
+LeetCode 704 — [Binary Search](https://leetcode.com/problems/binary-search/)
+
+```python
+def binary_search(nums, target):
+    l, r = 0, len(nums) - 1
+
+    while l <= r:
+        mid = (l + r) // 2
+
+        if nums[mid] == target:
+            return mid
+        elif nums[mid] < target:
+            l = mid + 1
+        else:
+            r = mid - 1
+
+    return -1
+```
+
+| 要素 | 这里的选择 | 为什么 |
+| --- | --- | --- |
+| 区间定义 | 闭区间 `[l, r]`，`l` 和 `r` 都是可能含有 target 的下标 | 所以 `r` 从 `len(nums) - 1` 开始 |
+| 循环条件 | `l <= r` | `l == r` 时区间里还有一个元素没检查，必须进循环 |
+| `mid` | `(l + r) // 2` | 向下取整；Python 整数不会溢出，不需要 `l + (r - l) // 2` |
+| 指针更新 | `l = mid + 1` / `r = mid - 1` | `mid` 已经比较过且不等于 target，可以从两边都排除 |
+| 结束状态 | `l > r` | 候选区间为空，确认 target 不存在 |
+| 返回 | 命中的下标，或 `-1` | 它只回答“在不在”，不负责给插入位置 |
+
+一个常见的错误更新：
+
+```python
+l += 1
+r -= 1
+```
+
+它在很多输入上也能找到答案，但每次只排除一个元素，不再是“排除一半”，最坏时间复杂度退化成 O(n)。二分的速度来自“用 `mid` 的比较结果，一次扔掉整个半区”。
+
+### Template B：Lower Bound / First True（半开区间，`l < r`）
+
+LeetCode 35 — [Search Insert Position](https://leetcode.com/problems/search-insert-position/)
+
+```python
+def search_insert(nums, target):
+    l, r = 0, len(nums)
+
+    while l < r:
+        mid = (l + r) // 2
+
+        if nums[mid] < target:
+            l = mid + 1
+        else:
+            r = mid
+
+    return l
+```
+
+| 要素 | 这里的选择 | 为什么 |
+| --- | --- | --- |
+| 区间定义 | 半开区间 `[l, r)`，候选的“插入位置”是 `l..r` | `r = len(nums)` 让“插在末尾”也是合法答案 |
+| 循环条件 | `l < r` | `l == r` 时候选位置只剩一个，它就是答案，不用再比 |
+| `mid` | `(l + r) // 2` | 向下取整保证 `mid < r <= len(nums)`，永远不会读 `nums[len(nums)]` |
+| 向右 | `l = mid + 1` | `nums[mid] < target`，`mid` 不可能是插入位置 |
+| 向左 | **`r = mid`**，不是 `mid - 1` | `nums[mid] >= target` 时，`mid` 本身可能就是第一个 `>= target` 的位置，不能排除 |
+| 结束状态 | `l == r` | 第一个 `>= target` 的位置 |
+| 返回 | `l` | 空数组时 `l == r == 0`，循环一次都不进，直接返回 0 |
+
+为什么这个循环一定会结束？因为 `mid` 向下取整，`l <= mid < r`：`l = mid + 1` 让 `l` 至少前进 1，`r = mid` 让 `r` 至少后退 1。区间每轮严格变小，不会死循环。
+
+### 核心对比
+
+| 特征 | Template A · Exact Match | Template B · Lower Bound |
+| --- | --- | --- |
+| 初始 `r` | `len(nums) - 1` | `len(nums)` |
+| 循环 | `l <= r` | `l < r` |
+| 向右 | `l = mid + 1` | `l = mid + 1` |
+| 向左 | `r = mid - 1` | `r = mid` |
+| 结束状态 | `l > r` | `l == r` |
+| 返回 | 找到的下标或 `-1` | `l` |
+
+注意，这是两个**不同目标**的标准模板，不是同一件事的两种写法。A 回答“在不在、在哪”，B 回答“第一个满足条件的位置在哪”。拿 A 的区间定义去配 B 的循环条件，就是下面交互要演示的错误。
+
+## Interactive Dry Run
+
+选第三个标签“A 的边界 + `l < r`（错误）”，输入 `[1, 3, 5]`, target = 6：它返回 2，而正确的插入位置是 3。再换 target = 3 和 target = 0，同一段错误代码却给出了正确答案。这正是这种 bug 难发现的原因。
+
+<BinarySearchVisualizer />
+
+把错误写法和 Template B 对照着走一遍：
+
+- 错误写法保留了 `r = len(nums) - 1` 和 `r = mid - 1`，也就是 A 的闭区间语义，意思是“`r` 这个位置还没检查”。
+- 可是循环条件改成了 `l < r`，于是在 `l == r` 时直接退出，`nums[l]` 从未和 target 比较过，就被当成了答案。
+- Template B 不会有这个问题，因为它的 `r` 是“排除边界”：`l == r` 恰好意味着只剩一个候选，不需要再比。
+
+## Common Mistakes
+
+| 错误写法 | 最小反例 | 为什么错 |
+| --- | --- | --- |
+| A 的边界，`while l < r`，返回 `l` 当插入位置 | `[1,3,5]`, target 6 → 返回 2，应为 3 | 闭区间在 `l == r` 时还剩一个未检查元素；改条件不改区间，就漏掉最后一个候选 |
+| B 里写 `r = mid - 1` | `[1,3,5]`, target 3 → 返回 0，应为 1 | `nums[mid] >= target` 时 `mid` 可能就是答案，`mid - 1` 把它扔掉了 |
+| B 里 `r = len(nums) - 1` | `[1,3,5]`, target 6 → 返回 2，应为 3 | “插在末尾”这个位置被排除在搜索空间外 |
+| A 里写 `while l < r` | `[5]`, target 5 → 返回 -1 | 单元素区间不进循环 |
+| 用 `l += 1` / `r -= 1` 代替 `mid ± 1` | 任何长数组 | 还是能对，但每次只排除一个，O(n) |
+| 在 `[l, r)` 里用 `mid = (l + r + 1) // 2` | `[1,3,5]`, target 0 → 死循环；`[1,3,5,7]`, target 8 → 读 `nums[4]` 越界 | `mid` 可能等于 `r`：`r = mid` 时区间不再缩小，`r = len` 时还会越界 |
+
+## Related Problems
+
+| Problem | Pattern | Difficulty |
+| --- | --- | --- |
+| [LC 704 Binary Search](https://leetcode.com/problems/binary-search/) | Exact Match（本文 Template A） | Easy |
+| [LC 35 Search Insert Position](https://leetcode.com/problems/search-insert-position/) | Lower Bound（本文 Template B） | Easy |
+| [LC 74 Search a 2D Matrix](https://leetcode.com/problems/search-a-2d-matrix/) | 把二维下标映射成一维后 Exact Match | Medium |
+| [LC 153 Find Minimum in Rotated Sorted Array](https://leetcode.com/problems/find-minimum-in-rotated-sorted-array/) | Boundary Search：用 `nums[mid]` 和 `nums[r]` 的关系判定方向 | Medium |
+| [LC 875 Koko Eating Bananas](https://leetcode.com/problems/koko-eating-bananas/) | First True，下一篇详细讲 | Medium |
+
+## Key Takeaways
+
+1. 二分的核心是维护“还可能含有答案”的区间，每一步排除一半，并且不把答案扔出去。
+2. `l <= r` 配闭区间 `[l, r]`、`r = len - 1`、`r = mid - 1`；`l < r` 配半开区间 `[l, r)`、`r = len`、`r = mid`。三者要成套换，不能只改一个。
+3. 找“第一个满足条件的位置”时，满足条件的 `mid` 不能排除，所以是 `r = mid`。
+4. 向下取整的 `mid` 保证 `mid < r`，是半开模板不越界、不死循环的原因。
+5. 一段错误的二分可能在大多数用例上都对。测试时专门构造 target 比所有元素都大、等于首尾元素、空数组这几种边界。
+
+下一篇：[Binary Search on Answer：Koko Eating Bananas](/notes/algorithms/binary-search/on-answer/)，把同一个 First True 模板搬到“答案范围”上。

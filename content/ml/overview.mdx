@@ -1,0 +1,15 @@
+import KnowledgeTree from "@/components/visualization/ml/KnowledgeTree";
+
+# ML & LLM 知识树
+
+ML & LLM 这一类的笔记按一棵树来组织。每一行是一章，章内从左到右是一条问题链：每一页回答上一页留下的问题。虚线是跨章的先修关系，比如 Word2Vec 的输出层就是 softmax，所以它指回 Softmax 与 Cross-Entropy。虚框的页还没写，写完会变成实框。
+
+<KnowledgeTree />
+
+## 怎么用这棵树
+
+- **第一次读**，从 Evaluation 开始按行往下。前六章是机器学习的基础，顺序就是依赖顺序；后面的 LLMs、LLM Engineering、Multimodal、Recommender Systems、Reinforcement Learning 各自独立，可以挑着看。
+- **复习某一页**，先点它，看一句话能不能自己复述；说不出来再进去读。节点下方会列出它的先修和后继。
+- **准备面试**，沿着虚线走：一条虚线就是一个追问。Cross-Entropy 会被追问到 Word2Vec 和 CLIP，Gradient Descent 会被追问到 GBDT 的残差。
+
+每一页都是同一个骨架：一句话、为什么需要它、怎么工作（一张能动的图加必要的公式）、代价与取舍、再往下看。图里的数字都是实时算出来的，拖一下控件就能验证正文说的话。

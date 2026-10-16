@@ -1,0 +1,46 @@
+import RocAucFigure from "@/components/visualization/ml/evaluation/RocAucFigure";
+
+# ROC 与 AUC
+
+## 一句话
+
+**ROC 曲线把阈值从高扫到低，每个阈值记一个 (FPR, TPR) 点连起来；AUC 是曲线下面积，等于随机抽一个正例和一个负例、模型给正例更高分数的概率。**
+
+它比较的是模型的排序能力，和你最后选哪个阈值无关。
+
+## 为什么需要它
+
+上一页的三个指标都挂在一个阈值上。两个模型放在一起比：A 在阈值 0.5 下 precision 高，B 在 0.3 下 recall 高，谁更好说不清，因为比的不是模型，是两个阈值。要么先定死阈值，要么把所有阈值一起看。ROC 做的是后者：每个阈值一个点，整条曲线才是模型。
+
+## 怎么工作
+
+<RocAucFigure />
+
+横轴和纵轴都是从混淆矩阵来的比例。纵轴 TPR 就是 recall，也叫 sensitivity；横轴 FPR 是被冤枉的负例占全部负例的比例，1 − FPR 叫 specificity，也就是负例那一侧的 recall：
+
+$$
+TPR = \frac{TP}{TP + FN},\qquad FPR = \frac{FP}{FP + TN}
+$$
+
+阈值最高时谁都不被叫成 dog，TPR 和 FPR 都是 0，曲线从左下角出发；阈值最低时所有动物都是 dog，两者都是 1，曲线在右上角结束。中间每降一点阈值，就多放进来一只动物：是 dog 就往上走一格，是 cat 就往右走一格。对角线是 TPR = FPR，相当于瞎猜；曲线越贴左上角，说明同样冤枉这么多 cat 时找出的 dog 越多。
+
+AUC 是曲线下面积。它有一个更好记的等价说法：把每一只 dog 和每一只 cat 配成一对，看模型给 dog 的分数是不是更高，分数相同算半对：
+
+$$
+AUC = \frac{\sum_{i \in \text{dog}} \sum_{j \in \text{cat}} \left[\,\mathbb{1}(s_i > s_j) + \tfrac{1}{2}\,\mathbb{1}(s_i = s_j)\,\right]}{N_{\text{dog}} \cdot N_{\text{cat}}}
+$$
+
+图里模型 A 的 AUC 约 0.9，意思是随便抽一只 dog 和一只 cat，十次里有九次 A 把 dog 排在前面。拖阈值时点在曲线上走，曲线和 AUC 一动不动。
+
+## 代价与取舍
+
+- AUC 只看排序，不看分数本身准不准。两个模型 AUC 相同，输出的概率可以一个整体偏高、一个整体偏低，需要概率时还要看校准。
+- AUC 把所有阈值平均对待，而上线只用一个阈值。曲线在你关心的那一段（比如 FPR 小于 1% 的区间）谁高，比总面积更要紧。
+- 正例稀少时，FPR 的分母是庞大的负例数，几千个误报也只是零点几的 FPR，ROC 依旧好看。这是下一页。
+- 分数相同的正负样本各记半对。模型只输出 0 / 1 时，ROC 只剩一个点，AUC 退化成 (TPR + 1 − FPR) / 2。
+
+## 再往下看
+
+[PR 曲线与 Precision@k](/notes/ml/evaluation/pr-curve-precision-at-k/) 把横轴换成 recall、纵轴换成 precision，只盯正例那一侧，不平衡数据上才看得出差别。
+
+跨章：推荐系统那一章的 [梯度提升树如何给曝光打分](/notes/ml/recsys/lightgbm-explained/) 用验证集 AUC 决定什么时候停止训练，[提升树训练实验台](/notes/ml/recsys/boosting-lab/) 里也能看到 AUC 先升后平再降。
