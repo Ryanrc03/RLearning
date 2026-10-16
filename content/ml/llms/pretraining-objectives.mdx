@@ -1,0 +1,43 @@
+import PretrainingObjectivesFigure from "@/components/visualization/ml/llms/PretrainingObjectivesFigure";
+
+# 预训练目标：自回归与 Masked LM
+
+## 一句话
+
+**预训练的 loss 是一串 cross-entropy：GPT 让每个位置只看前文、预测自己这个词；BERT 遮住 15% 的词、整句可见、只预测被遮的，再加一项判断下一句的二分类。**
+
+两种目标决定了模型是会生成的 decoder 还是会理解的 encoder。
+
+## 为什么需要它
+
+上一页把一层的形状对上了，叠几十层就是一个模型，但参数还是随机的。监督学习要标签，可没有人给几万亿个 token 标过答案。预训练的办法是让句子自己当标签：盖住一部分，让模型猜，猜错了就罚。于是问题变成盖哪一部分：只让它看左边、猜右边，得到的是会续写的模型；随便盖中间几个、两边都给看，得到的是会理解整句的模型。两种盖法对应两种 loss。
+
+## 怎么工作
+
+<PretrainingObjectivesFigure />
+
+$$
+L_{\text{GPT}} = -\sum_{t=1}^{T} \log P\left(y_t \mid y_{<t},\, x\right)
+$$
+
+$$
+L_{\text{BERT}} = -\sum_{i \in \text{masked}} \log P\left(x_i \mid x_{\text{masked}}\right)
+\;-\; y\log p - (1-y)\log(1-p)
+$$
+
+GPT 那一侧：输入是 [BOS] 加整句，位置 t 只能读到它左边的 token（causal mask 把右边遮成 −∞），任务是预测自己这个位置的词。六个位置各给一个概率、各交一项 −log p_t，加起来就是 L。「我」排在句首没有任何上下文，p 只有 0.2，这一项最贵；「火锅」前面已经有「很 想 吃」，p = 0.85，几乎不罚。训练时整句已知，六个位置的预测一次前向全算出来，这就是 Transformer vs RNN 那一页说的 teacher forcing。
+
+BERT 那一侧：先把两个位置换成 [MASK]，然后每个位置都能读整句，包括 [MASK] 本身。只有被遮的位置交 loss，「今天」和「吃」各一项；「吃」夹在「想」和「火锅」之间，两边一看几乎确定，p = 0.92。没被遮的位置不预测、不罚。再加一项 NSP：[CLS] 位置的向量过一个二分类头，判断后面那句是不是真的下一句，这是一项二元 cross-entropy，p = 0.9、y = 1 时交 0.105。
+
+两边的每一项都是 [Softmax 与 Cross-Entropy](/notes/ml/classifiers/softmax-cross-entropy/) 那一页的 −log p：模型在整个词表上给一个分布，罚的是正确 token 分到的概率有多低。区别只在哪些位置算、每个位置能看到什么。
+
+## 代价与取舍
+
+- GPT 的每个 token 都是训练信号，一句话出 T 项；BERT 只有 15% 的位置出 loss，同样的数据学得慢，但每一项都用上了双向上下文。
+- BERT 训练时见过 [MASK]，推理时输入里却没有，这个错位是它用 80 / 10 / 10（遮、换成随机词、不动）的原因；GPT 训练和推理看到的都是前文，没有这个问题。
+- 自回归模型只能从左往右生成，想「填中间」得绕；BERT 能理解整句、做分类和抽取，却不会生成，因为它从没学过「下一个词是什么」。
+- NSP 后来被 RoBERTa 证明帮助不大，很多 BERT 变体去掉了它，Masked LM 才是主项。
+
+## 再往下看
+
+GPT 学的是「下一个词的分布」，可一个分布不是一个词：生成时到底取最高的、按概率抽，还是留几个再抽？下一页 [Decoding：greedy、sampling、top-k、top-p、beam](/notes/ml/llms/decoding-strategies/)。位置 t 为什么只能看左边、训练为什么还能并行，见 [Transformer vs RNN](/notes/ml/llms/transformer-vs-rnn/) 里的 mask 和 train / prefill / decode。

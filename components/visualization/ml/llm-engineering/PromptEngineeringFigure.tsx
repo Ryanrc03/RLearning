@@ -68,9 +68,9 @@ export default function PromptEngineeringFigure() {
               </button>
             );
           })}
-          <div className="viz-layer" aria-hidden style={{ cursor: "default", background: "#fbfaf4", borderStyle: "dashed" }}>
+          <div className="viz-layer" style={{ cursor: "default", background: "#fbfaf4", borderStyle: "dashed" }}>
             <b style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <i style={{ display: "inline-block", width: 10, height: 10, borderRadius: 3, background: "#3b4234" }} />
+              <i aria-hidden style={{ display: "inline-block", width: 10, height: 10, borderRadius: 3, background: "#3b4234" }} />
               任务 <span className="viz-k">不可关</span>
             </b>
             <small>要分类的那条评论和问题本身，始终在 prompt 里。</small>

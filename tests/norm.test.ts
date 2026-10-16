@@ -1,6 +1,24 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { batchNorm, DEMO_ACTIVATIONS, DEMO_BATCH, DEMO_FEATURES, DEMO_SEED, DEMO_WEIGHTS, layerNorm, meanStd, weightNorm } from "@/lib/ml/norm";
+import {
+  batchNorm,
+  batchNorm2d,
+  channelValues,
+  DEMO_ACTIVATIONS,
+  DEMO_BATCH,
+  DEMO_FEATURES,
+  DEMO_IMAGE_BATCH,
+  DEMO_IMAGE_CHANNELS,
+  DEMO_IMAGE_HW,
+  DEMO_IMAGE_SEED,
+  DEMO_IMAGES,
+  DEMO_SEED,
+  DEMO_WEIGHTS,
+  layerNorm,
+  meanStd,
+  tensorShape,
+  weightNorm,
+} from "@/lib/ml/norm";
 
 const close = (a: number, b: number, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} ≉ ${b}`);
 
@@ -62,4 +80,46 @@ test("DEMO_ACTIVATIONS is seeded and its features sit on different scales", () =
   const colMeans = Array.from({ length: DEMO_FEATURES }, (_, j) => meanStd(a.map((row) => row[j])).mean);
   assert.ok(Math.max(...colMeans) - Math.min(...colMeans) > 5, `column means too similar: ${colMeans}`);
   assert.ok(a.flat().every((v) => Number.isFinite(v)));
+});
+
+// ---- BatchNorm2d: (batch, channel, H, W), one statistic per channel ----
+
+test("BatchNorm2d: every channel has mean 0 and std 1 over batch × H × W (eps = 0)", () => {
+  const t = DEMO_IMAGES(DEMO_IMAGE_SEED);
+  const r = batchNorm2d(t, 0);
+  for (let k = 0; k < DEMO_IMAGE_CHANNELS; k++) {
+    const vals = channelValues(r.normalized, k);
+    assert.equal(vals.length, DEMO_IMAGE_BATCH * DEMO_IMAGE_HW * DEMO_IMAGE_HW, "8 numbers per channel");
+    const { mean, std } = meanStd(vals);
+    close(mean, 0);
+    close(std, 1);
+    // μ and σ reported per channel are the raw statistics of those 8 numbers.
+    const raw = meanStd(channelValues(t, k));
+    close(r.mean[k], raw.mean);
+    close(r.std[k], raw.std);
+  }
+  // A channel's normalisation depends only on that channel: swap the other channels and it does not move.
+  const swapped = t.map((img) => [img[0], img[2], img[1]]);
+  assert.deepEqual(batchNorm2d(swapped, 0).normalized.map((img) => img[0]), r.normalized.map((img) => img[0]));
+});
+
+test("BatchNorm2d: the output shape equals the input shape (2, 3, 2, 2)", () => {
+  const t = DEMO_IMAGES(DEMO_IMAGE_SEED);
+  const r = batchNorm2d(t, 1e-5);
+  assert.deepEqual(r.shape, [2, 3, 2, 2]);
+  assert.deepEqual(tensorShape(r.normalized), tensorShape(t));
+  assert.deepEqual(r.shape, tensorShape(t));
+  assert.ok(r.normalized.flat(3).every((v) => Number.isFinite(v)));
+  // A single-channel 1 × 1 batch of one has σ = 0 and maps to 0 rather than NaN.
+  const flat = batchNorm2d([[[[3]]]], 0);
+  assert.deepEqual(flat.normalized, [[[[0]]]]);
+  assert.throws(() => tensorShape([[[[1, 2]], [[1]]]]), /height|width|channel/);
+});
+
+test("DEMO_IMAGES is seeded, rectangular, and its channels sit on different scales", () => {
+  const a = DEMO_IMAGES(DEMO_IMAGE_SEED);
+  assert.deepEqual(a, DEMO_IMAGES(DEMO_IMAGE_SEED));
+  assert.deepEqual(tensorShape(a), [DEMO_IMAGE_BATCH, DEMO_IMAGE_CHANNELS, DEMO_IMAGE_HW, DEMO_IMAGE_HW]);
+  const means = Array.from({ length: DEMO_IMAGE_CHANNELS }, (_, k) => meanStd(channelValues(a, k)).mean);
+  assert.ok(Math.max(...means) - Math.min(...means) > 4, `channel means too similar: ${means}`);
 });

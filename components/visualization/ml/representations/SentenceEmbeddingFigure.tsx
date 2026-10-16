@@ -87,8 +87,8 @@ export default function SentenceEmbeddingFigure() {
 
   const FW = 420;
   const FH = 212;
-  const midY = 112;
-  const unit = 84; // px per 1.0
+  const midY = 118;
+  const unit = 70; // px per 1.0; the 1.0 gridline then sits below the subtitle
   const slot = 58;
   const x0 = 52;
 
@@ -155,7 +155,7 @@ export default function SentenceEmbeddingFigure() {
           })}
         </Figure>
         <div className="viz-panel">
-          <h5>「{selTok}」在输出里的份额</h5>
+          <h5 className="nocase">「{selTok}」在输出里的份额</h5>
           <p className="viz-k" style={{ marginBottom: 6 }}>
             权重 w = {fmtW(selW)}{selW > 0 ? `（${Math.round(selW * 100)}%）` : ""}；贡献 = w × h_{selTok}
           </p>

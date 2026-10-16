@@ -1,6 +1,6 @@
 # ML 知识树笔记 — 设计文档
 
-日期：2026-10-16　状态：批次 1（骨架 + Evaluation 章）已实施，其余批次待做
+日期：2026-10-16　状态：已全部实施并逐页验证（七章 24 个节点，加《Transformer》《646》追加的 9 页，共 40 个树节点）
 
 ## 目标
 
@@ -149,7 +149,7 @@ MDX 正文固定五节，顺序不变：
 
 | # | slug | 标题 | 回答的问题 | 图：形式 → 主控件 | 来源 | 下一页 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 6 | `classifiers/naive-bayes` | Naive Bayes | 不学参数，光数数能分类吗？ | HTML：笔记的垃圾邮件例子（12 封，8 正常 4 垃圾；Dear / Friend / Lunch / Money 在正常类的词频 8/17、5/17、3/17、1/17，在垃圾类 2/7、1/7、0/7、4/7；“Dear Friend” 算出 0.115 对 0.014，判正常（笔记里写的 0.33 是笔误，结论不变））→ 勾选邮件里出现的词，两个后验的连乘式逐项展开；勾到 Lunch 时垃圾类乘出 0，引出 Laplace 平滑 | p12 | 7 |
+| 6 | `classifiers/naive-bayes` | Naive Bayes | 不学参数，光数数能分类吗？ | HTML：笔记的垃圾邮件例子（12 封，8 正常 4 垃圾；Dear / Friend / Lunch / Money 在正常类的词频 8/17、5/17、3/17、1/17，在垃圾类 2/7、1/7、0/7、4/7；“Dear Friend” 算出 0.092 对 0.014，判正常（笔记里写的 0.33 是算错了，结论不变））→ 勾选邮件里出现的词，两个后验的连乘式逐项展开；勾到 Lunch 时垃圾类乘出 0，引出 Laplace 平滑 | p12 | 7 |
 | 7 | `classifiers/logistic-regression` | Logistic Regression | 边界怎么学出来，分数怎么变概率？ | SVG 左右：二维点和决策边界，sigmoid 曲线上当前样本的位置 → 步进播放器，每步做一次 gradient descent，边界转动、BCE loss 下降 | p3 | 8 |
 | 8 | `classifiers/softmax-cross-entropy` | Softmax 与 Cross-Entropy | 三类以上怎么办，错得离谱怎么罚得更重？ | HTML：cat / dog / bird 三个 logit 和 softmax 后的概率条，右侧 −log p 曲线 → 拖真实类的 logit，复现 0.9 → 0.105 和 0.2 → 1.61；K = 2 时公式退化成 sigmoid 的提示 | p3–4 | 章出口：Training |
 
@@ -213,7 +213,7 @@ MDX 正文固定五节，顺序不变：
 | `norm.ts` | 沿 batch / feature 轴的均值方差、weight norm | 21 |
 | `sampling.ts` | 带 temperature 的 softmax 采样（用 random.ts） | 24 |
 
-测试用现有的 `npm test`（`tsx --test tests/*.test.ts`）。每个函数至少一条用笔记里的数字做断言：p1 的 4/7、4/6、50%；p4 的 0.105、1.61；p12 的 0.115 和 0.014。
+测试用现有的 `npm test`（`tsx --test tests/*.test.ts`）。每个函数至少一条用笔记里的数字做断言：p1 的 4/7、4/6、50%；p4 的 0.105、1.61；p12 的 0.092 和 0.014。
 
 ## 注册
 

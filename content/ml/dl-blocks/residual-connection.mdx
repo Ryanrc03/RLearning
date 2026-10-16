@@ -1,0 +1,48 @@
+import ResidualFigure from "@/components/visualization/ml/dl-blocks/ResidualFigure";
+
+# Residual Connection
+
+## 一句话
+
+**residual connection 把一层写成 y = x + f(x)：输入直接加到输出上，反向时梯度多出一条系数为 1 的通路，层数再深也不会被连乘成 0。**
+
+ResNet 靠它把网络从二十层推到一百多层，Transformer 的每个 attention 和 FFN 子层外面都包着一条。
+
+## 为什么需要它
+
+上一页的梯度是一串局部导数的连乘，每过一层乘一个 ∂f/∂x。这个因子通常小于 1：sigmoid 的导数最大 0.25，初始化的权重又偏小，一层 0.5 左右很常见。十层是 0.5¹⁰ ≈ 0.001，三十层是 10⁻⁹，靠近输入的层收到的梯度几乎为 0，参数等于没在训练。这就是 vanishing gradient：不是模型不想学，是信号到不了。
+
+## 怎么工作
+
+<ResidualFigure />
+
+$$
+y = x + f(x)
+$$
+
+$$
+\frac{\partial L}{\partial x} = \frac{\partial L}{\partial y}\cdot\left(1 + \frac{\partial f}{\partial x}\right)
+$$
+
+$$
+\text{plain: } \prod_{\ell=1}^{N}\frac{\partial f_\ell}{\partial x_\ell}
+\qquad
+\text{residual: } \prod_{\ell=1}^{N}\left(1 + \frac{\partial f_\ell}{\partial x_\ell}\right)
+$$
+
+图里左右两列是同样的 N 层，每层的 ∂f/∂x 从 [−0.4, 0.6] 里按固定种子抽出，两列用的数完全一样。梯度从 loss 出发往回走，经过第 k 层后的累计大小画成一根条，横轴是对数刻度。plain 这列每层乘一个绝对值小于 1 的数，条一路缩短，拖到 30 层时已经掉到 10⁻²¹ 以下；residual 这列乘的是 1 + ∂f/∂x，在 0.6 到 1.6 之间来回，30 层后仍在 1 附近。
+
+那个 1 是从哪来的：y = x + f(x) 对 x 求导，x 这一项的导数就是 1。梯度回传时它不经过 f 的任何权重，原样加在 f 那条路的梯度上；f 算出来的 ∂f/∂x 再小，也只是在 1 上加减一点，连乘不会往 0 塌。换一种说法，每一层只需要学 f(x) = y − x 这个残差，学到 0 也无妨，恒等映射是白送的，所以加层至少不会更差。
+
+切到「全部 +0.6」看另一面：plain 是 0.6ⁿ，20 层后 3.7 × 10⁻⁵；residual 变成 1.6ⁿ，20 层后一万多。那个 1 保证了不消失，不保证不爆炸。
+
+## 代价与取舍
+
+- x 和 f(x) 要能相加，两者的形状必须一致；下采样或变宽的层要给跳线加一个 1×1 卷积或线性投影。
+- 它只解决「梯度传不过去」，不解决「梯度太大」。因子同号时 (1 + ∂f/∂x) 一路大于 1，所以 residual 几乎总是和 normalization 搭配出现。
+- 一层学的是残差而不是完整映射，每层的改动都是小修小补；想让一层做大改动时它反而是束缚，这也是输入端第一层通常不用它的原因。
+- Transformer 里 norm 放在跳线之前还是之后（pre-norm / post-norm）决定这条直通路是不是真的直：post-norm 把 x + f(x) 再归一化一次，1 就不再是 1。
+
+## 再往下看
+
+有了直通路，梯度不消失了，但每层激活值的尺度仍然没人管，连乘出来的大小会飘。[Normalization](/notes/ml/dl-blocks/normalization/) 讲怎么把激活值和权重拉回均值 0、方差 1，以及沿哪个轴拉。

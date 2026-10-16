@@ -1,0 +1,42 @@
+import Word2VecFigure from "@/components/visualization/ml/representations/Word2VecFigure";
+
+# Word2Vec：CBOW 与 Skip-gram
+
+## 一句话
+
+**Word2Vec 用「一个词和它周围的词互相预测」这个任务训练一个小网络，训练完把隐层权重拿出来，每个词对应的那一行就是它的向量。**
+
+CBOW 用上下文预测中心词，Skip-gram 用中心词预测上下文。学出来的词向量是后面句向量、检索、推荐里一切「算相似度」的起点。
+
+## 为什么需要它
+
+上一章的树模型吃的是表格里的数字，文字要先变成向量才能进模型。最直接的是 one-hot：词表有 V 个词，每个词是一个长度 V、只有一个 1 的向量。但 one-hot 两两正交，cat 和 dog 的距离与 cat 和 bank 一样远，模型学不到词和词的关系。Word2Vec 之前的做法是数一张巨大的「词 × 上下文」共现矩阵，再用 SVD 压成低维（大矩阵 → 小矩阵）；它能用，但矩阵随词表平方增长，加新语料就得重算。Word2Vec 换了思路：不压缩统计量，而是让一个预测任务顺便把向量学出来，输出层就是一个用 cross-entropy 训练的 softmax（见 [Softmax 与 Cross-Entropy](/notes/ml/classifiers/softmax-cross-entropy/)）。
+
+## 怎么工作
+
+<Word2VecFigure />
+
+$$
+\text{CBOW:}\quad h = \frac{1}{|C|}\sum_{c \in C} W_{\text{in}}[c],\qquad P(w_t \mid C) = \text{softmax}(W_{\text{out}}\, h)_{w_t}
+$$
+
+$$
+\text{Skip-gram:}\quad h = W_{\text{in}}[w_t],\qquad P(w_c \mid w_t) = \text{softmax}(W_{\text{out}}\, h)_{w_c}
+$$
+
+图里的句子是笔记里的 we are about to study the idea，窗口左右各 2 个词。中心词停在 about 时，窗口里是 we、are、to、study。CBOW 把这 4 个词的 one-hot 各在 W_in 里查出一行（one-hot 乘矩阵就是取那一行），逐维平均成 h，再乘 W_out 过 softmax，得到词表上 7 个词的概率，训练目标是让 about 的概率最大。中心词挪到 to，上下文变成 are、about、study、the，目标变成 to。
+
+Skip-gram 把方向倒过来：about 的 one-hot 查出一行 W_in 得到 h，乘 W_out 过 softmax 得到 P(w_c | about)，对窗口里的每个词各算一次。同一个窗口产生 4 个训练对：about → we、about → are、about → to、about → study，标签都是 1。词表大时 softmax 的分母算不起，实际用 negative sampling：从窗口外随机抽几个词作标签 0 的负样本（图里的 the、idea），把 V 路 softmax 换成几个二分类。
+
+训练完，W_in 就是词向量表：一行一个词，维度 d 通常几十到几百。在相似上下文里出现的词被推到相近的位置，所以才会有 king − man + woman ≈ queen 这种规律。
+
+## 代价与取舍
+
+- CBOW 把上下文平均掉，等于做了平滑：训练快、对噪声稳，但罕见词在平均里被淹没，学得差。Skip-gram 每个上下文词单独算一次，更细、罕见词学得更好，代价是慢、对超参数更敏感、结果更吵。小语料常选 Skip-gram，大语料 CBOW 够用。
+- 一个词只有一个向量，分不开 bank 的两个意思；这要到上下文相关的模型（BERT）才解决。
+- 窗口大小决定学到什么：小窗口偏句法，可互换的词挨得近；大窗口偏主题。
+- 没见过的词没有向量；子词方法（fastText、BPE）用来补这个洞。
+
+## 再往下看
+
+词有了向量，一句话呢？[Sentence Embedding](/notes/ml/representations/sentence-embedding/) 讲 BERT 把每个 token 变成一个上下文相关的向量以后，怎么合成整句的一个向量。Word2Vec 的输出层就是一个 softmax，它的训练目标在 [Softmax 与 Cross-Entropy](/notes/ml/classifiers/softmax-cross-entropy/) 里。

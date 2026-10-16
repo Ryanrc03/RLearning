@@ -1,0 +1,46 @@
+import MultiHeadAttentionFigure from "@/components/visualization/ml/llms/MultiHeadAttentionFigure";
+
+# Multi-head 与参数量
+
+## 一句话
+
+**multi-head attention 把 d_model 维切成 h 份，每个 head 用自己的 W_Q、W_K、W_V 在 d_k = d_model / h 维里各算一次 attention，输出拼接后再乘一个 W^O；四个矩阵加起来是 4 d_model²，和 h 无关。**
+
+GPT、BERT 和 ViT 里的 attention 层全是这样拼的。
+
+## 为什么需要它
+
+[上一页](/notes/ml/llms/attention-qkv/) 里一组 W_Q、W_K、W_V 算出的权重矩阵只有一张：Ryan 主要看「I」，这是一种关系。可一句话里同时存在好几种关系：主谓、动宾、指代、相邻。一张 softmax 表要同时顾及所有关系，权重就会被摊平，哪种都看不清。最直接的办法是多算几张表，每张用自己的一组投影，各看各的。问题是参数会不会按 h 倍增长？答案是不会，因为每个 head 用的维度也跟着除以 h。
+
+## 怎么工作
+
+<MultiHeadAttentionFigure />
+
+$$
+\text{head}_i = \mathrm{Attention}\left(X W_{Q,i},\; X W_{K,i},\; X W_{V,i}\right),\qquad W_{Q,i} \in \mathbb{R}^{d_{\text{model}} \times d_k},\; d_k = \frac{d_{\text{model}}}{h}
+$$
+
+$$
+\mathrm{MultiHead}(X) = \mathrm{Concat}(\text{head}_1, \ldots, \text{head}_h)\, W^{O},\qquad W^{O} \in \mathbb{R}^{h d_k \times d_{\text{model}}}
+$$
+
+$$
+\#\text{params} = 3 \cdot h \cdot d_{\text{model}} \cdot \frac{d_{\text{model}}}{h} + d_{\text{model}}^2 = 4\, d_{\text{model}}^2
+$$
+
+图里 d_model = 128，拖动 h 从 1 到 16。h = 8 时 d_k = 16，每个 head 的 Q、K、V 都是 (B, T, 16)，上面那条 128 维的输入被切成 8 条颜色不同的片，每片进自己的 attention，8 个 (B, T, 16) 的输出按同样顺序拼回 (B, T, 128)，最后乘 W^O 把各 head 的结果混在一起。模型对外的输出形状从头到尾是 (B, T, d_model)，和单头时一样。
+
+参数表是这一页的重点。一个 head 的 W_Q 是 d_model × d_k；h 个 head 就是 h × d_model × d_k，把 d_k = d_model / h 代进去，h 消掉，得到 d_model²。W_K、W_V 同理，W^O 是 (h · d_k) × d_model，也是 d_model²。所以 attention 层的参数量永远是 4 d_model² = 65,536，滑杆怎么拖最后一列都不动。多头不是多花参数，而是把同样的 128 维分给 h 种看法。
+
+切到 GPT-3 预设：d_model = 12,288，推到 h = 96 时 d_k 正好是 128，这就是笔记里 W_Q、W_K 12,288 × 128 的来历，每个 head 把 12,288 维的 embedding 压到 128 维去比相关性。右下角是两个真实算出来的 head：同样的四个 token、同样的 E，head 1 让 Ryan 最看「I」，head 2 让它最看「am」。两个 head 的 2 维输出拼成 4 维，乘 W^O 又回到 4 维，下一层拿到的 Ryan 同时带着这两种关系。
+
+## 代价与取舍
+
+- h 越大 d_k 越小：128 维切成 16 份后每个 head 只剩 8 维去比相关性，分数区分度下降；h 选多少是在「看法种类」和「每种看法的精度」之间取舍，常见是 d_k 取 64 或 128。
+- 参数量不随 h 变，计算量也几乎不变（h 个 T × T 的小表加起来和一张大表差不多），但 h 张 T × T 的权重表要同时留在显存里，长序列时这是主要开销。
+- 很多 head 学到的模式彼此重复，训练完剪掉一部分 head 影响很小；MQA、GQA 让多个 head 共享 K、V，就是在省这部分。
+- W^O 不能省：没有它，各 head 的输出只是并排放着，彼此没有交互，下一层也无法按需要重新组合它们。
+
+## 再往下看
+
+attention 只是一层里的一块，[Transformer Block](/notes/ml/llms/transformer-block/) 把 embedding、position、multi-head attention、residual + LayerNorm 和 MLP 串成一层，每一步标出形状。

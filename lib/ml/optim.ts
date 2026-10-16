@@ -78,8 +78,8 @@ export function adamStep(st: AdamState, grad: Vec2, lr: number, beta1: number, b
 // One learning rate per method, chosen so each is visibly characteristic on
 // the bowl within forty steps (see the figure's narration).
 export const HYPER = {
-  gd: { lr: 1.5 },
-  sgd: { lr: 1.5, noiseSd: 0.18 },
+  gd: { lr: 1.8 },
+  sgd: { lr: 1.8, noiseSd: 0.1 },
   momentum: { lr: 0.5, beta: 0.8 },
   rmsprop: { lr: 0.16, rho: 0.9 },
   adam: { lr: 0.16, beta1: 0.9, beta2: 0.999 },
@@ -151,4 +151,15 @@ export function runOptimizer(name: OptimizerName, steps: number, seed = 1): Traj
 export function stepsToReach(traj: TrajectoryPoint[], threshold: number): number | null {
   const i = traj.findIndex((p) => p.loss < threshold);
   return i < 0 ? null : i;
+}
+
+// First step index from which the loss stays below `threshold` for the rest of
+// the run (an overshooting optimizer dips below and climbs back), or null.
+export function stepsToSettle(traj: TrajectoryPoint[], threshold: number): number | null {
+  let k: number | null = null;
+  for (let i = traj.length - 1; i >= 0; i--) {
+    if (traj[i].loss >= threshold) return k;
+    k = i;
+  }
+  return k;
 }

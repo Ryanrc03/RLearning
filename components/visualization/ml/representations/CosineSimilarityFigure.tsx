@@ -136,7 +136,8 @@ export default function CosineSimilarityFigure() {
                   <Arrow f={f} v={B} color={C_B} />
                   <text x={f.x(A[0]) + 8} y={f.y(A[1]) - 6} fontSize={13} fontWeight={700} fill={C_A}>A</text>
                   <text x={f.x(B[0]) + (B[0] >= 0 ? 12 : -12)} y={f.y(B[1]) + (B[1] >= 0 ? -10 : 18)} fontSize={13} fontWeight={700} textAnchor={B[0] >= 0 ? "start" : "end"} fill={C_B}>B</text>
-                  <text x={f.x(foot[0]) + (A[1] >= 0 ? 6 : -6)} y={f.y(foot[1]) + 14} fontSize={10.5} fill={C_B} className="mono">‖B‖cosθ = {fmt(proj)}</text>
+                  {/* label at the midpoint of the projection, pushed below A's line so it never leaves the panel */}
+                  <text x={f.x(foot[0] / 2) + (A[1] / nA) * 16} y={f.y(foot[1] / 2) + (A[0] / nA) * 16 + 4} fontSize={10.5} fill={C_B} textAnchor="middle" className="mono">‖B‖cosθ = {fmt(proj)}</text>
                   {/* drag surface + handle */}
                   <rect
                     x={f.x0}
@@ -146,7 +147,11 @@ export default function CosineSimilarityFigure() {
                     fill="transparent"
                     style={{ cursor: dragging ? "grabbing" : "crosshair", touchAction: "none" }}
                     onPointerDown={(e) => {
-                      e.currentTarget.setPointerCapture(e.pointerId);
+                      try {
+                        e.currentTarget.setPointerCapture(e.pointerId);
+                      } catch {
+                        // Synthetic events have no active pointer to capture; moves still arrive while over the rect.
+                      }
                       setDragging(true);
                       moveTo(e, f);
                     }}

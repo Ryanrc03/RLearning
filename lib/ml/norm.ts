@@ -73,3 +73,75 @@ export const DEMO_SEED = 11;
 
 // A weight vector for the WeightNorm tab; ‖v‖ ≈ 3 so g and v/‖v‖ look different.
 export const DEMO_WEIGHTS = [1.2, -2.0, 0.6, 1.5, -0.9];
+
+// ---------------------------------------------------------------------------
+// BatchNorm2d: the CNN case. A (batch, channel, H, W) tensor is normalised per
+// channel, and each channel's μ and σ come from every pixel of that channel in
+// every image of the batch (batch × H × W numbers). The shape never changes.
+
+/** Indexed [batch][channel][row][col]. */
+export type Tensor4 = number[][][][];
+export type Shape4 = [number, number, number, number];
+
+export type Norm2dResult = {
+  normalized: Tensor4;
+  /** One mean per channel, taken over batch × H × W. */
+  mean: number[];
+  /** One population std per channel, taken over batch × H × W. */
+  std: number[];
+  /** (batch, channel, H, W); identical for input and output. */
+  shape: Shape4;
+};
+
+// The tensor must be rectangular: every image has the same channels, every channel the same H × W.
+export function tensorShape(t: Tensor4): Shape4 {
+  const n = t.length;
+  const c = t[0]?.length ?? 0;
+  const h = t[0]?.[0]?.length ?? 0;
+  const w = t[0]?.[0]?.[0]?.length ?? 0;
+  for (const img of t) {
+    if (img.length !== c) throw new Error("images differ in channel count");
+    for (const ch of img) {
+      if (ch.length !== h) throw new Error("channels differ in height");
+      for (const row of ch) if (row.length !== w) throw new Error("rows differ in width");
+    }
+  }
+  return [n, c, h, w];
+}
+
+// Every value of one channel, in every image, every row, every column.
+export function channelValues(t: Tensor4, channel: number): number[] {
+  return t.flatMap((img) => img[channel].flat());
+}
+
+export function batchNorm2d(t: Tensor4, eps = 0): Norm2dResult {
+  const shape = tensorShape(t);
+  const [, c] = shape;
+  const perChannel = Array.from({ length: c }, (_, k) => {
+    const { mean, std } = meanStd(channelValues(t, k));
+    return { mean, std, denom: Math.sqrt(std * std + eps) };
+  });
+  const normalized = t.map((img) => img.map((ch, k) => ch.map((row) => row.map((v) => (perChannel[k].denom === 0 ? 0 : (v - perChannel[k].mean) / perChannel[k].denom)))));
+  return { normalized, mean: perChannel.map((p) => p.mean), std: perChannel.map((p) => p.std), shape };
+}
+
+export const DEMO_IMAGE_BATCH = 2;
+export const DEMO_IMAGE_CHANNELS = 3;
+export const DEMO_IMAGE_HW = 2;
+export const DEMO_IMAGE_SEED = 7;
+
+// Three channels on different scales (think R / G / B after a conv), so each
+// channel visibly needs its own μ and σ.
+const CHANNEL_MEAN = [0, 6, -3];
+const CHANNEL_SD = [1, 2.5, 0.8];
+
+// The (2, 3, 2, 2) example from the notes: 2 images, 3 channels, 2 × 2 pixels.
+export function DEMO_IMAGES(seed: number): Tensor4 {
+  const rng = createRng(seed);
+  const round = (x: number) => Math.round(x * 10) / 10;
+  return Array.from({ length: DEMO_IMAGE_BATCH }, () =>
+    Array.from({ length: DEMO_IMAGE_CHANNELS }, (_, k) =>
+      Array.from({ length: DEMO_IMAGE_HW }, () => Array.from({ length: DEMO_IMAGE_HW }, () => round(randomNormal(rng, CHANNEL_MEAN[k], CHANNEL_SD[k])))),
+    ),
+  );
+}

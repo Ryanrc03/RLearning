@@ -1,0 +1,21 @@
+import KnowledgeTree from "@/components/visualization/ml/KnowledgeTree";
+
+# LLMs Overview
+
+## 一句话
+
+**这一章回答「模型怎么读一串 token」：先看 RNN 怎么一步一步传 hidden state、Transformer 为什么能并行；再把 attention 拆成 Q、K、V 和多个 head，拼成一层；最后看训练时在预测什么、生成时怎么选下一个词。**
+
+七页是一条问题链，每一页解决上一页留下的问题。除了早先写的 Transformer vs RNN，每页都是五段：一句话、为什么需要它、怎么工作、代价与取舍、再往下看。
+
+## 这章的问题链
+
+<KnowledgeTree chapter="llms" />
+
+## 怎么读
+
+按顺序读，每页 5 到 7 分钟，图里的步进器和滑杆从头拖到尾再往下看。
+
+第 1 页 RNN 用一个 hidden 3 维、输入 2 维的真实递推算出每个 h_t，看清「下一步要等上一步」是什么意思。第 2 页 Transformer vs RNN 是早先写的一篇长文，讲并行从哪来、mask 和 position 是两回事、train / prefill / decode 三个阶段；它比别的页长，可以先读前两节再回头。第 3 页 Attention 用四个 token、d = 4 的玩具 embedding 把 Q、K、V、softmax、加权和一步步算出来；第 4 页 Multi-head 数参数：head 数怎么变，4 d_model² 都不变。第 5 页 Transformer Block 把 attention、MLP、residual、LayerNorm 拼成一层，一个 token 的向量在每个块前后各是什么数。第 6 页预训练目标把 GPT 和 BERT 的 loss 逐项算出来；第 7 页 Decoding 在同一张分布上试五种选词规则和 temperature。
+
+读完应该能用自己的话回答五个问题：Transformer 为什么训练能并行、生成不能；Q、K、V 各是什么；为什么 Transformer 用 LayerNorm 不用 BatchNorm；GPT 和 BERT 的 loss 差在哪；top-p 比 top-k 省心在哪。这一章之后接着去 LLM Engineering，看参数不动时还能改什么。

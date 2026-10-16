@@ -1,0 +1,21 @@
+import KnowledgeTree from "@/components/visualization/ml/KnowledgeTree";
+
+# Deep Learning Blocks Overview
+
+## 一句话
+
+**这一章回答「深了以后出的问题」：先把多层网络的梯度用 chain rule 倒着算出来，再用 residual 让它穿过几十层不消失，最后用 normalization 把每层的尺度沿某个轴稳住。**
+
+三页是一条问题链，每一页解决上一页留下的问题。每页都是五段：一句话、为什么需要它、怎么工作、代价与取舍、再往下看。
+
+## 这章的问题链
+
+<KnowledgeTree chapter="dl-blocks" />
+
+## 怎么读
+
+按顺序读，每页 5 到 7 分钟，图里的控件从头拖到尾再往下看。
+
+第 1 页是基础：一个两输入、两隐层单元的小网络，正向五步、反向七步，每一步的数都写在节点上，亲手把 −(1−p)·z 乘出来。第 2 页讲为什么深了就训不动：同一串因子，连乘它和连乘 (1 + 它) 的差别，拖到 30 层看一边归零、一边还在 1 附近。第 3 页讲三种 normalization 只是「沿哪个轴取均值方差」的不同，以及 BatchNorm 为什么训练和推理不一样。
+
+读完应该能用自己的话回答三个问题：为什么 backprop 要存正向的中间值；residual 的那个 1 是从哪里来的；Transformer 为什么用 LayerNorm 而不是 BatchNorm。

@@ -23,17 +23,19 @@ export default function StepPlayer({ step, total, onStep, intervalMs = 900, capt
   const [playing, setPlaying] = useState(false);
   const reduced = usePrefersReducedMotion();
   const atEnd = step >= total - 1;
+  // Playing stops by itself at the last step; no state write is needed for that.
+  const running = playing && !atEnd;
 
   useEffect(() => {
-    if (!playing) return;
-    if (atEnd) {
-      setPlaying(false);
-      return;
-    }
+    if (!running) return;
     const id = window.setTimeout(() => onStep(step + 1), intervalMs);
     return () => window.clearTimeout(id);
-  }, [playing, atEnd, step, intervalMs, onStep]);
+  }, [running, step, intervalMs, onStep]);
 
+  const go = (next: number) => {
+    setPlaying(false);
+    onStep(next);
+  };
   const reset = () => {
     setPlaying(false);
     if (onReset) onReset();
@@ -42,11 +44,11 @@ export default function StepPlayer({ step, total, onStep, intervalMs = 900, capt
 
   return (
     <div className="viz-player" role="group" aria-label="步进控制">
-      <button type="button" className="viz-btn" disabled={step <= 0} onClick={() => { setPlaying(false); onStep(step - 1); }}>← 上一步</button>
-      <button type="button" className="viz-btn primary" disabled={atEnd} onClick={() => { setPlaying(false); onStep(step + 1); }}>下一步 →</button>
+      <button type="button" className="viz-btn" disabled={step <= 0} onClick={() => go(step - 1)}>← 上一步</button>
+      <button type="button" className="viz-btn primary" disabled={atEnd} onClick={() => go(step + 1)}>下一步 →</button>
       {!reduced && (
-        <button type="button" className={`viz-btn${playing ? " is-on" : ""}`} disabled={atEnd && !playing} onClick={() => setPlaying((p) => !p)}>
-          {playing ? "暂停" : "播放"}
+        <button type="button" className={`viz-btn${running ? " is-on" : ""}`} disabled={atEnd} onClick={() => setPlaying(!running)}>
+          {running ? "暂停" : "播放"}
         </button>
       )}
       <button type="button" className="viz-btn" onClick={reset}>重置</button>

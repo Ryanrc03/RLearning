@@ -125,3 +125,32 @@ export function bestDegree(errors: DegreeError[]): number {
   for (const e of errors) if (e.test < best.test) best = e;
   return best.degree;
 }
+
+export type FitRegions = {
+  best: number;
+  /** Largest degree below `best` whose test MSE is still more than `ratio` × the minimum, or null. */
+  underEnd: number | null;
+  /** Smallest degree above `best` whose test MSE exceeds `ratio` × the minimum, or null. */
+  overStart: number | null;
+};
+
+// Labels the two ends of the error curve: degrees whose test MSE is clearly worse than
+// the best one are "underfitting" on the left and "overfitting" on the right.
+export function fitRegions(errors: DegreeError[], ratio = 1.5): FitRegions {
+  const best = bestDegree(errors);
+  const minTest = errors.find((e) => e.degree === best)!.test;
+  let underEnd: number | null = null;
+  let overStart: number | null = null;
+  for (const e of errors) {
+    if (e.test <= ratio * minTest) continue;
+    if (e.degree < best) underEnd = e.degree;
+    else if (e.degree > best && overStart === null) overStart = e.degree;
+  }
+  return { best, underEnd, overStart };
+}
+
+export function fitRegionOf(regions: FitRegions, degree: number): "under" | "sweet" | "over" {
+  if (regions.underEnd !== null && degree <= regions.underEnd) return "under";
+  if (regions.overStart !== null && degree >= regions.overStart) return "over";
+  return "sweet";
+}

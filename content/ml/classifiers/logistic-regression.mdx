@@ -1,0 +1,46 @@
+import LogisticRegressionFigure from "@/components/visualization/ml/classifiers/LogisticRegressionFigure";
+
+# Logistic Regression
+
+## 一句话
+
+**Logistic Regression 学一条线性边界 z = wᵀx + b，用 sigmoid 把 z 压成 0 到 1 之间的概率，再用 BCE 损失和梯度下降把 w 学出来。**
+
+它是最常用的二分类 baseline，也是神经网络最后一层的原型：点击率预估、风控评分里到处是它。
+
+## 为什么需要它
+
+Naive Bayes 什么都不学，边界是词频表定的；特征一旦不是「数出来」的词，或者特征之间明显相关，它就不好用了。更直接的想法是给每个特征一个权重，加权求和得到一个分数 z，z 大于 0 就判 1。但分数不是概率：z = 3 和 z = 30 都是「判 1」，可信程度却差很多，而上一章的阈值和指标要的都是 p(y = 1 | x)。sigmoid 是把分数变概率的那一步，BCE 是逼着这个概率说实话的那把尺子。
+
+## 怎么工作
+
+<LogisticRegressionFigure />
+
+$$
+z = w^\top x + b,\qquad p(y = 1 \mid x) = \sigma(z) = \frac{1}{1 + e^{-z}}
+$$
+
+$$
+L = -\frac{1}{n}\sum_i \Big[\, y_i \log p_i + (1 - y_i)\log(1 - p_i) \,\Big]
+$$
+
+$$
+\frac{\partial L}{\partial w} = \frac{1}{n}\sum_i (p_i - y_i)\,x_i,\qquad w \leftarrow w - \eta\,\frac{\partial L}{\partial w}
+$$
+
+左图是 32 个点，蓝色是 0，橙色是 1，两团略有重叠。初始的 w = (0, 1)、b = 0 画出一条水平线，上半边猜 1，和数据正好拧着：只分对 6 个，loss 1.30。每按一次「下一步」，模型按第三个公式走一步：p − y 是每个点「错了多少」，乘上它的坐标就是它把 w 往哪边拉；错得多的点拉得狠，已经分对的点几乎不出力。几步之内边界就转了过来，右上角的 loss 曲线一路往下。
+
+右下角的 sigmoid 曲线回答「分数怎么变概率」：带圈的那个点一开始 z 是负的，σ(z) 只有 0.04，模型说它几乎肯定是 0；边界转过来之后 z 变正，p 跨过 0.5，预测翻成了 1。sigmoid 在 z = 0 附近最陡，离 0 越远越平，所以同样是「判 1」，z = 7 比 z = 1 有把握得多。
+
+BCE 的意思是：真实是 1 就罚 −log p，真实是 0 就罚 −log(1 − p)。p 靠近正确答案时罚得很轻，靠近错误答案时罚得无限重，它不允许模型在错的那边「很有把握」。播到最后会看到 loss 还在降、分对的个数却不再涨：loss 看的是每个概率离 0 / 1 多远，不是对错的个数。
+
+## 代价与取舍
+
+- 边界是一条直线（高维是一个超平面）。两团数据本来就不线性可分时，它再怎么训也分不开重叠处那几个点；要弯的边界得加特征交叉，或者换树模型、神经网络。
+- 概率校准得比 Naive Bayes 好，但前提是损失真的收敛了：学习率太大 loss 会震荡，太小几十步转不过来，怎么选是下一章的事。
+- 特征要先归一化到差不多的尺度，否则某一维主导梯度，边界只沿一个方向转。
+- 它只做二分类。三类以上要么训 K 个「一对其余」，要么换成 softmax，这是下一页。
+
+## 再往下看
+
+[Softmax 与 Cross-Entropy](/notes/ml/classifiers/softmax-cross-entropy/) 把 sigmoid 推广到 K 个类：K 个分数变成一组和为 1 的概率，损失还是 −log p。图里「每步走一步」的具体走法——学习率、动量、Adam——在 [Gradient Descent 与 Optimizers](/notes/ml/training/gradient-descent-optimizers/) 展开。

@@ -1,0 +1,21 @@
+import KnowledgeTree from "@/components/visualization/ml/KnowledgeTree";
+
+# Classifiers Overview
+
+## 一句话
+
+**这一章回答「分数怎么变成概率」：先用词频数出后验，再学一条线性边界、用 sigmoid 把分数压成概率，最后把 sigmoid 推广到 K 个类，并说清为什么用 −log p 当损失。**
+
+三页是一条问题链，每一页解决上一页留下的问题。每页都是五段：一句话、为什么需要它、怎么工作、代价与取舍、再往下看。
+
+## 这章的问题链
+
+<KnowledgeTree chapter="classifiers" />
+
+## 怎么读
+
+按顺序读，每页 5 到 7 分钟，图里的控件从头拖到尾再往下看。
+
+第 1 页是不学参数的分类器：Naive Bayes 只靠一张词频表，顺便遇到零概率陷阱和 Laplace 平滑。第 2 页开始学参数：Logistic Regression 的直线边界怎么被梯度一步步转到位，sigmoid 怎么把分数变概率，BCE 为什么是那把尺子。第 3 页把两类推到 K 类：softmax、cross-entropy，以及 0.9 和 0.2 为什么损失差 15 倍。
+
+读完应该能用自己的话回答四个问题：Naive Bayes 的「naive」假设了什么、什么时候会算出 0；sigmoid 和 softmax 是什么关系；为什么分类用 cross-entropy 而不是平方误差；loss 是怎么用梯度降下去的。最后一个问题这章只开了头，答案在下一章 Training。

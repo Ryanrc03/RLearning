@@ -1,0 +1,49 @@
+import BackpropFigure from "@/components/visualization/ml/dl-blocks/BackpropFigure";
+
+# Backprop 与 Chain Rule
+
+## 一句话
+
+**loss 对每一层权重的梯度，是从 loss 往回一路乘过来的一串局部导数；backprop 就是把这串乘法从输出往输入倒着算一遍，中间结果存下来给前一层复用。**
+
+它是所有神经网络训练的第一步：optimizer 要的梯度全靠它算出来。
+
+## 为什么需要它
+
+前面几章的模型都靠 [gradient descent](/notes/ml/training/gradient-descent-optimizers/) 学参数：对 loss 求导，沿负梯度走一步。只有一层时梯度好算，logistic regression 的 ∂L/∂w 一行就写完；叠几十层以后，loss 只直接碰到最后一层，前面某一层的权重要绕过后面所有层才影响到 loss，硬展开会写出一个爆炸的式子。chain rule 说复合函数的导数等于每一段导数的乘积；backprop 进一步注意到这些乘积共享很长的前缀，于是从输出往回算一遍、沿路把前缀存下来，每个权重的梯度只要再乘一个局部项。
+
+## 怎么工作
+
+<BackpropFigure />
+
+$$
+a = W^{(1)} x,\qquad z = \sigma(a),\qquad s = W^{(0)\top} z,\qquad p = \sigma(s),\qquad L = -\log p
+$$
+
+$$
+\frac{\partial L}{\partial W^{(0)}}
+= \frac{\partial L}{\partial p}\cdot\frac{\partial p}{\partial s}\cdot\frac{\partial s}{\partial W^{(0)}}
+= \left(-\frac{1}{p}\right)\cdot p(1-p)\cdot z
+= -(1-p)\,z
+$$
+
+$$
+\frac{\partial L}{\partial W^{(1)}} = -(1-p)\cdot W^{(0)} \odot z(1-z)\cdot x^{\top}
+$$
+
+图里是一个只有两个输入、两个隐层单元、一个输出的网络，标签 y = 1。正向的五步把 a、z、s、p、L 依次算出来写在节点上：这些中间值不是算完就扔，反向时每一步都要用到。
+
+反向从 L 出发。∂L/∂p = −1/p，∂p/∂s = p(1−p)，两项一乘就是 ∂L/∂s = p − 1 = −(1−p)：预测 p 离 1 越远，推力越大。到这里第一个权重的梯度已经到手，W⁽⁰⁾ 只差一个局部项 ∂s/∂W⁽⁰⁾ = z，所以 ∂L/∂W⁽⁰⁾ = −(1−p)·z，用图里的数就是 −0.573 × (0.646, 0.679)。
+
+往 W⁽¹⁾ 走时链更长：∂L/∂s 先经过 ∂s/∂z = W⁽⁰⁾ 回到隐层，再经过 sigmoid 的 ∂z/∂a = z(1−z)，最后乘 ∂a/∂W⁽¹⁾ = xᵀ。前面那段 −(1−p) 没有重算，它是存下来的公共前缀；真实网络有几百万个权重，省下的正是这些重复乘法。最后一步用有限差分验算，把一个权重挪 ±ε 看 loss 变多少，数对得上，说明链没有乘错。
+
+## 代价与取舍
+
+- 正向的中间值（每层的 a 和 z）要留到反向用完才能释放，所以训练比推理吃内存得多；batch 大、层深、序列长时先爆显存的往往是这些激活值，gradient checkpointing 就是用重算换显存。
+- 梯度是一串局部导数的连乘。sigmoid 的 z(1−z) 最大只有 0.25，每过一层至少缩四倍，层数一深，靠前的层几乎收不到梯度，这是下一页的问题。
+- backprop 要求链上每一段都可导。取整、argmax、排序这类操作的梯度是 0 或不存在，要么换成软版本，要么另找估计方法。
+- 自动微分框架把这套流程做成了自动的，但手算一遍仍然值得：排查 loss 不降、梯度为 NaN 时，看的就是这条链上哪一项出了问题。
+
+## 再往下看
+
+链里每一项都小于 1 时，几十层连乘下来梯度就没了。[Residual Connection](/notes/ml/dl-blocks/residual-connection/) 给每层加一条 y = x + f(x) 的直通路，让链里多出一个 1。

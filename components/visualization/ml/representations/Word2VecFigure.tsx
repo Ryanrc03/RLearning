@@ -160,11 +160,11 @@ export default function Word2VecFigure() {
           <circle cx={226} cy={MID} r={19} fill="#fff" stroke={C_CBOW} strokeWidth={1.5} />
           <text x={226} y={MID + 4} fontSize={11.5} fontWeight={600} textAnchor="middle" fill={C_CBOW}>平均</text>
           <text x={226} y={MID + 34} fontSize={10.5} textAnchor="middle" fill={MUTED} className="mono">h = Σv / {context.length}</text>
-          <Arrow x1={247} y1={MID} x2={268} y2={MID} color={C_CBOW} />
-          <MatrixBox x={270} y={MID - 40} w={34} h={80} label="softmax" sub={`V = ${V}`} rows={[centre]} color={C_CBOW} />
-          <Arrow x1={306} y1={MID} x2={316} y2={MID} color={C_CBOW} />
-          <WordChip x={306} y={MID - 32} word={centreWord} color={C_CBOW} strong />
-          <text x={329} y={MID + 24} fontSize={10.5} textAnchor="middle" fill={MUTED}>目标</text>
+          <Arrow x1={247} y1={MID} x2={260} y2={MID} color={C_CBOW} />
+          <MatrixBox x={262} y={MID - 40} w={34} h={80} label="softmax" sub={`V = ${V}`} rows={[centre]} color={C_CBOW} />
+          <Arrow x1={298} y1={MID} x2={305} y2={MID} color={C_CBOW} />
+          <WordChip x={306} y={MID - 11} word={centreWord} color={C_CBOW} strong />
+          <text x={329} y={MID + 26} fontSize={10.5} textAnchor="middle" fill={MUTED}>目标</text>
         </g>
 
         {/* ---------- Skip-gram, right ---------- */}
@@ -187,7 +187,7 @@ export default function Word2VecFigure() {
               <WordChip x={664} y={rightYs[k] - 11} word={w} color={C_SKIP} strong={false} />
             </g>
           ))}
-          <text x={687} y={rightYs[rightYs.length - 1] + 28} fontSize={10.5} textAnchor="middle" fill={MUTED}>各是 1 个训练对</text>
+          <text x={708} y={rightYs[rightYs.length - 1] + 28} fontSize={10.5} textAnchor="end" fill={MUTED}>各是 1 个训练对</text>
         </g>
       </Figure>
 

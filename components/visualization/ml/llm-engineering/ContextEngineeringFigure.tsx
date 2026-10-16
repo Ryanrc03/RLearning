@@ -19,6 +19,15 @@ const COLOR: Record<SegmentKey, string> = {
   user: "#3b4234",
 };
 
+// How a harness would actually shrink each compressible segment.
+const HOW_TO_CUT: Partial<Record<SegmentKey, string>> = {
+  rag: "只留最相关的两段",
+  tools: "把 JSON 裁成要用的几个字段",
+  shortMemory: "把摘要再压一遍",
+  longMemory: "少取回几条",
+  state: "只留当前这一步",
+};
+
 const ALL_ON: Record<SegmentKey, boolean> = Object.fromEntries(SEGMENTS.map((s) => [s.key, true])) as Record<SegmentKey, boolean>;
 const fmt = (n: number) => n.toLocaleString();
 const kfmt = (n: number) => (n >= 1000 ? `${n / 1000}k` : String(n));
@@ -34,7 +43,7 @@ export default function ContextEngineeringFigure() {
   const toggle = (k: SegmentKey) => setEnabled((e) => ({ ...e, [k]: !e[k] }));
 
   const narr = fill.overflow
-    ? `${onRows.length} 段一共 ${fmt(fill.used)} token，超出 ${kfmt(budget)} 的窗口 ${fmt(fill.excess)} 个：模型根本装不下，更别说留地方回答。必须压缩或截断。${cut ? `最大的可压段是「${cut.name}」${fmt(cut.tokens)} token，至少要压到 ${fmt(cut.keep)} 以内（比如只留最相关的两段，或者把 JSON 换成一句摘要）；` : ""}不压的话多数 harness 会从最早的内容开始丢，先丢的往往是记忆。`
+    ? `${onRows.length} 段一共 ${fmt(fill.used)} token，超出 ${kfmt(budget)} 的窗口 ${fmt(fill.excess)} 个：模型根本装不下，更别说留地方回答。必须压缩或截断。${cut ? `最大的可压段是「${cut.name}」${fmt(cut.tokens)} token，至少要压到 ${fmt(cut.keep)} 以内（比如${HOW_TO_CUT[cut.key] ?? "压成摘要"}），或者干脆这轮不要它；` : ""}不压的话多数 harness 会从最早的内容开始丢，先丢的往往是记忆。`
     : onRows.length === 0
       ? `什么都没进窗口，模型看到的是空的。勾上任一段。`
       : `${onRows.length} 段一共 ${fmt(fill.used)} token，${kfmt(budget)} 的窗口还剩 ${fmt(budget - fill.used)} 个给回答。模型看到的就是这根条从左到右的全部内容：上一页的 prompt 只占其中 ${fmt(fill.rows.find((r) => r.key === "prompt")?.tokens ?? 0)} 个。${budget > BUDGETS[0] ? "窗口大了装得下，但每一段都要花钱、花时间，而且被无关内容稀释的注意力不会因为窗口大就回来。" : ""}`;
@@ -55,8 +64,8 @@ export default function ContextEngineeringFigure() {
 
       <div style={{ position: "relative", paddingTop: 18, paddingBottom: 4 }}>
         <div className="viz-stack" role="img" aria-label={`窗口 ${budget} token，已用 ${fill.used}${fill.overflow ? `，超出 ${fill.excess}` : ""}`} style={{ height: 22 }}>
-          {fill.rows.map((r) => (
-            <span key={r.key} style={{ width: r.enabled ? `${(r.tokens / scale) * 100}%` : 0, background: COLOR[r.key], transition: "width .3s", marginLeft: r.enabled ? undefined : 0 }} />
+          {onRows.map((r) => (
+            <span key={r.key} style={{ width: `${(r.tokens / scale) * 100}%`, background: COLOR[r.key], transition: "width .3s" }} />
           ))}
         </div>
         {fill.overflow && (

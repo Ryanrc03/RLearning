@@ -1,0 +1,40 @@
+import XgboostLightgbmFigure from "@/components/visualization/ml/trees/XgboostLightgbmFigure";
+
+# XGBoost 与 LightGBM
+
+## 一句话
+
+**XGBoost 给 GBDT 加上并行找切点、目标函数里的正则项和缺失值处理；LightGBM 再用直方图分桶、互斥特征捆绑、按梯度采样和 leaf-wise 生长，换来更快、更省、更准的树。**
+
+它们是工业界表格数据的默认选择，推荐系统那一章的点击模型就是 LightGBM。
+
+## 为什么需要它
+
+上一页说 GBDT 慢在树必须串行。但一棵树内部也慢：每个节点要对每个特征的每个取值都试一刀，500 万行乘 84 列，每轮都要扫一遍。XGBoost 先把这件事做对：各特征的切点搜索分到多个线程并行，目标函数里加上叶子数和叶子值的正则项让树不长歪，缺失值在每个节点学一个默认方向不用填补。LightGBM 接着问：能不能少扫一些？它从四个方向各砍一刀。
+
+## 怎么工作
+
+<XgboostLightgbmFigure />
+
+$$
+\text{Obj} = \sum_i L\big(y_i, F(x_i)\big) + \sum_m \Big(\gamma\, T_m + \tfrac{1}{2}\lambda \lVert w_m \rVert^2\Big)
+$$
+
+$$
+\text{gain} = \tfrac{1}{2}\left[\frac{G_L^2}{H_L + \lambda} + \frac{G_R^2}{H_R + \lambda} - \frac{(G_L + G_R)^2}{H_L + H_R + \lambda}\right] - \gamma
+$$
+
+图的上半部分是同一张 gain 表的两种长法。Level-wise 每步把当前最深一层的叶子全切开，三步到 8 个叶子，其中几刀只值 6 或 8；leaf-wise 每步只切 gain 最大的那一个叶子，七步也到 8 个叶子，总 gain 287 对 249。同样的叶子数换到更多的损失下降，代价是树深到 6 层、偏向一边，所以 LightGBM 用 num_leaves 而不是 max_depth 做容量，再用 min_data_in_leaf 兜住小叶子。
+
+下面三张卡片是 LightGBM 省扫描的另外三招。直方图把一个特征的 32 个取值分进 8 个桶，找切点只在 8 个桶边界上试，每个值只存一个桶号。EFB 把两列从不同时非零的特征（男 / 女这种 one-hot）捆成一列，直方图少建一个，而且无损可还原。GOSS 按梯度大小排序，梯度大的 20% 全留，剩下的随机抽 20% 并乘上权重补回来：梯度小的样本已经学得差不多了，少看几个损失不大。
+
+## 代价与取舍
+
+- Leaf-wise 在小数据上容易过拟合，树又深又偏；数据少于几万行时把 num_leaves 调小，或者干脆用 level-wise。
+- 直方图把切点限制在桶边界上，max_bin 小时切点会偏：推荐那一章的实验台里 8 个桶时切点从 0.315 跳到 0.375。
+- GOSS 和 EFB 都是近似，换来的是速度；数据本来就不大时关掉它们反而更准。
+- 两者要调的超参比 GBDT 多一截：learning rate、叶子数、λ、行列采样比例、早停耐心，没有一组万能的默认值。
+
+## 再往下看
+
+这一章到此结束：从一刀切出的树，到投票和打补丁，到残差就是梯度，再到工业版的四处提速。去 [梯度提升树如何给曝光打分](/notes/ml/recsys/lightgbm-explained/) 看一个真实训练的 LightGBM 点击模型怎么用这些东西，再到 [提升树训练实验台](/notes/ml/recsys/boosting-lab/) 把 GBDT / XGBoost / LightGBM 的开关逐个拨一遍。下一章 Representations 从 [Word2Vec](/notes/ml/representations/word2vec/) 讲东西怎么变成向量。

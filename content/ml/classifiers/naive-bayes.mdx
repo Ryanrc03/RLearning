@@ -1,0 +1,43 @@
+import NaiveBayesFigure from "@/components/visualization/ml/classifiers/NaiveBayesFigure";
+
+# Naive Bayes
+
+## 一句话
+
+**Naive Bayes 不学参数：用词频数出每个类的先验和每个词的似然，假设词与词互相独立，连乘起来比大小。**
+
+它是最老的文本分类器之一，垃圾邮件过滤、情感分类这类「数词就够」的任务到今天还拿它当 baseline。
+
+## 为什么需要它
+
+评价指标说清了模型好不好，现在回到模型本身：分数是怎么算出来的。最朴素的做法是不算分数，只数数。笔记里的例子：12 封邮件，8 封正常，4 封垃圾；正常邮件里 Dear 出现 8 次、Friend 5 次、Lunch 3 次、Money 1 次，垃圾邮件里分别是 2、1、0、4 次。现在来了一封新邮件「Dear Friend」，直觉说它是正常的，因为两个词都更常出现在正常邮件里；Naive Bayes 把这个直觉变成一个可以算的数。
+
+## 怎么工作
+
+<NaiveBayesFigure />
+
+$$
+P(c \mid \text{words}) \propto P(c)\prod_{w \in \text{words}} P(w \mid c)
+$$
+
+$$
+P(w \mid c) = \frac{\text{count}(w, c)}{\sum_{w'} \text{count}(w', c)},\qquad
+P_{\text{Laplace}}(w \mid c) = \frac{\text{count}(w, c) + 1}{\sum_{w'} \text{count}(w', c) + |V|}
+$$
+
+Bayes 公式说后验正比于先验乘似然。先验 P(正常) = 8/12、P(垃圾) = 4/12 是两类邮件的比例；似然 P(Dear | 正常) = 8/17 是正常邮件的 17 个词里 Dear 占了 8 个。「naive」指的是那个连乘：假设邮件里的词互相独立，P(Dear, Friend | 正常) 就能拆成 P(Dear | 正常) × P(Friend | 正常)。这个假设明显不对（Dear 后面跟 Friend 的概率远高于随机），但它让整个模型只需要一张词频表。
+
+图里勾上 Dear 和 Friend：正常 = 8/12 × 8/17 × 5/17 ≈ 0.092，垃圾 = 4/12 × 2/7 × 1/7 ≈ 0.014，正常赢（笔记里把第一个数写成 0.33 是算错了，结论不变）。这两个数本身不是概率，因为分母 P(words) 被省掉了；要概率就把两个数归一化，正常约 87%。
+
+再勾上 Lunch：垃圾邮件里 Lunch 一次都没出现过，P(Lunch | 垃圾) = 0/7，连乘里有一个 0，垃圾类的分数直接变成 0，邮件里再多几个 Money 也救不回来。这就是零概率陷阱。Laplace 平滑的做法是给每个词的计数加 1，分母相应加上词表大小：垃圾类的 Lunch 变成 (0 + 1)/(7 + 4) = 1/11，没见过的词从「不可能」变成「很少见」。
+
+## 代价与取舍
+
+- 独立假设在真实文本里几乎总是错的，所以 Naive Bayes 给出的概率往往过于极端（0.99 或 0.01）：拿来排序和判类可以，拿来当校准过的概率不行。
+- 只数数，训练就是扫一遍语料；数据少、特征多（几万个词）时它比要学参数的模型稳得多，但它学不到「哪些词的组合才要紧」。
+- 连乘很快下溢到 0，实际实现都在 log 空间里把乘法变加法；平滑的 +1 也常换成更小的 α。
+- 它天然只适合「数出来」的特征。长度、发件时间这类连续特征要先离散化，或者换成高斯似然。
+
+## 再往下看
+
+Naive Bayes 的边界由词频表决定，没有可学的权重。[Logistic Regression](/notes/ml/classifiers/logistic-regression/) 反过来：直接学一条线性边界 wᵀx + b，再用 sigmoid 把分数变成概率。

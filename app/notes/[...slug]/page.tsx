@@ -43,6 +43,40 @@ import PrecisionRecallF1 from "@/content/ml/evaluation/precision-recall-f1.mdx";
 import RocAuc from "@/content/ml/evaluation/roc-auc.mdx";
 import PrCurvePrecisionAtK from "@/content/ml/evaluation/pr-curve-precision-at-k.mdx";
 import AbTestPValue from "@/content/ml/evaluation/ab-test-p-value.mdx";
+import LlmsOverview from "@/content/ml/llms/overview.mdx";
+import Rnn from "@/content/ml/llms/rnn.mdx";
+import AttentionQkv from "@/content/ml/llms/attention-qkv.mdx";
+import MultiHeadAttention from "@/content/ml/llms/multi-head-attention.mdx";
+import TransformerBlock from "@/content/ml/llms/transformer-block.mdx";
+import PretrainingObjectives from "@/content/ml/llms/pretraining-objectives.mdx";
+import DecodingStrategies from "@/content/ml/llms/decoding-strategies.mdx";
+import InceptionBlock from "@/content/ml/dl-blocks/inception-block.mdx";
+import RetrievalPrecisionAtK from "@/content/ml/recsys/retrieval-precision-at-k.mdx";
+import ClassifiersOverview from "@/content/ml/classifiers/overview.mdx";
+import NaiveBayes from "@/content/ml/classifiers/naive-bayes.mdx";
+import LogisticRegression from "@/content/ml/classifiers/logistic-regression.mdx";
+import SoftmaxCrossEntropy from "@/content/ml/classifiers/softmax-cross-entropy.mdx";
+import TrainingOverview from "@/content/ml/training/overview.mdx";
+import GradientDescentOptimizers from "@/content/ml/training/gradient-descent-optimizers.mdx";
+import BiasVariance from "@/content/ml/training/bias-variance.mdx";
+import RegularizationL1L2 from "@/content/ml/training/regularization-l1-l2.mdx";
+import TreesOverview from "@/content/ml/trees/overview.mdx";
+import DecisionTree from "@/content/ml/trees/decision-tree.mdx";
+import Ensembles from "@/content/ml/trees/ensembles.mdx";
+import Gbdt from "@/content/ml/trees/gbdt.mdx";
+import XgboostLightgbm from "@/content/ml/trees/xgboost-lightgbm.mdx";
+import RepresentationsOverview from "@/content/ml/representations/overview.mdx";
+import Word2Vec from "@/content/ml/representations/word2vec.mdx";
+import SentenceEmbedding from "@/content/ml/representations/sentence-embedding.mdx";
+import CosineSimilarity from "@/content/ml/representations/cosine-similarity.mdx";
+import DlBlocksOverview from "@/content/ml/dl-blocks/overview.mdx";
+import BackpropChainRule from "@/content/ml/dl-blocks/backprop-chain-rule.mdx";
+import ResidualConnection from "@/content/ml/dl-blocks/residual-connection.mdx";
+import Normalization from "@/content/ml/dl-blocks/normalization.mdx";
+import LlmEngineeringOverview from "@/content/ml/llm-engineering/overview.mdx";
+import PromptEngineering from "@/content/ml/llm-engineering/prompt-engineering.mdx";
+import ContextEngineering from "@/content/ml/llm-engineering/context-engineering.mdx";
+import Hallucination from "@/content/ml/llm-engineering/hallucination.mdx";
 import BinarySearchTemplates from "@/content/algorithms/binary-search/templates.mdx";
 import BinarySearchOnAnswer from "@/content/algorithms/binary-search/on-answer.mdx";
 import { getNote, getSeriesNeighbors, noteEntries } from "@/content/notes";
@@ -93,6 +127,40 @@ const noteComponents = {
   "ml/evaluation/roc-auc": RocAuc,
   "ml/evaluation/pr-curve-precision-at-k": PrCurvePrecisionAtK,
   "ml/evaluation/ab-test-p-value": AbTestPValue,
+  "ml/llms/overview": LlmsOverview,
+  "ml/llms/rnn": Rnn,
+  "ml/llms/attention-qkv": AttentionQkv,
+  "ml/llms/multi-head-attention": MultiHeadAttention,
+  "ml/llms/transformer-block": TransformerBlock,
+  "ml/llms/pretraining-objectives": PretrainingObjectives,
+  "ml/llms/decoding-strategies": DecodingStrategies,
+  "ml/dl-blocks/inception-block": InceptionBlock,
+  "ml/recsys/retrieval-precision-at-k": RetrievalPrecisionAtK,
+  "ml/classifiers/overview": ClassifiersOverview,
+  "ml/classifiers/naive-bayes": NaiveBayes,
+  "ml/classifiers/logistic-regression": LogisticRegression,
+  "ml/classifiers/softmax-cross-entropy": SoftmaxCrossEntropy,
+  "ml/training/overview": TrainingOverview,
+  "ml/training/gradient-descent-optimizers": GradientDescentOptimizers,
+  "ml/training/bias-variance": BiasVariance,
+  "ml/training/regularization-l1-l2": RegularizationL1L2,
+  "ml/trees/overview": TreesOverview,
+  "ml/trees/decision-tree": DecisionTree,
+  "ml/trees/ensembles": Ensembles,
+  "ml/trees/gbdt": Gbdt,
+  "ml/trees/xgboost-lightgbm": XgboostLightgbm,
+  "ml/representations/overview": RepresentationsOverview,
+  "ml/representations/word2vec": Word2Vec,
+  "ml/representations/sentence-embedding": SentenceEmbedding,
+  "ml/representations/cosine-similarity": CosineSimilarity,
+  "ml/dl-blocks/overview": DlBlocksOverview,
+  "ml/dl-blocks/backprop-chain-rule": BackpropChainRule,
+  "ml/dl-blocks/residual-connection": ResidualConnection,
+  "ml/dl-blocks/normalization": Normalization,
+  "ml/llm-engineering/overview": LlmEngineeringOverview,
+  "ml/llm-engineering/prompt-engineering": PromptEngineering,
+  "ml/llm-engineering/context-engineering": ContextEngineering,
+  "ml/llm-engineering/hallucination": Hallucination,
   "algorithms/binary-search/templates": BinarySearchTemplates,
   "algorithms/binary-search/on-answer": BinarySearchOnAnswer,
 };

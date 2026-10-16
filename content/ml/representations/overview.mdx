@@ -1,0 +1,21 @@
+import KnowledgeTree from "@/components/visualization/ml/KnowledgeTree";
+
+# Representations Overview
+
+## 一句话
+
+**这一章回答「东西怎么变成向量」：先让词在预测任务里长出向量，再把一句话的 token 向量合成一个，最后用夹角的余弦比两个向量多像。**
+
+三页是一条问题链：词 → 句 → 相似度。每页都是五段：一句话、为什么需要它、怎么工作、代价与取舍、再往下看。
+
+## 这章的问题链
+
+<KnowledgeTree chapter="representations" />
+
+## 怎么读
+
+按顺序读，每页 5 到 7 分钟，图里的控件从头拖到尾再往下看。
+
+第 1 页是起点：one-hot 为什么不够，Word2Vec 怎么用「上下文和中心词互相预测」把向量学出来，CBOW 和 Skip-gram 是同一个窗口的两种读法。第 2 页从词到句：BERT 给每个 token 一个上下文相关的向量以后，取 [CLS] 还是取平均。第 3 页是这些向量最常见的用法：cosine 只看方向不看长度，所以适合比较 embedding。
+
+读完应该能用自己的话回答三个问题：为什么词向量里会有 king − man + woman ≈ queen；没微调的 BERT 的 [CLS] 为什么不能直接拿来算相似度；把一个向量拉长两倍，cosine 为什么不变而点积会变。

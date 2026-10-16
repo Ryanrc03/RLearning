@@ -1,0 +1,44 @@
+import SentenceEmbeddingFigure from "@/components/visualization/ml/representations/SentenceEmbeddingFigure";
+
+# Sentence Embedding：CLS 与 Mean Pooling
+
+## 一句话
+
+**BERT 把一句话变成每个 token 一个向量；取 [CLS] 位置的那个，或者把所有 token 的向量逐维平均，就得到代表整句的一个向量。**
+
+这个向量接一个线性层就能做分类，也可以直接拿去算相似度做检索、聚类。
+
+## 为什么需要它
+
+上一页的词向量一个词一个，但分类器、检索系统要的是「一句话一个向量」。把句子里的词向量加起来是最早的做法，可它丢掉了词序，「狗咬人」和「人咬狗」一样。BERT 这样的 encoder-only Transformer 先把整句读一遍，每个位置的输出都已经通过 attention 看过全句，是上下文相关的；问题只剩一个：n 个向量怎么变成 1 个。
+
+## 怎么工作
+
+<SentenceEmbeddingFigure />
+
+$$
+\text{CLS:}\quad h_{\text{sent}} = h_{[\text{CLS}]},\qquad \text{logit} = W\,h_{[\text{CLS}]} + b
+$$
+
+$$
+\text{Mean pooling:}\quad h_{\text{mean}} = \frac{1}{n}\sum_{i=1}^{n} h_i
+$$
+
+图里的输入是笔记里的 [CLS] I really like Adobe [SEP]。BERT 在句首放一个 [CLS]、句尾放一个 [SEP]，六个位置各输出一个隐向量（图里用 6 维的教学数字代替真实的 768 维）。
+
+取 [CLS] 是 BERT 原文的做法：[CLS] 本身不是词，没有词义，它的向量完全是靠 attention 从其他位置收集来的。微调时把 logit = W · h_[CLS] + b 接在它上面训练，这个位置就被训练成了「整句的摘要」。切到 CLS 路线，点 like 看它的权重：是 0，它不直接进入输出，但它的信息早已经流进了 [CLS]。
+
+Mean pooling 不挑位置，把 n 个向量逐维相加再除以 n，每个 token 的份额都是 1/n。点任一 token，右边的表列出它的向量、乘 1/n 后的贡献，和最终的输出。勾上「去掉 [CLS] 和 [SEP]」，这两个不带词义的符号退出平均，剩下四个词各占 1/4；句向量模型通常这么做，还会按 attention mask 把 padding 也排除。
+
+两条路线出来的都是一个 d 维向量，可以当特征送进任何分类器，也可以和另一句的向量算相似度。
+
+## 代价与取舍
+
+- 没微调过的 BERT，[CLS] 向量对相似度任务很差：预训练只在 next sentence prediction 里用过它，并不代表语义。要做检索，得用 Sentence-BERT 这类在句对上训练过的模型，它们多数用 mean pooling。
+- Mean pooling 把所有位置一视同仁，长句里关键的词被稀释；[CLS] 可以学会挑重点，但要靠微调。
+- 平均时记得去掉 padding 和特殊符号，否则一批里长短不同的句子会被 padding 拉向同一个方向。
+- 一句话一个向量是有损压缩：几百维装不下长文档的全部信息，长文本要先切段再分别编码。
+
+## 再往下看
+
+有了两个句向量，「多像」怎么量？[Cosine Similarity](/notes/ml/representations/cosine-similarity/) 用夹角的余弦来比，只看方向不看长度。BERT 为什么是一个只有 encoder 的 Transformer、attention 怎么让 [CLS] 看到全句，见 [Transformer vs RNN](/notes/ml/llms/transformer-vs-rnn/)。

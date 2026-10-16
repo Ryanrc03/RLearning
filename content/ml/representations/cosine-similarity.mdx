@@ -1,0 +1,43 @@
+import CosineSimilarityFigure from "@/components/visualization/ml/representations/CosineSimilarityFigure";
+
+# Cosine Similarity
+
+## 一句话
+
+**两个向量的 cosine similarity 是它们夹角的余弦：同向是 1，正交是 0，反向是 −1；它只看方向，不看长度。**
+
+embedding 之间比相似度、检索排序、推荐召回，默认用的都是它。
+
+## 为什么需要它
+
+上一页把两句话各变成了一个向量，接下来要回答「这两句多像」。最先想到的是点积，但点积随长度变：一句话长一点、token 多一点，向量的模长就可能大一点，点积跟着膨胀，比出来的是「谁更长」而不是「谁更像」。把长度除掉，剩下的就是方向之间的关系，这就是 cosine。
+
+## 怎么工作
+
+<CosineSimilarityFigure />
+
+$$
+\cos\theta = \frac{\mathbf{v}_1 \cdot \mathbf{v}_2}{\lVert \mathbf{v}_1 \rVert\,\lVert \mathbf{v}_2 \rVert}
+= \frac{\sum_i v_{1,i}\, v_{2,i}}{\sqrt{\sum_i v_{1,i}^2}\,\sqrt{\sum_i v_{2,i}^2}}
+$$
+
+$$
+\mathbf{v}_1 \cdot \mathbf{v}_2 = \lVert \mathbf{v}_1 \rVert\,\lVert \mathbf{v}_2 \rVert \cos\theta
+$$
+
+图里 A 固定，拖 B 的端点。右边的数里，点积 A · B 和两个模长是原料，cos θ 是点积除以两个模长的积。第二个公式反过来读：点积 = ‖A‖ × (‖B‖ cos θ)，括号里是 B 在 A 方向上的投影，就是图里 A 线上那段粗的影子。
+
+把 B 转到和 A 同一个方向，影子和 B 一样长，cos θ = 1；转到 110°（和 A 正交），影子缩成一个点，cos θ = 0，点积也是 0；再往后转，影子落到 A 的反方向，cos θ 变负。
+
+现在把长度滑杆从 0.7 拉到 1.0：B 的箭头变长，点积跟着变大，cos θ 的数字一动不动。这就是「只看方向」的意思。实践里常先把向量做 L2 归一化（除以自己的模长），之后点积就等于 cosine，检索引擎只算点积就够了。
+
+## 代价与取舍
+
+- 长度有时是信息：词频、置信度、图像亮度都可能藏在模长里，cosine 把它们一并丢掉。要保留就用点积，或者把模长另算一项。
+- 高维空间里随机向量几乎都接近正交，cosine 挤在 0 附近；embedding 之间 0.3 和 0.5 的差距可能已经很大，阈值要在自己的数据上定，别照搬。
+- 没处理过的 embedding 常有各向异性：所有向量挤在一个窄锥里，任意两句的 cosine 都在 0.8 以上。先减去均值或者做白化再比。
+- 1 − cos 不满足三角不等式，不是严格的距离；要当距离用时留意聚类算法的假设。
+
+## 再往下看
+
+向量有了、相似度也会算了，下一章回到网络本身：这些向量是靠梯度学出来的，[Backprop 与 Chain Rule](/notes/ml/dl-blocks/backprop-chain-rule/) 讲多层网络的梯度怎么从输出一路乘回输入。图文对齐比的就是图像向量和文本向量的 cosine，见 [Vision–Language Alignment](/notes/ml/multimodal/vision-language-alignment/)。
