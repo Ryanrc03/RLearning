@@ -20,6 +20,11 @@ import LightgbmExplained from "@/content/ml/recsys/lightgbm-explained.mdx";
 import BoostingLab from "@/content/ml/recsys/boosting-lab.mdx";
 import DistributedCore from "@/content/systems/distributed/core.mdx";
 import DataOverview from "@/content/systems/data/overview.mdx";
+import DesignMessageQueue from "@/content/systems/design/message-queue.mdx";
+import DesignCache from "@/content/systems/design/cache.mdx";
+import DesignSharding from "@/content/systems/design/sharding.mdx";
+import DesignDataModeling from "@/content/systems/design/data-modeling.mdx";
+import DesignApi from "@/content/systems/design/api.mdx";
 import Serverless from "@/content/systems/backend/serverless.mdx";
 import AgentLoop from "@/content/ai-infra/agent-harness/agent-loop.mdx";
 import ToolsPermissionsHooks from "@/content/ai-infra/agent-harness/tools-permissions-hooks.mdx";
@@ -104,6 +109,11 @@ const noteComponents = {
   "ml/recsys/boosting-lab": BoostingLab,
   "systems/distributed/core": DistributedCore,
   "systems/data/overview": DataOverview,
+  "systems/design/message-queue": DesignMessageQueue,
+  "systems/design/cache": DesignCache,
+  "systems/design/sharding": DesignSharding,
+  "systems/design/data-modeling": DesignDataModeling,
+  "systems/design/api": DesignApi,
   "systems/backend/serverless": Serverless,
   "ai-infra/agent-harness/agent-loop": AgentLoop,
   "ai-infra/agent-harness/tools-permissions-hooks": ToolsPermissionsHooks,

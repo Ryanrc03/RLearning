@@ -52,7 +52,7 @@ function Column({ x, title, side, color }: { x: number; title: string; side: Sid
       ) : m.kind === "run" ? (
         <g key={i}><rect x={tx(m.t) - 6} y={26} width={12} height={16} rx={3} fill="#3b4234" /><text x={tx(m.t)} y={22} fontSize={8} textAnchor="middle" fill="#30332c">{m.label || "算"}</text></g>
       ) : (
-        <g key={i}><circle cx={tx(m.t)} cy={50} r={5} fill="#fff" stroke="#d03b3b" strokeWidth={2} /><path d={`M ${tx(m.t)} 44 Q ${(tx(m.t) + tx(2)) / 2} 20 ${tx(2)} 40`} fill="none" stroke="#d03b3b" strokeDasharray="3 2" /><text x={tx(m.t)} y={82} fontSize={8.5} textAnchor="middle" fill="#d03b3b">{m.label}，第 5.5 小时才到</text></g>
+        <g key={i}><circle cx={tx(m.t)} cy={50} r={5} fill="#fff" stroke="#d03b3b" strokeWidth={2} /><path d={`M ${tx(m.t)} 44 Q ${(tx(m.t) + tx(2)) / 2} 20 ${tx(2)} 40`} fill="none" stroke="#d03b3b" strokeDasharray="3 2" /><text x={COL_W - 10} y={82} fontSize={8.5} textAnchor="end" fill="#d03b3b">{m.label}，第 5.5 小时才到</text></g>
       ))}
       <text x={10} y={100} fontSize={9.5} fill="#30332c">{side.results}</text>
       <text x={10} y={114} fontSize={9} fill={side.bad ? "#d03b3b" : LINE}>{side.note}</text>
