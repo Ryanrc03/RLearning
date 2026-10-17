@@ -126,6 +126,7 @@ export const chapters: TreeChapter[] = [
       n("ml/llms/transformer-block", "Transformer Block：一层里有什么", "一层里还有什么？", "embedding 加位置编码进来，经过 multi-head attention 和 MLP 两个子层，每个子层外面套 residual 和 LayerNorm，decoder 再加一个因果 mask。", "ready", "Transformer Block"),
       n("ml/llms/pretraining-objectives", "预训练目标：自回归与 Masked LM", "训练时在预测什么？", "GPT 用因果 mask 预测下一个 token，loss 是 −Σ log P(y_t | y_<t)；BERT 遮住 15% 的 token 再猜回来，外加一个句子对的二分类。", "ready", "预训练目标"),
       n("ml/llms/decoding-strategies", "Decoding：greedy、sampling、top-k、top-p、beam", "生成时怎么选下一个词？", "greedy 取最高，sampling 按概率抽，top-k / top-p 先截断再抽，beam search 多留几条路选总分最大的；temperature 把分布变尖或变平。", "ready", "Decoding"),
+      n("ml/llms/bert", "BERT：双向编码器怎样读懂一句话", "这些零件拼成一个只读不写的模型，怎么训、怎么用？", "只有 encoder 的 Transformer：遮住 15% 的词再猜回来做预训练，再接一个小头全参数微调去做分类；读得懂整句，但不会生成。", "ready", "BERT"),
     ],
   },
   {
@@ -195,7 +196,7 @@ export const edges: TreeEdge[] = [
   { from: "ml/dl-blocks/normalization", to: "ml/llms/transformer-block", why: "Transformer 每一层都有 LayerNorm" },
   { from: "ml/dl-blocks/residual-connection", to: "ml/llms/transformer-block", why: "每个子层外面都套着 residual" },
   { from: "ml/llms/transformer-vs-rnn", to: "ml/multimodal/visual-tokens", why: "已有的「从 Transformer 到多模态」系列" },
-  { from: "ml/llms/transformer-vs-rnn", to: "ml/representations/sentence-embedding", why: "BERT 是一个只有 encoder 的 Transformer" },
+  { from: "ml/llms/bert", to: "ml/representations/sentence-embedding", why: "句向量取的就是 BERT 的 [CLS] 或所有位置的平均" },
   { from: "ml/evaluation/pr-curve-precision-at-k", to: "ml/recsys/retrieval-precision-at-k", why: "P@k 用在真实的检索项目上" },
   { from: "ml/classifiers/softmax-cross-entropy", to: "ml/llms/pretraining-objectives", why: "预训练 loss 就是逐个位置的 cross-entropy" },
   { from: "ml/llms/decoding-strategies", to: "ml/llm-engineering/hallucination", why: "采样策略和 temperature 决定了多容易编" },

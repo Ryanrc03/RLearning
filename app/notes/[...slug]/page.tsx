@@ -18,7 +18,6 @@ import UCB from "@/content/ml/reinforcement-learning/ucb.mdx";
 import KuairandInput from "@/content/ml/recsys/kuairand-input.mdx";
 import LightgbmExplained from "@/content/ml/recsys/lightgbm-explained.mdx";
 import BoostingLab from "@/content/ml/recsys/boosting-lab.mdx";
-import Bert from "@/content/ml/transformers/bert.mdx";
 import DistributedCore from "@/content/systems/distributed/core.mdx";
 import DataOverview from "@/content/systems/data/overview.mdx";
 import DesignMessageQueue from "@/content/systems/design/message-queue.mdx";
@@ -56,6 +55,7 @@ import MultiHeadAttention from "@/content/ml/llms/multi-head-attention.mdx";
 import TransformerBlock from "@/content/ml/llms/transformer-block.mdx";
 import PretrainingObjectives from "@/content/ml/llms/pretraining-objectives.mdx";
 import DecodingStrategies from "@/content/ml/llms/decoding-strategies.mdx";
+import Bert from "@/content/ml/llms/bert.mdx";
 import InceptionBlock from "@/content/ml/dl-blocks/inception-block.mdx";
 import RetrievalPrecisionAtK from "@/content/ml/recsys/retrieval-precision-at-k.mdx";
 import ClassifiersOverview from "@/content/ml/classifiers/overview.mdx";
@@ -108,7 +108,6 @@ const noteComponents = {
   "ml/recsys/kuairand-input": KuairandInput,
   "ml/recsys/lightgbm-explained": LightgbmExplained,
   "ml/recsys/boosting-lab": BoostingLab,
-  "ml/transformers/bert": Bert,
   "systems/distributed/core": DistributedCore,
   "systems/data/overview": DataOverview,
   "systems/design/message-queue": DesignMessageQueue,
@@ -146,6 +145,7 @@ const noteComponents = {
   "ml/llms/transformer-block": TransformerBlock,
   "ml/llms/pretraining-objectives": PretrainingObjectives,
   "ml/llms/decoding-strategies": DecodingStrategies,
+  "ml/llms/bert": Bert,
   "ml/dl-blocks/inception-block": InceptionBlock,
   "ml/recsys/retrieval-precision-at-k": RetrievalPrecisionAtK,
   "ml/classifiers/overview": ClassifiersOverview,

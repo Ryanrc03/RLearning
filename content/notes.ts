@@ -630,7 +630,7 @@ export const noteEntries: NoteEntry[] = [
     slug: "ml/llms/overview",
     title: "LLMs Overview",
     description:
-      "这一章回答「模型怎么读一串 token」：从 RNN 的递推到 attention 的矩阵，再到一层的全部零件、训练目标和生成策略。七页的问题链和阅读顺序。",
+      "这一章回答「模型怎么读一串 token」：从 RNN 的递推到 attention 的矩阵，再到一层的全部零件、训练目标和生成策略。八页的问题链和阅读顺序。",
     categoryId: "ml",
     category: "ML & LLM",
     section: "LLMs",
@@ -744,6 +744,21 @@ export const noteEntries: NoteEntry[] = [
     readingMinutes: 7,
     tags: ["ml-fundamentals", "llms", "interactive"],
     series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 7 },
+  },
+  {
+    slug: "ml/llms/bert",
+    title: "BERT：双向编码器怎样读懂一句话",
+    description:
+      "只有编码器的 Transformer：三个嵌入相加、双向注意力；MLM 的 15% 与 80/10/10 腐蚀、NSP；预训练与微调的全部超参；一条影评走完分类五步；最后和 GPT 比“看哪边”与“预测什么”。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "LLMs",
+    created: "2026-10-16",
+    updated: "2026-10-16",
+    status: "growing",
+    readingMinutes: 15,
+    tags: ["BERT", "llms", "transformer", "pre-training", "fine-tuning", "GPT", "interactive"],
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 8 },
   },
   {
     slug: "ml/llm-engineering/overview",
@@ -1214,20 +1229,6 @@ export const noteEntries: NoteEntry[] = [
     readingMinutes: 12,
     tags: ["binary search", "binary search on answer", "first true", "LeetCode", "interactive"],
     series: { id: "binary-search", title: "Binary Search", order: 2 },
-  },
-  {
-    slug: "ml/transformers/bert",
-    title: "BERT：双向编码器怎样读懂一句话",
-    description:
-      "只有编码器的 Transformer：三个嵌入相加、双向注意力；MLM 的 15% 与 80/10/10 腐蚀、NSP；预训练与微调的全部超参；一条影评走完分类五步；最后和 GPT 比“看哪边”与“预测什么”。",
-    categoryId: "ml",
-    category: "ML & LLM",
-    section: "Transformers",
-    created: "2026-10-16",
-    updated: "2026-10-16",
-    status: "growing",
-    readingMinutes: 15,
-    tags: ["BERT", "transformer", "pre-training", "fine-tuning", "GPT", "interactive"],
   },
 ];
 

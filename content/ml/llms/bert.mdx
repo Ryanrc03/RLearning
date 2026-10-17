@@ -1,13 +1,13 @@
-import MaskedLmViz from "@/components/visualization/transformers/MaskedLmViz";
-import ClsFineTuneViz from "@/components/visualization/transformers/ClsFineTuneViz";
-import BertVsGptAttentionViz from "@/components/visualization/transformers/BertVsGptAttentionViz";
-import PretrainFinetuneFlow from "@/components/visualization/transformers/PretrainFinetuneFlow";
-import BertInputEmbeddingViz from "@/components/visualization/transformers/BertInputEmbeddingViz";
-import BertEncoderStackViz from "@/components/visualization/transformers/BertEncoderStackViz";
+import MaskedLmViz from "@/components/visualization/ml/llms/bert/MaskedLmViz";
+import ClsFineTuneViz from "@/components/visualization/ml/llms/bert/ClsFineTuneViz";
+import BertVsGptAttentionViz from "@/components/visualization/ml/llms/bert/BertVsGptAttentionViz";
+import PretrainFinetuneFlow from "@/components/visualization/ml/llms/bert/PretrainFinetuneFlow";
+import BertInputEmbeddingViz from "@/components/visualization/ml/llms/bert/BertInputEmbeddingViz";
+import BertEncoderStackViz from "@/components/visualization/ml/llms/bert/BertEncoderStackViz";
 
 # BERT：双向编码器怎样读懂一句话
 
-BERT（Bidirectional Encoder Representations from Transformers，Devlin 等，2018）是一个只用 Transformer **编码器**堆起来的模型：先在没有标注的文本上做"填空"预训练，再在每个具体任务上接一个小头微调。这篇笔记按四个问题走：模型长什么样、损失算在哪、怎样训练、拿它做一次情感分类是什么样；最后和同期的 GPT 放在一起比。文中的尺寸、超参和分数都来自原论文。
+BERT（Bidirectional Encoder Representations from Transformers，Devlin 等，2018）是一个只用 Transformer **编码器**堆起来的模型：先在没有标注的文本上做"填空"预训练，再在每个具体任务上接一个小头微调。这篇笔记按四个问题走：模型长什么样、损失算在哪、怎样训练、拿它做一次情感分类是什么样；最后和同期的 GPT 放在一起比。它是 [LLMs](/notes/ml/llms/overview/) 这一章的最后一页：前面几页拆开的 attention、Transformer Block 和预训练目标，在这里拼成一个完整的模型。文中的尺寸、超参和分数都来自原论文。
 
 ## What is it?
 
@@ -51,7 +51,7 @@ BERT 的办法是改任务：先把一部分词遮掉，再让模型用剩下的
 
 ### 编码器层
 
-每一层就是原始 Transformer 的编码器层，BERT_BASE 叠 12 层：
+每一层就是原始 Transformer 的编码器层（零件逐个拆开见 [Attention：Q、K、V](/notes/ml/llms/attention-qkv/) 和 [Transformer Block](/notes/ml/llms/transformer-block/)），BERT_BASE 叠 12 层：
 
 <BertEncoderStackViz />
 
@@ -62,7 +62,7 @@ BERT 的办法是改任务：先把一部分词遮掉，再让模型用剩下的
 编码器输出是一个形状为 `[序列长度, H]` 的矩阵，每行对应一个位置。两种用法：
 
 - **按位置用**：命名实体识别、抽取式问答（预测答案的起止位置）直接在每个位置的向量上接分类器。
-- **按句子用**：`[CLS]` 位置的向量经过一层 `tanh(W_p · h + b_p)`（叫 pooler）作为整句的表示，接分类头。`[CLS]` 本身没有词义，它的向量完全来自注意力汇聚的上下文。
+- **按句子用**：`[CLS]` 位置的向量经过一层 $\tanh(W_p h + b_p)$（叫 pooler）作为整句的表示，接分类头。`[CLS]` 本身没有词义，它的向量完全来自注意力汇聚的上下文。
 
 预训练时还有两个头：MLM 头把每个位置的向量先过 dense + GELU + LayerNorm，再乘以**词嵌入矩阵的转置**（和输入共享权重）得到对整个词表的 logits；NSP 头在 pooler 输出上接一个 2 类分类器。微调时这两个头都丢掉。
 
@@ -80,12 +80,15 @@ BERT 的办法是改任务：先把一部分词遮掉，再让模型用剩下的
 
 损失是这些位置上对整个词表的交叉熵，**只在 M 里的位置计算**，其余 85% 的位置的输出不进损失：
 
-```text
-L_MLM = − (1/|M|) Σ_{i∈M} log p(x_i | x̃)
-p(· | x̃)_i = softmax( E · g(h_i) + b )
-```
+$$
+L_{\text{MLM}} = -\frac{1}{|M|} \sum_{i \in M} \log p\left(x_i \mid \tilde{x}\right)
+$$
 
-`x̃` 是腐蚀后的输入，`h_i` 是第 12 层在位置 i 的输出，`g` 是 MLM 头里的 dense + GELU + LayerNorm，`E` 是词嵌入矩阵。
+$$
+p\left(\cdot \mid \tilde{x}\right)_i = \operatorname{softmax}\left(E\, g(h_i) + b\right)
+$$
+
+$\tilde{x}$ 是腐蚀后的输入，$h_i$ 是第 12 层在位置 $i$ 的输出，$g$ 是 MLM 头里的 dense + GELU + LayerNorm，$E$ 是和输入层共享的词嵌入矩阵。GPT 和 BERT 的 loss 逐项对照算一遍，见 [预训练目标](/notes/ml/llms/pretraining-objectives/)。
 
 为什么是 80 / 10 / 10 而不是 100% `[MASK]`：`[MASK]` 这个符号只在预训练出现，微调时永远不会出现，两个阶段的输入分布就对不上。留 10% 随机词和 10% 原词，模型就不能只在看到 `[MASK]` 时才认真干活，它必须对**每一个**位置都保持一个好的表示，因为它不知道哪个位置会被要求预测。
 
@@ -93,15 +96,13 @@ p(· | x̃)_i = softmax( E · g(h_i) + b )
 
 ### 下一句预测（NSP）
 
-问答和自然语言推理都要理解两句话的关系，MLM 不直接教这个。所以预训练时同时做一个二分类：
+问答和自然语言推理都要理解两句话的关系，MLM 不直接教这个。所以预训练时同时做一个二分类：句子 B 有 50% 是语料里 A 的真实下一句（标签 IsNext），50% 从语料里随机抽（NotNext），由 `[CLS]` 位置的 pooler 输出来判断。
 
-```text
-50%：B 是语料里 A 的真实下一句   → IsNext
-50%：B 从语料随机抽              → NotNext
-L_NSP = − log p(label | pooler(h_[CLS]))
-```
+$$
+L_{\text{NSP}} = -\log p\left(\text{label} \mid \operatorname{pooler}(h_{\text{[CLS]}})\right)
+$$
 
-总损失就是两项相加：`L = L_MLM + L_NSP`。
+总损失就是两项相加：$L = L_{\text{MLM}} + L_{\text{NSP}}$。
 
 后来 RoBERTa 发现，去掉 NSP、只用更长的连续文本做 MLM，下游任务不掉反升。此后的编码器模型大多不再用 NSP。它留下来的东西是 `[CLS]` + 句对格式这套输入约定。
 
@@ -151,7 +152,7 @@ L_NSP = − log p(label | pooler(h_[CLS]))
 
 **第 4 步，取 `[CLS]`。** 第 0 行过 pooler，得到 `[1, 768]`。
 
-**第 5 步，分类头和损失。** 一个 `W ∈ R^{2×768}` 和 `b ∈ R^2`，这是**仅有的新参数**（1,538 个）。logits 过 softmax，损失是标签类别的负对数概率，梯度流回全部 1.09 亿个参数。
+**第 5 步，分类头和损失。** 一个 $W \in \mathbb{R}^{2 \times 768}$ 和 $b \in \mathbb{R}^{2}$，这是**仅有的新参数**（1,538 个）。logits 过 softmax，损失是标签类别的负对数概率，梯度流回全部 1.09 亿个参数。
 
 <ClsFineTuneViz />
 
@@ -187,7 +188,7 @@ optimizer.step()
 
 几个实践里会碰到的点：
 
-- **`[CLS]` 不是魔法**。它的向量好用，是因为预训练时 NSP 逼着它汇总全句；也可以对所有位置的输出取平均再接头，有时更稳。
+- **`[CLS]` 不是魔法**。它的向量好用，是因为预训练时 NSP 逼着它汇总全句；也可以对所有位置的输出取平均再接头，有时更稳（两种取法的对比见 [Sentence Embedding](/notes/ml/representations/sentence-embedding/)）。
 - **小数据集上微调不稳定**。几千条样本时，不同随机种子的结果差好几个点；常见做法是多跑几个种子、用更小的学习率、更多 epoch 配早停。
 - **长文本要截断**。位置嵌入只有 512 行，更长的文本要切块或只取开头。
 
@@ -231,6 +232,13 @@ optimizer.step()
 3. 训练分两段：无标注文本上 100 万步的预训练，然后在标注数据上**全参数**微调 2 到 4 个 epoch，学习率 2e-5 量级。
 4. 做分类就是接一个 `2 × 768` 的头到 `[CLS]` 的 pooler 输出上；新参数只有一千多个，但整个模型都在更新。
 5. 和 GPT 的根本差别只有两点：**看哪边**（双向 vs 只看左边）和**预测什么**（被遮的词 vs 下一个词）；前者让 BERT 更会"读"，后者让 GPT 会"写"，并最终能靠规模和 prompt 统一所有任务。
+
+## Related notes
+
+- [Transformer Block：一层里有什么](/notes/ml/llms/transformer-block/)：编码器层里每个零件的形状和数。
+- [预训练目标：自回归与 Masked LM](/notes/ml/llms/pretraining-objectives/)：GPT 和 BERT 的 loss 逐项算一遍。
+- [Decoding：greedy、sampling、top-k、top-p、beam](/notes/ml/llms/decoding-strategies/)：GPT 那一侧生成时怎么选词。
+- [Sentence Embedding：CLS 与 Mean Pooling](/notes/ml/representations/sentence-embedding/)：BERT 的输出怎样变成一句话的向量。
 
 ## Further reading
 
