@@ -1,0 +1,51 @@
+import NormalizationFigure from "@/components/visualization/ml/dl-blocks/NormalizationFigure";
+
+# Normalization：Batch / Layer / Weight
+
+## 一句话
+
+**normalization 把一组数减掉均值、除以标准差拉回均值 0、方差 1，再用可学的 γ 和 β 放回去；三种方法的区别只在「这一组」沿哪个轴取：BatchNorm 沿 batch 轴，LayerNorm 沿 feature 轴，WeightNorm 不碰激活值而是拆权重。**
+
+CNN 和 MLP 里常见 BatchNorm，Transformer 的每一层都有 LayerNorm。
+
+## 为什么需要它
+
+residual 解决了梯度传不过去，但激活值的尺度还是没人管：前一层参数一更新，后一层看到的输入分布就变了，后面的层得追着一个会动的目标学，学习率只能开得很小。把每层的输入拉回固定的尺度，后面的层就能当输入分布不变来学，学习率可以开大，对初始化也不那么敏感。剩下的问题只有一个：「拉回固定尺度」时，均值和方差是从哪些数算出来的。
+
+## 怎么工作
+
+<NormalizationFigure />
+
+$$
+\text{BatchNorm: } \hat{x}_{i,j} = \frac{x_{i,j} - \mu_{B,j}}{\sqrt{\sigma^{2}_{B,j} + \epsilon}},\qquad
+\mu_{B,j} = \frac{1}{m}\sum_{i=1}^{m} x_{i,j},\qquad
+y = \gamma\,\hat{x} + \beta
+$$
+
+$$
+\text{LayerNorm: } \hat{x}_{i,j} = \frac{x_{i,j} - \mu_{L,i}}{\sqrt{\sigma^{2}_{L,i} + \epsilon}},\qquad
+\mu_{L,i} = \frac{1}{d}\sum_{j=1}^{d} x_{i,j}
+$$
+
+$$
+\text{WeightNorm: } w = g\,\frac{v}{\lVert v \rVert}
+$$
+
+图里是一个 4 个样本 × 5 个 feature 的激活矩阵，五个 feature 故意放在不同的尺度上。切到 BatchNorm，高亮的是一列：同一个 feature 在 4 个样本上的值，μ_B 和 σ_B 只从这 4 个数算，这一列归一化后均值 0、方差 1。它的统计量依赖整个 batch，batch 小时估得不准；推理时常常一次只来一个样本，根本没有 batch 可算，所以训练时还要维护一份 running mean 和 running variance，推理时用这份而不是当前 batch 的。训练和推理走的是两条不同的公式，这是它最常出 bug 的地方。
+
+切到 LayerNorm，高亮的变成一行：一个样本自己的 5 个 feature，μ_L 和 σ_L 只从这一行算。每个样本独立，batch 大小无关，训练和推理一模一样；序列模型里每个位置的 token 向量就是这样一行，长度不齐、batch 为 1 都没关系，所以 Transformer 用的是它。
+
+WeightNorm 换了个对象：它不动激活值，把一层的权重向量拆成长度 g 和单位方向 v/‖v‖ 两个参数分开学。方向和长度解耦之后，更新方向不会顺带改尺度，优化更平稳，而且和 batch 完全无关。
+
+BatchNorm 还分 1D 和 2D，差别只在「这一组」有多大。1D 用在 MLP、RNN，输入 (batch, feature)，比如 (4, 3)，每个 feature 一种统计；2D 用在 CNN，输入 (batch, channel, H, W)，比如 (2, 3, 2, 2)，每个 channel 一种统计，μ 和 σ 来自 batch × H × W 共 8 个数。图里切到 2D 就能看到这 8 个数。两种都不改变张量形状，作用都是稳定梯度、加速收敛。
+
+## 代价与取舍
+
+- BatchNorm 的 batch 不能太小，也不能让一个 batch 里的样本互相泄露信息（对比学习里同一 batch 的正负样本会通过 μ_B 互相看到）；忘记切 eval 模式就会在推理时用错一套统计量。
+- LayerNorm 把一行的所有 feature 拉成同一尺度，feature 之间的绝对大小差异被抹掉；CNN 里通道之间的差异往往有意义，所以 CNN 更常用 BatchNorm 或 GroupNorm。
+- 三种方法都多了 γ、β 或 g 这几个参数和一次额外的统计计算；推理时 BatchNorm 可以折进前一层的权重里，LayerNorm 不能，每次都要重新算。
+- 放的位置不同效果不同：Transformer 里 pre-norm 训得稳，post-norm 上限略高但难训，这和上一页 residual 的直通路直接相关。
+
+## 再往下看
+
+到这里深网络能训了：梯度算得出来、传得过去、尺度稳得住。Transformer 每一层里的 residual + LayerNorm 在 [Transformer Block](/notes/ml/llms/transformer-block/) 里；Inception 怎么用 channel 拼接代替相加在下一页 [Inception：并行分支按 channel 拼接](/notes/ml/dl-blocks/inception-block/)。

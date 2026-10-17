@@ -11,7 +11,7 @@ export default function HomePage() {
       <section className="recent-section" aria-labelledby="recent-title">
         <div className="section-heading"><h2 id="recent-title">最近记录 <span>Recently added</span></h2><span className="subtle-text">{noteEntries.length} 篇笔记</span></div>
         <div className="recent-notes">{recentNotes.map((note) => <Link className="recent-note" key={note.slug} href={`/notes/${note.slug}/`}>
-          <span className="note-card-icon"><Icon name={note.categoryId === "ml" ? "brain" : "code"} /></span>
+          <span className="note-card-icon"><Icon name={note.categoryId === "ml" ? "brain" : note.categoryId === "algorithms" ? "search" : "code"} /></span>
           <div className="recent-note-copy"><p className="note-category">{note.category} <span>/</span> {note.section}</p><h3>{note.title}</h3><p>{note.description}</p></div>
           <div className="recent-note-end"><span className={`note-status status-${note.status}`}><span />{note.status === "growing" ? "Growing" : note.status === "stable" ? "Stable" : "Seed"}</span><time dateTime={note.updated}>{note.updated.slice(5).replace("-", ".")}</time></div><Icon name="arrow" className="card-arrow" />
         </Link>)}</div>

@@ -1,0 +1,107 @@
+import ImagePatchExplorer from "@/components/visualization/multimodal/ImagePatchExplorer";
+import VisualTokenSequence from "@/components/visualization/multimodal/VisualTokenSequence";
+import QwenResolutionCounter from "@/components/visualization/multimodal/QwenResolutionCounter";
+
+# 一张图片如何变成 Visual Tokens？
+
+语言模型只认 token。给它一张照片让它描述，图片是怎么进去的？一种直觉是先把图片“翻译”成一段文字说明再喂给 LLM；另一种直觉是把整张图压成一个向量。两种都不对。
+
+**一句话答案：** 图片通常不会先翻译成文字，也不只变成一个向量。ViT 把图像切成 patch，编码成一串视觉特征；projector 或 merger 把它们映射到 LLM 的 hidden 维度，变成多个 visual token，和文本 embedding 排在同一条序列里一起做 attention。
+
+## 从像素到 LLM 输入的整条路径
+
+```text
+Image (pixels)                    [3, 224, 224]
+  → 预处理、切 patch               196 个 16×16×3 的小块
+  → Vision Encoder (ViT)           Transformer 层让 patch 之间互相 attention
+  → visual hidden states          [196, 1024]
+  → projector / merger            映射到 LLM 维度，可能顺便合并相邻 token
+  → visual token embeddings       [N_v, 4096]
+  → 和文本 embedding 拼成一条序列   [N_t + N_v, 4096]
+  → LLM attention、next-token 生成
+```
+
+维度数字是一个常见组合的示意（ViT-L/16 的 1024 维、7B 级 LLM 的 4096 维），不是某个模型的官方参数。下面一段一段看。
+
+## 第一步：切 Patch
+
+ViT 把图片当成一句话来处理：把 $H\times W$ 的图切成 $p\times p$ 的小块，每块展平后乘一个线性投影矩阵，就是这个“词”的 embedding。patch 数是
+
+$$
+N=\frac{H}{p}\cdot\frac{W}{p}
+$$
+
+224×224 的图用 16×16 的 patch，每边 14 块，共 $14^2=196$ 个。ViT 论文的标题 *An Image is Worth 16x16 Words* 说的就是这件事。
+
+<ImagePatchExplorer />
+
+patch 大小是一个取舍：$p=8$ 时 784 个 token，细节多，但 self-attention 的计算量按 token 数的平方涨；$p=32$ 时只剩 49 个，便宜，但一块里塞了太多东西。
+
+切完之后，196 个 patch embedding 加上位置信息，经过几十层 Transformer。每一层里每个 patch 都在和其他 patch 做 attention，所以最后输出的第 $k$ 个向量已经不只描述第 $k$ 块像素，还带着它在整张图里的上下文。
+
+## 第二步：Projector 把维度接上
+
+ViT 输出 $V\in\mathbb{R}^{N_v\times d_v}$，LLM 的 embedding 是 $T\in\mathbb{R}^{N_t\times d_l}$。两者维度通常不同，中间需要一个可训练的映射：
+
+$$
+V'=f_\theta(V)\in\mathbb{R}^{N_v'\times d_l}
+$$
+
+$f_\theta$ 可以只是一个线性层（最早的 LLaVA），也可以是两层 MLP，或者在映射的同时把相邻的 2×2 个 token 合成一个（Qwen2-VL 的 merger），这样 $N_v'=N_v/4$。
+
+**维度一致不等于语义已对齐。** 把 1024 维投影成 4096 维只是让形状对得上。这些向量能不能被 LLM 正确理解，要靠训练，这是下一篇 [视觉与文本是怎么对齐的？](/notes/ml/multimodal/vision-language-alignment/) 的主题。
+
+## 第三步：和文本排进同一条序列
+
+<VisualTokenSequence />
+
+几件值得注意的事：
+
+- **Visual token 是连续向量，不是词 id。** 文本 token 先由 tokenizer 给出一个整数 id，再查 embedding 表的一行；visual token 是由图像算出来的 4096 维向量，词表里没有它。两张不同的猫图得到的向量也不同。
+- **LLM 看不出谁是图谁是字。** 拼好之后它只是一条更长的 embedding 序列。“动物”这个位置的 query 和前面每个 visual token 的 key 做点积，权重高的那些区域就被读进来，这就是 LLM“看见”图片的方式。
+- **拼接方式不止一种。** 常见做法是在文本里放一个图片占位符，送进 LLM 之前把占位符那一格替换成 $N_v$ 个视觉 embedding；Flamingo 这类模型则不把图像放进序列，而是在 LLM 层之间插入 cross-attention 去读图像特征。
+
+## 实例：Qwen2-VL 怎么做
+
+Qwen2-VL 是“ViT + LLM”结构的一个具体实例。下面几点出自它的论文与博客，只描述这个模型，不能推广为所有 VLM 的做法：
+
+- **约 675M 参数的 ViT**，patch size 14，去掉了原本的绝对位置编码，改用 2D-RoPE。
+- **Naive Dynamic Resolution**：不把图片统一缩到 224×224，而是按原分辨率切 patch，不同尺寸的图产生不同数量的 token。
+- **2×2 merge**：ViT 之后用一个 MLP 把相邻 2×2 个 token 压成 1 个，再在前后加 `<|vision_start|>` 和 `<|vision_end|>`。论文里的例子：224×224 的图在进入 LLM 前被压成 66 个 token。
+- **M-RoPE**：把旋转位置编码拆成 temporal、height、width 三个分量。文本 token 三个分量相同，图片 token 的 height/width 分量对应它在网格里的行列，所以 LLM 拿到的是二维位置。
+
+<QwenResolutionCounter />
+
+$224/14=16$，$16\times16=256$ 个 patch，合并后 $256/4=64$，加两个特殊 token 正好 66。换成 1344×896 时是 1536 个 visual token（加特殊 token 共 1538），这就是高分辨率图片又贵又慢的原因。
+
+## 和 CLIP 检索的区别
+
+[CLIP](/notes/ml/multimodal/clip-contrastive-learning/) 也有一个图像 encoder，但它的目标是图文匹配：最后把整张图池化成**一个全局向量**，和文本向量算 cosine。生成式 VLM 要回答“左下角那只猫是什么颜色”，一个全局向量装不下这种区域细节，所以它把**多个** visual token 交给 LLM。很多 VLM 用 CLIP 或 SigLIP 预训练的 ViT 当 vision encoder，取的是中间层的 patch 特征，而不是最后那个全局向量。
+
+## 常见误区
+
+- **“图片先被翻译成文字。”** 进入 LLM 的是连续向量，不经过任何文字中间态。模型最后输出的描述是 LLM 读了这些向量之后生成的。
+- **“一张图就是一个 embedding。”** 检索模型是这样；生成式 VLM 通常是几十到上千个 token。
+- **“visual token 数 = patch 数。”** 中间可能有 [CLS]、特殊标记、patch merge、动态分辨率，数量由具体架构决定。
+- **“投影到 4096 维之后，视觉向量就和词向量在同一个语义空间了。”** 形状一致只是前提，语义上能不能用要靠训练。
+
+## Key ideas to remember
+
+1. ViT 把图片切成 $p\times p$ 的 patch，224×224、$p=16$ 时是 196 个。
+2. 每个 visual token 是一个连续向量，不是离散的词 id。
+3. Projector / merger 负责把视觉特征映射到 LLM 的维度，可能同时压缩 token 数。
+4. 视觉 token 和文本 token 在同一条序列里做 attention，LLM 由此读到图像区域。
+5. 具体 token 数、拼接方式、位置编码因架构而异；Qwen2-VL 用动态分辨率、2×2 merge 和 M-RoPE。
+
+## Related notes
+
+- [Transformer 为什么比 RNN 更容易并行？](/notes/ml/llms/transformer-vs-rnn/)：ViT 和 LLM 都是 Transformer。
+- [视觉与文本是怎么对齐的？](/notes/ml/multimodal/vision-language-alignment/)：维度接上之后，怎样训练让 LLM 真正会用这些 token。
+- [CLIP：图文对比学习实验台](/notes/ml/multimodal/clip-contrastive-learning/)：一张图一个全局向量的另一条路线。
+
+## Further reading
+
+- [Dosovitskiy et al. (2020), *An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale*](https://arxiv.org/abs/2010.11929)：ViT。
+- [Qwen Team (2024), *Qwen2-VL: To See the World More Clearly*](https://qwenlm.github.io/blog/qwen2-vl/)（[中文版](https://qwenlm.github.io/zh/blog/qwen2-vl/)）与 [论文 arXiv:2409.12191](https://arxiv.org/abs/2409.12191)：动态分辨率、2×2 merge、M-RoPE、66 个 token 的例子。
+- [Liu et al. (2023), *Visual Instruction Tuning* (LLaVA)](https://arxiv.org/abs/2304.08485)：ViT + 线性投影 + LLM 的最简结构。
+- [Alayrac et al. (2022), *Flamingo*](https://arxiv.org/abs/2204.14198)：用 cross-attention 而非序列拼接接入图像。

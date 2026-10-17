@@ -1,0 +1,21 @@
+import KnowledgeTree from "@/components/visualization/ml/KnowledgeTree";
+
+# Evaluation Overview
+
+## 一句话
+
+**这一章回答「模型好不好」：先把预测装进四个格子，从格子里算出 precision 和 recall，再把阈值扫成一条曲线，最后把离线指标拿到线上去验。**
+
+五页是一条问题链，每一页解决上一页留下的问题。每页都是五段：一句话、为什么需要它、怎么工作、代价与取舍、再往下看。
+
+## 这章的问题链
+
+<KnowledgeTree chapter="evaluation" />
+
+## 怎么读
+
+按顺序读，每页 5 到 7 分钟，图里的控件从头拖到尾再往下看。
+
+第 1、2 页是所有分类指标的基础，也是面试最常问的：四个格子怎么来，precision 和 recall 为什么此消彼长。第 3、4 页讲怎么选指标：阈值不定时用 ROC 和 AUC，正例稀少或只看前几条时换 PR 和 Precision@k。第 5 页从离线走到线上，p-value 到底在说什么。
+
+读完应该能用自己的话回答四个问题：为什么不平衡数据上不能看 accuracy；为什么 AUC 不随阈值变；什么时候 PR 比 ROC 诚实；p = 0.03 是什么意思、不是什么意思。

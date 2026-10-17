@@ -1,0 +1,53 @@
+import GradientDescentFigure from "@/components/visualization/ml/training/GradientDescentFigure";
+
+# Gradient Descent 与 Optimizers
+
+## 一句话
+
+**沿负梯度走一步；SGD 用小批量换速度，Momentum 攒惯性，RMSProp 按维度调步长，Adam 两者都要。**
+
+从 logistic regression 到 LLM，参数都是这样一步步学出来的；optimizer 决定的只是「这一步往哪走、走多远」。
+
+## 为什么需要它
+
+上一页把 cross-entropy 写成了 loss，但 loss 只是一个数，还得有办法让它降下去。参数可能有几百万个，不能一个个试，能用的信息只有 loss 对每个参数的导数，也就是梯度 g：它指向 loss 上升最快的方向，反过来走就是下降最快的方向。[Logistic Regression](/notes/ml/classifiers/logistic-regression/) 那页的 w 就是这样一次次更新出来的。麻烦在于学习率 η 很挑：大了在陡的方向震荡，小了在平的方向挪不动，而真实的 loss 面每个方向的陡峭程度都不一样。
+
+## 怎么工作
+
+<GradientDescentFigure />
+
+最基本的更新只有一句话，GD 用全部数据算 g，SGD 只用一小批：
+
+$$
+\theta_{t+1} = \theta_t - \eta\, g_t,\qquad g_t = \nabla_\theta L(\theta_t)
+$$
+
+Momentum 先把梯度攒成速度，再用速度更新：
+
+$$
+v_t = \beta\, v_{t-1} + g_t,\qquad \theta_{t+1} = \theta_t - \eta\, v_t
+$$
+
+RMSProp 不改方向，改每个维度的步长，除以该维度梯度平方的滑动平均：
+
+$$
+s_t = \rho\, s_{t-1} + (1-\rho)\, g_t^2,\qquad \theta_{t+1} = \theta_t - \frac{\eta}{\sqrt{s_t + \epsilon}}\, g_t
+$$
+
+图里的碗沿 y 陡、沿 x 平。GD 用同一个 η 伺候两个方向：η = 1.8 在 y 方向一步跨过谷底跳到对面，于是上下来回蹦，在 x 方向却每步只挪一点。SGD 每一小批数据算出的方向都不太一样，相当于真梯度加噪声，所以它一路抖，到了谷底也停不下来；好处是每步只看一批数据，大数据集上只有它可行。
+
+Momentum 里方向一致的分量越攒越大，来回变号的分量在 v 里互相抵消，所以它沿 x 冲得快、在 y 蹦得小，代价是惯性让它冲过最低点再折回来。RMSProp 把 x 方向的小梯度放大、y 方向的大梯度缩小，两个方向步长差不多，路径几乎是直线。Adam 把两者合起来：用 m（梯度的滑动平均）当方向、用 v（RMSProp 的 s）当尺度，再各除以 1 − βᵗ 做 bias correction，所以第一步每个坐标正好走 η，不像 RMSProp 那样起跳。它是今天的默认选择；笔记里也提到它偏爱 sharp minima，泛化有时不如调好的 SGD + Momentum。
+
+## 代价与取舍
+
+- η 是最重要的超参数：GD 的上限由最陡方向决定（这个碗里 η 必须小于 2），平缓方向只能忍着慢。自适应方法把这个矛盾按维度拆开，但也多了 β、ρ 要调。
+- SGD 的噪声不全是坏事：它能把参数从尖锐的小坑里晃出来，泛化常常更好；代价是要靠 learning rate decay 才能收敛。
+- Momentum 和 Adam 都会冲过头。图里 Adam 回来得慢，是因为 v̂ 还记着起步时的大梯度；η 偏大时它会这样震荡。
+- 两维的碗里五种方法都能到底，差别只在路径；真正的差距要到百万维、各维尺度悬殊、梯度带噪声的问题上才看得出来。
+- loss 降下去不等于模型好：训练 loss 降了、测试没降，是下一页的问题。
+
+## 再往下看
+
+[Bias 与 Variance](/notes/ml/training/bias-variance/) 看训练 loss 降下去之后测试 loss 为什么没跟着降，把错误拆成「学不会」和「学过头」两种。
+
+跨章：[Logistic Regression](/notes/ml/classifiers/logistic-regression/) 的 w 就是用这里的 gradient descent 学出来的；[GBDT](/notes/ml/trees/gbdt/) 里每棵树拟合的残差正是平方损失的负梯度，boosting 其实是在函数空间里做 gradient descent。

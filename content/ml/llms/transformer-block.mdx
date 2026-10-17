@@ -1,0 +1,49 @@
+import TransformerBlockFigure from "@/components/visualization/ml/llms/TransformerBlockFigure";
+
+# Transformer Block：一层里有什么
+
+## 一句话
+
+**一层 Transformer 是两个子层各包一条 residual 加一次 LayerNorm：masked multi-head attention 让每个位置读别的位置，MLP 在每个位置上单独加工；进出都是 (B, T, d_model)，所以能原样叠 N 次。**
+
+进层之前 token 先查 embedding 表再加 position。GPT 这类 decoder-only 模型就是这样的层叠几十次，最后接一个线性层和 softmax。
+
+## 为什么需要它
+
+上一页算完了多头 attention 的输出和参数量，但 attention 只做了一件事：把别的位置的 V 按权重加过来。它是线性的，没有非线性就学不出复杂的函数；它不知道顺序，把输入的行打乱，输出只是跟着打乱；叠几十层以后梯度还会像 backprop 那一页说的那样被连乘到消失。所以一层里除了 attention 还得有别的东西：position 补顺序，MLP 补非线性，residual 和 LayerNorm 让几十层训得动。
+
+## 怎么工作
+
+<TransformerBlockFigure />
+
+$$
+PE_{(pos,\,2i)} = \sin\!\left(\frac{pos}{10000^{2i/d}}\right),\qquad
+PE_{(pos,\,2i+1)} = \cos\!\left(\frac{pos}{10000^{2i/d}}\right)
+$$
+
+$$
+h' = \mathrm{LN}\big(h + \mathrm{MaskedMHA}(h)\big),\qquad
+h'' = \mathrm{LN}\big(h' + \mathrm{MLP}(h')\big)
+$$
+
+$$
+\mathrm{LN}(h_i) = \frac{h_i - \mu_i}{\sigma_i}\cdot\gamma + \beta,\qquad
+\mu_i = \frac{1}{d}\sum_{j=1}^{d} h_{ij}
+$$
+
+图里跟着「我 想 吃」的最后一个 token 走。它先查表得到 4 维的 embedding，再加上第 2 个位置的 position 向量：sinusoidal 是按公式算出来的 sin / cos，任意长度都能算；learned 是一张 (T_max, d_model) 的参数表，训练前只是随机数。切换 tab，第 ② 步之后的数都会跟着变。
+
+第 ③ 步是 attention。Q 是这个 token 在找什么，K 是每个位置拿出来被匹配的，V 是匹配上以后真正搬过来的东西。「吃」对三个位置打分、softmax、按权重把 V 加起来，就是 attention 带回的 Δ；多个 head 各算一份再拼回 d_model 维。因为是 decoder，未来的位置在 softmax 前被 mask 成 −∞，权重正好为 0。
+
+第 ④ 步先把 Δ 加回输入（residual），再对这一个 token 的 4 个数做 LayerNorm：μ 和 σ 只从它自己的 d_model 维算。这里用 LayerNorm 而不是 BatchNorm 的原因很具体：batch 里的句子长短不一样，沿 batch 轴统计会把不相干的位置混在一起，推理时一次只来一个 token 更没有 batch 可算。第 ⑤ 步的 MLP 让每个位置独立过一个 d_model → d_ff → d_model 的两层网络，不看别的 token；第 ⑥ 步再做一次 residual + LayerNorm。进来 4 维，出去还是 4 维。
+
+## 代价与取舍
+
+- LayerNorm 不是「把所有 token 平均」：mean pooling（h_mean = 1/N Σ h_i）把 N 个向量压成一个，形状变了；LayerNorm 把一个向量内部的 d 个数拉回均值 0、方差 1，形状不变。两者是两回事。
+- 图里是原论文的 post-LN（先加再归一化）；GPT-2 之后的模型多用 pre-LN，把 LayerNorm 挪到子层前面，几十层叠起来更稳。两种写法里 residual 都在。
+- sinusoidal 不用学、能外推到没见过的长度，但模型用得不如学出来的顺手；learned 表只有 T_max 行，超过就没有位置向量。现在的 LLM 多用 RoPE，把位置写进 Q、K 的旋转里。
+- 参数大头在 MLP：d_ff = 4 d_model 时 MLP 有 8 d_model² 个参数，attention 的四个投影一共 4 d_model²；计算量大头却可能在 attention 的 (B, h, T, T)，序列一长就是平方增长。
+
+## 再往下看
+
+一层的形状对上了，叠 N 层就是一个 GPT；可它的参数从哪来、训练时到底在预测什么，还没说，下一页 [预训练目标：自回归与 Masked LM](/notes/ml/llms/pretraining-objectives/) 把 loss 写出来。图里的两个块来自前面那一章：[Residual Connection](/notes/ml/dl-blocks/residual-connection/) 解释为什么要有那条直通路，[Normalization](/notes/ml/dl-blocks/normalization/) 解释 μ、σ 沿哪个轴算。

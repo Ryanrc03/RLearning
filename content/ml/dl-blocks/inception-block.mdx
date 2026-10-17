@@ -1,0 +1,47 @@
+import InceptionFigure from "@/components/visualization/ml/dl-blocks/InceptionFigure";
+
+# Inception：并行分支按 channel 拼接
+
+## 一句话
+
+**Inception block 让同一个输入同时过几条分支（1×1、3×3、5×5 卷积和一条 pooling），每条分支各出一张同样 H × W 的特征图，再用 torch.cat 沿 channel 维拼成一张：channel 数变成各分支之和，空间尺寸不变。**
+
+GoogLeNet 靠它把网络堆到 22 层；后来的 Inception v2 到 v4、Xception 都是它的变体。
+
+## 为什么需要它
+
+上一页 residual 解决的是「深了梯度传不过去」，这一页回答另一个问题：一层里到底该用多大的卷积核。3×3 看局部纹理，5×5 看更大的结构，1×1 只在 channel 之间做线性组合；图片里物体有大有小，提前定死一种核就是在赌。Inception 的回答是不选：几种核并排放，每条分支各算各的，再把结果拼在一起，让下一层自己决定用哪条分支的输出。拼接而不是相加，是因为相加要求形状一致，还会把不同核看到的东西混成一团；拼接把它们保留成不同的 channel。
+
+## 怎么工作
+
+<InceptionFigure />
+
+$$
+y_i = b_i(x),\quad i = 1, \dots, 4,\qquad
+y = \operatorname{cat}\big([y_1, y_2, y_3, y_4],\ \text{dim} = 1\big)
+$$
+
+$$
+(C, H, W) \;\longrightarrow\; (c_1 + c_2 + c_3 + c_4,\ H,\ W)
+$$
+
+$$
+\text{conv 参数量} = C_{\text{in}} \cdot C_{\text{out}} \cdot k \cdot k + C_{\text{out}}
+$$
+
+图里的输入是 GoogLeNet inception 3a 的 (192, 28, 28)。四条分支：b1 是一个 1×1 卷积，出 64 个 channel；b2 先用 1×1 把 192 压到 96，再 3×3 卷积出 c₂ 个；b3 先压到 16 再 5×5 出 32 个；b4 先 3×3 max-pool 再 1×1 出 32 个。每条分支都用 same padding，所以四张输出都还是 28 × 28。PyTorch 里 forward 就是把 x 分别送进 b1 到 b4 得到 y1 到 y4，再把四条分支的输出 torch.cat 在 channel 维（dim = 1）上返回。拖滑杆改 c₂，输出 channel 数跟着变成 64 + c₂ + 32 + 32，H、W 一步都没动。
+
+每条分支前面的 1×1 卷积是省算力的关键：5×5 卷积直接吃 192 个 channel 要 192 × 32 × 25 ≈ 15 万个参数，先压到 16 个 channel 再做只剩 1.3 万。表里按 C_in · C_out · k² + C_out 逐层算出参数量，按每个输出像素做 C_in · k² 次乘加算出计算量，可以自己验算。
+
+切到 ResNet 看对照：同一个输入走 y = relu(f(x) + x)，f(x) 里两层 3×3 卷积先变宽再变回 192，因为相加要求 f(x) 和 x 形状完全一样，输出只能是 (192, 28, 28)。拼接让 channel 变多，相加让形状不变，这是两种 forward 的根本区别。
+
+## 代价与取舍
+
+- 拼接的前提是各分支的 H × W 一致，所以分支里的卷积和 pooling 都得配 same padding，stride 也要一样；想下采样得整块一起做。
+- 输出 channel 是各分支之和，几个 block 叠下去 channel 会越滚越多，下一个 block 开头的 1×1 压缩不是可选项，而是必需。
+- 分支数、每条分支的 channel 数都是超参数，GoogLeNet 里每个 block 的配置都是手调出来的，不如 ResNet 的「同一个 block 复制 N 遍」好扩展。
+- 并行分支在 GPU 上要么串行算要么拆 kernel，实际吞吐不一定比同参数量的单路卷积高；后来 ResNeXt 把分支做成分组卷积，就是在修这个问题。
+
+## 再往下看
+
+拼接和相加是两种让一层「做得更多」的办法，Transformer 两样都用：multi-head attention 把各个头的输出拼起来，每个子层外面再包一条 residual。[Transformer Block](/notes/ml/llms/transformer-block/) 里能看到它们各在哪一步；上一页的 [Residual Connection](/notes/ml/dl-blocks/residual-connection/) 讲了相加那条路为什么要形状一致。

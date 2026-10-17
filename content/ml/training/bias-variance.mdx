@@ -1,0 +1,42 @@
+import BiasVarianceFigure from "@/components/visualization/ml/training/BiasVarianceFigure";
+
+# Bias 与 Variance
+
+## 一句话
+
+**bias 是模型学不会，再多数据也拟合不上；variance 是换一批数据答案就变，训练误差和测试误差之间的差距暴露的就是它。**
+
+任何「训练集上很好、上线不行」的问题，第一步都是判断自己在哪一端。
+
+## 为什么需要它
+
+上一页把训练 loss 降下去了，但模型最终要在没见过的数据上用。训练 loss 低有两种完全不同的原因：模型真的学会了规律，或者模型把训练集连同噪声一起背了下来。只看训练 loss 分不出来，所以要留一份模型没见过的数据（dev / test）打分：训练误差本身告诉你 bias，训练和测试的差距告诉你 variance。两种病开的药相反，诊断错了会越治越糟。
+
+## 怎么工作
+
+<BiasVarianceFigure />
+
+对一个固定的 x，把「换一批训练数据再训一次」重复很多遍，预测的期望误差可以拆成三项：
+
+$$
+\mathbb{E}\big[(y - \hat f(x))^2\big] = \underbrace{\big(f(x) - \mathbb{E}[\hat f(x)]\big)^2}_{\text{bias}^2} + \underbrace{\mathbb{E}\big[(\hat f(x) - \mathbb{E}[\hat f(x)])^2\big]}_{\text{variance}} + \underbrace{\sigma^2}_{\text{噪声}}
+$$
+
+bias 是平均下来的预测离真相多远，variance 是每次训练的预测彼此差多远，σ² 是数据本身的噪声，谁也消不掉。
+
+图里的真相是一条正弦。d = 1 的直线怎么拟合都是一条直线，训练误差和测试误差一样高：bias 大，variance 小。d 到 3 到 5，曲线描出了正弦的形状，两个误差一起降到接近噪声方差 0.09。再往右，训练误差继续下降，测试误差却回头：13 个参数对 20 个点，曲线在点与点之间来回摆动，把每个点的噪声都当成了规律。换一批点，这条曲线会完全不同，这就是 variance。
+
+实际项目里没有真相曲线，但有这两个数。训练误差高，是 bias：换更大的模型、加特征、训练更久。训练误差低而测试误差高，是 variance：更多数据、正则化、早停，或者换小一点的模型。
+
+## 代价与取舍
+
+- 两者此消彼长：模型容量越大 bias 越小、variance 越大，最优点在中间，而且随数据量移动：数据多了，更复杂的模型也不会过拟合。
+- 「训练误差高」要和噪声下限或人的水平比：这里噪声方差是 0.09，训练误差 0.1 已经到底，再压就是在记噪声。
+- 测试集只能用来打分，不能用来选模型；选模型用 dev 集，否则测试误差本身也过拟合了。
+- 深度网络打破了「越大越过拟合」的简单图景（double descent），但用训练 / 测试差距做诊断的方法仍然成立。
+
+## 再往下看
+
+[Regularization：L1 与 L2](/notes/ml/training/regularization-l1-l2/) 是治 variance 最直接的药：在 loss 后面加一项惩罚，不让权重随便长大。
+
+跨章：[Ensemble](/notes/ml/trees/ensembles/) 用同一对概念解释两类集成：bagging 让很多棵高 variance 的树投票来降 variance，boosting 让一串弱模型接力来降 bias。

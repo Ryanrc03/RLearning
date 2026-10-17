@@ -1,0 +1,44 @@
+import RetrievalMetricsFigure from "@/components/visualization/ml/recsys/RetrievalMetricsFigure";
+
+# 检索的 P@30、Recall@30 与 group P@1
+
+## 一句话
+
+**对一条 query，P@30 是检索出来的前 30 个结果里相关的占几分之几，Recall@30 是前 30 个里找到的相关结果占库里全部相关结果的几分之几；P@1 只问第一个结果对不对。**
+
+搜索、推荐召回、RAG 的检索层，离线评估用的都是这一组数。
+
+## 为什么需要它
+
+[PR 曲线与 Precision@k](/notes/ml/evaluation/pr-curve-precision-at-k/) 里的 Precision@k 是对一个分类器的打分排序定义的；检索系统的「样本」换成了 query：每条 query 各有一份排好序的结果、各有一份自己的相关集合，指标要先对每条 query 算，再在所有 query 上平均。MeMe 项目里的问题很具体：用户输一句话找表情包，库里几千张，系统按相似度排出前 30 张给用户翻。它好不好，看的不是全库的 AUC，而是这 30 张里有几张是用户要的、用户要的那几张有多少被排进来了、第一张是不是就对。前两个问题是 P@30 和 Recall@30，第三个是 P@1。
+
+## 怎么工作
+
+<RetrievalMetricsFigure />
+
+$$
+P@k = \frac{\text{前 } k \text{ 个结果里相关的个数}}{k},\qquad
+\text{Recall}@k = \frac{\text{前 } k \text{ 个结果里相关的个数}}{\text{库里相关结果的总数}}
+$$
+
+$$
+\text{hit}@k = \mathbb{1}\left[\text{前 } k \text{ 个里至少有一个相关}\right],\qquad
+\text{笔记里的「}P@30\text{」} = \frac{1}{N}\sum_{q=1}^{N} \text{hit}@30(q)
+$$
+
+图里是一条 query 的前 30 个结果，初始有 6 个相关：P@30 = 6/30 = 0.2。Recall@30 的分母不在这 30 个里面，它是库里一共有多少个相关的，图里用 5 / 10 / 20 三个预设代替，默认 10，所以 Recall@30 = 6/10 = 0.6。点任意一个结果切换它的相关性，两个分子一起变；把总相关数从 10 切到 20，只有 recall 掉一半。P@1 只看结果 1，要么是 1 要么是 0。
+
+右边三个数是 MeMe 项目在 100 条 query 上实测的，不是这张图算出来的：exact-match 检索 0.23，semantic 检索 0.9344，group P@1 0.8287。笔记里把前两个都叫「P@30」，但算法是每条 query 问一次「前 30 里有没有命中」，再在 100 条上取比例：exact-match 只有二十几条 query 找到了相关的，semantic 有 93 到 94 条。严格说这是 hit@30 在 query 上的平均，也就是 hit rate，不是上面定义的 per-query precision；两种口径在一条 query 上能差很远，图里这条 query 的 P@30 是 0.2，hit@30 却是 1。group P@1 问的是第一个结果有没有落在正确的组里，0.8287 是落对的比例。
+
+关键字匹配只能搜到字面相同的表情包，所以 exact-match 命中率低；semantic 检索把 query 和 meme 的描述都变成 embedding，按 cosine similarity 排序，意思相近的也能召回，命中率从 0.23 升到 0.93。
+
+## 代价与取舍
+
+- P@k 和 Recall@k 只数前 k 个里有几个相关，不管它们排在第 1 还是第 30；在意顺序要用 MRR 或 NDCG。
+- Recall@k 需要知道库里每条 query 的全部相关结果，标注成本高；很多项目标不全，只能报 P@k 或 hit@k，报的时候要说明口径。
+- hit@k 比 P@k 宽松得多，一条 query 只要前 k 里有一个对的就记 1；拿它当 P@k 报会显得比实际好，写报告时两个名字不要混。
+- k 要和产品界面对齐：用户一屏看 30 张就用 30；k 取得比用户会看的多，指标好看但不反映体验。
+
+## 再往下看
+
+这一组指标评的是排在前面的那几条，排序本身是模型给的：回头看 [梯度提升树如何给曝光打分](/notes/ml/recsys/lightgbm-explained/)，那个 LightGBM 模型给每条曝光打的分决定了谁排进前 k。semantic 检索的分数来自 embedding 之间的 [cosine similarity](/notes/ml/representations/cosine-similarity/)，它是 semantic 比 exact-match 高出 0.7 的原因。

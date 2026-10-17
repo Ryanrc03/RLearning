@@ -1,0 +1,42 @@
+import PrecisionRecallFigure from "@/components/visualization/ml/evaluation/PrecisionRecallFigure";
+
+# Precision / Recall / F1
+
+## 一句话
+
+**precision 看模型说是 dog 的里面有多少真的是 dog，recall 看真的是 dog 的里面模型找出了多少，F1 是两者的调和平均。**
+
+三个数都从混淆矩阵的格子里来，也都随着「多高的分数算 dog」这条阈值线一起动。
+
+## 为什么需要它
+
+上一页结尾那个会认猫的模型，accuracy 反而比全猜 dog 的低。accuracy 回答不了「它到底好在哪」，因为它把两种错混在一个分母里。换一个角度，把我们真正关心的 cat 当成 positive：全猜 dog 的模型一只 cat 都没找到，recall 是 0/10；会认猫的模型找到 5 只，recall 5/10，代价是它说的 55 只「cat」里只有 5 只是真的，precision 5/55。两个数一摆，谁在干活、代价是什么，一目了然。
+
+## 怎么工作
+
+<PrecisionRecallFigure />
+
+$$
+\text{precision} = \frac{TP}{TP + FP},\qquad \text{recall} = \frac{TP}{TP + FN}
+$$
+
+$$
+F_1 = \frac{2 \cdot P \cdot R}{P + R} = \frac{2\,TP}{2\,TP + FP + FN}
+$$
+
+阈值 0.5 时就是笔记里的那张矩阵：模型说了 7 次 dog，对了 4 次，precision 4/7；6 只真 dog 找出 4 只，recall 4/6。把阈值往右拖，模型只在很有把握时才说 dog，冤枉的 cat（FP）变少、precision 升，但漏掉的 dog（FN）变多、recall 降；往左拖正好相反，拖到头就是「全猜 dog」：recall 100%，precision 6/10。
+
+同一张矩阵换 cat 当 positive，算出来是 precision 1/3、recall 1/4，和笔记里的数一致。
+
+F1 用调和平均而不是算术平均，是因为调和平均会被小的那个拖住：precision 1.0、recall 0.1 的算术平均是 0.55，F1 只有 0.18。一个指标偏科，F1 就不好看。
+
+## 代价与取舍
+
+- 先定谁是 positive：通常是稀少又要紧的那一类，欺诈、阳性、点击。positive 选错了，这两个指标会像 accuracy 一样失去意义。
+- precision 和 recall 多数时候此消彼长，哪个更要紧看漏掉和误报哪个更贵：筛查疾病要 recall，推送给用户的内容要 precision。
+- F1 把两者捏成一个数方便比较，也把取舍藏起来了。汇报时最好三个一起给，再附上用的阈值。
+- 这三个数都绑定一个阈值。要比较两个模型本身而不是某个阈值下的表现，得把阈值扫一遍，这就是下一页。
+
+## 再往下看
+
+[ROC 与 AUC](/notes/ml/evaluation/roc-auc/) 把阈值从高到低扫一遍，每个阈值记一个点连成曲线，再用曲线下面积这一个数比较两个模型。

@@ -1,0 +1,47 @@
+import SoftmaxCrossEntropyFigure from "@/components/visualization/ml/classifiers/SoftmaxCrossEntropyFigure";
+
+# Softmax 与 Cross-Entropy
+
+## 一句话
+
+**softmax 把 K 个分数变成一组和为 1 的概率；cross-entropy 用 −log p 惩罚模型，真实类的概率越低，罚得越重。**
+
+几乎所有分类网络的最后一层都是这一对：图像分类、语言模型预测下一个 token、Word2Vec 的输出层。
+
+## 为什么需要它
+
+Logistic Regression 只有一个分数、一个 sigmoid，只能回答「是不是」。猫、狗、鸟三类怎么办？给每类各一个分数 z_cat、z_dog、z_bird 很自然，但三个分数怎么变成三个加起来是 1 的概率？损失也得跟上：笔记里的两个例子，模型给真实类 cat 的概率分别是 0.9 和 0.2，第二个显然错得更离谱，损失应该重得多，而不是只差 0.7。
+
+## 怎么工作
+
+<SoftmaxCrossEntropyFigure />
+
+$$
+p_k = \frac{e^{z_k}}{\sum_{j=1}^{K} e^{z_j}}
+$$
+
+$$
+L = -\sum_{k} y_k \log p_k = -\log p_{\text{true}}
+$$
+
+$$
+K = 2:\quad \frac{e^{z_1}}{e^{z_1} + e^{z_2}} = \frac{1}{1 + e^{-(z_1 - z_2)}} = \sigma(z_1 - z_2)
+$$
+
+softmax 先把每个分数取指数——这一步保证全部为正，而且大的分数被放大得更多——再除以总和，K 个数就加起来是 1。图里 dog 和 bird 的 logit 固定在 0，只拖 cat 的：z_cat = 2.89 时 cat 得 0.9、dog 和 bird 各 0.05，正是笔记的第一个例子；拖到 −0.69，cat 掉到 0.2，dog 和 bird 各 0.4，是第二个例子。
+
+cross-entropy 只看真实类那一项：y 是 one-hot，其它类的 y_k = 0 把那些项都乘没了，剩下 −log p_true。0.9 → 0.105，0.2 → 1.61，差 15 倍。右图的 −log p 曲线说明了为什么：p 在 1 附近曲线几乎是平的，模型已经答对，多一点把握不值几个钱；p 往 0 走曲线越来越陡，趋向无穷。真实类被排得越靠后，每再低一点罚得越重，梯度也越大，训练时模型会优先修最离谱的错。
+
+K = 2 时公式退化：两个分数的 softmax 等于它们之差的 sigmoid，上一页的 logistic regression 就是 softmax 的两类特例。图里「只留 cat / dog 两类」那一行算的就是这个。
+
+## 代价与取舍
+
+- 指数会溢出：z = 1000 时 e^z 是 Infinity。实际实现先减去最大的 z 再取指数（结果不变），loss 也直接在 log 空间算 logsumexp − z_true。
+- softmax 永远给每个类留一点概率，z 差 20 也不会精确是 0；它表达不了「这个类不可能」，也分不清「不确定」和「都不像」。
+- 一个样本只能属于一类。标签可以多选（一张图里既有猫又有狗）时要换成 K 个独立的 sigmoid 加 BCE。
+- 把分数除以一个 temperature 再 softmax，分布会被拉平或压尖：排序不变，概率的大小全由它决定。
+- 类别数几十万时（词表）分母的求和很贵，Word2Vec 用 negative sampling 和 hierarchical softmax 绕开它。
+
+## 再往下看
+
+这一章到此结束：分数先过 sigmoid 或 softmax 变成概率，再用 −log p 罚它，loss 有了；loss 怎么降下去，是下一章 [Gradient Descent 与 Optimizers](/notes/ml/training/gradient-descent-optimizers/) 的事。softmax 在后面还会反复出现：[Word2Vec](/notes/ml/representations/word2vec/) 的输出层就是一个词表大小的 softmax，[Hallucination](/notes/ml/llm-engineering/hallucination/) 里的 temperature 改的是 softmax 前的分数，[CLIP 对比学习](/notes/ml/multimodal/clip-contrastive-learning/) 的 contrastive loss 是一个双向的 cross-entropy。

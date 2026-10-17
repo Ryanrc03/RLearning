@@ -20,6 +20,12 @@ import LightgbmExplained from "@/content/ml/recsys/lightgbm-explained.mdx";
 import BoostingLab from "@/content/ml/recsys/boosting-lab.mdx";
 import Bert from "@/content/ml/transformers/bert.mdx";
 import DistributedCore from "@/content/systems/distributed/core.mdx";
+import DataOverview from "@/content/systems/data/overview.mdx";
+import DesignMessageQueue from "@/content/systems/design/message-queue.mdx";
+import DesignCache from "@/content/systems/design/cache.mdx";
+import DesignSharding from "@/content/systems/design/sharding.mdx";
+import DesignDataModeling from "@/content/systems/design/data-modeling.mdx";
+import DesignApi from "@/content/systems/design/api.mdx";
 import Serverless from "@/content/systems/backend/serverless.mdx";
 import AgentLoop from "@/content/ai-infra/agent-harness/agent-loop.mdx";
 import ToolsPermissionsHooks from "@/content/ai-infra/agent-harness/tools-permissions-hooks.mdx";
@@ -32,7 +38,54 @@ import SeparateVsFusedKernels from "@/content/ai-infra/gpu/separate-vs-fused-ker
 import ThreadVsWarpPerRow from "@/content/ai-infra/gpu/thread-vs-warp-per-row.mdx";
 import AggregateVsProjectFirst from "@/content/ai-infra/gpu/aggregate-vs-project-first.mdx";
 import ImplicitGemmVsFft from "@/content/ai-infra/gpu/implicit-gemm-vs-fft.mdx";
-import { getNote, noteEntries } from "@/content/notes";
+import TransformerVsRnn from "@/content/ml/llms/transformer-vs-rnn.mdx";
+import VisualTokens from "@/content/ml/multimodal/visual-tokens.mdx";
+import VisionLanguageAlignment from "@/content/ml/multimodal/vision-language-alignment.mdx";
+import ClipContrastiveLearning from "@/content/ml/multimodal/clip-contrastive-learning.mdx";
+import MlOverview from "@/content/ml/overview.mdx";
+import EvaluationOverview from "@/content/ml/evaluation/overview.mdx";
+import ConfusionMatrix from "@/content/ml/evaluation/confusion-matrix.mdx";
+import PrecisionRecallF1 from "@/content/ml/evaluation/precision-recall-f1.mdx";
+import RocAuc from "@/content/ml/evaluation/roc-auc.mdx";
+import PrCurvePrecisionAtK from "@/content/ml/evaluation/pr-curve-precision-at-k.mdx";
+import AbTestPValue from "@/content/ml/evaluation/ab-test-p-value.mdx";
+import LlmsOverview from "@/content/ml/llms/overview.mdx";
+import Rnn from "@/content/ml/llms/rnn.mdx";
+import AttentionQkv from "@/content/ml/llms/attention-qkv.mdx";
+import MultiHeadAttention from "@/content/ml/llms/multi-head-attention.mdx";
+import TransformerBlock from "@/content/ml/llms/transformer-block.mdx";
+import PretrainingObjectives from "@/content/ml/llms/pretraining-objectives.mdx";
+import DecodingStrategies from "@/content/ml/llms/decoding-strategies.mdx";
+import InceptionBlock from "@/content/ml/dl-blocks/inception-block.mdx";
+import RetrievalPrecisionAtK from "@/content/ml/recsys/retrieval-precision-at-k.mdx";
+import ClassifiersOverview from "@/content/ml/classifiers/overview.mdx";
+import NaiveBayes from "@/content/ml/classifiers/naive-bayes.mdx";
+import LogisticRegression from "@/content/ml/classifiers/logistic-regression.mdx";
+import SoftmaxCrossEntropy from "@/content/ml/classifiers/softmax-cross-entropy.mdx";
+import TrainingOverview from "@/content/ml/training/overview.mdx";
+import GradientDescentOptimizers from "@/content/ml/training/gradient-descent-optimizers.mdx";
+import BiasVariance from "@/content/ml/training/bias-variance.mdx";
+import RegularizationL1L2 from "@/content/ml/training/regularization-l1-l2.mdx";
+import TreesOverview from "@/content/ml/trees/overview.mdx";
+import DecisionTree from "@/content/ml/trees/decision-tree.mdx";
+import Ensembles from "@/content/ml/trees/ensembles.mdx";
+import Gbdt from "@/content/ml/trees/gbdt.mdx";
+import XgboostLightgbm from "@/content/ml/trees/xgboost-lightgbm.mdx";
+import RepresentationsOverview from "@/content/ml/representations/overview.mdx";
+import Word2Vec from "@/content/ml/representations/word2vec.mdx";
+import SentenceEmbedding from "@/content/ml/representations/sentence-embedding.mdx";
+import CosineSimilarity from "@/content/ml/representations/cosine-similarity.mdx";
+import DlBlocksOverview from "@/content/ml/dl-blocks/overview.mdx";
+import BackpropChainRule from "@/content/ml/dl-blocks/backprop-chain-rule.mdx";
+import ResidualConnection from "@/content/ml/dl-blocks/residual-connection.mdx";
+import Normalization from "@/content/ml/dl-blocks/normalization.mdx";
+import LlmEngineeringOverview from "@/content/ml/llm-engineering/overview.mdx";
+import PromptEngineering from "@/content/ml/llm-engineering/prompt-engineering.mdx";
+import ContextEngineering from "@/content/ml/llm-engineering/context-engineering.mdx";
+import Hallucination from "@/content/ml/llm-engineering/hallucination.mdx";
+import BinarySearchTemplates from "@/content/algorithms/binary-search/templates.mdx";
+import BinarySearchOnAnswer from "@/content/algorithms/binary-search/on-answer.mdx";
+import { getNote, getSeriesNeighbors, noteEntries } from "@/content/notes";
 import { getNoteToc } from "@/lib/content";
 import TableOfContents from "@/components/layout/TableOfContents";
 import Icon from "@/components/ui/Icon";
@@ -57,6 +110,12 @@ const noteComponents = {
   "ml/recsys/boosting-lab": BoostingLab,
   "ml/transformers/bert": Bert,
   "systems/distributed/core": DistributedCore,
+  "systems/data/overview": DataOverview,
+  "systems/design/message-queue": DesignMessageQueue,
+  "systems/design/cache": DesignCache,
+  "systems/design/sharding": DesignSharding,
+  "systems/design/data-modeling": DesignDataModeling,
+  "systems/design/api": DesignApi,
   "systems/backend/serverless": Serverless,
   "ai-infra/agent-harness/agent-loop": AgentLoop,
   "ai-infra/agent-harness/tools-permissions-hooks": ToolsPermissionsHooks,
@@ -69,6 +128,53 @@ const noteComponents = {
   "ai-infra/gpu/thread-vs-warp-per-row": ThreadVsWarpPerRow,
   "ai-infra/gpu/aggregate-vs-project-first": AggregateVsProjectFirst,
   "ai-infra/gpu/implicit-gemm-vs-fft": ImplicitGemmVsFft,
+  "ml/llms/transformer-vs-rnn": TransformerVsRnn,
+  "ml/multimodal/visual-tokens": VisualTokens,
+  "ml/multimodal/vision-language-alignment": VisionLanguageAlignment,
+  "ml/multimodal/clip-contrastive-learning": ClipContrastiveLearning,
+  "ml/overview": MlOverview,
+  "ml/evaluation/overview": EvaluationOverview,
+  "ml/evaluation/confusion-matrix": ConfusionMatrix,
+  "ml/evaluation/precision-recall-f1": PrecisionRecallF1,
+  "ml/evaluation/roc-auc": RocAuc,
+  "ml/evaluation/pr-curve-precision-at-k": PrCurvePrecisionAtK,
+  "ml/evaluation/ab-test-p-value": AbTestPValue,
+  "ml/llms/overview": LlmsOverview,
+  "ml/llms/rnn": Rnn,
+  "ml/llms/attention-qkv": AttentionQkv,
+  "ml/llms/multi-head-attention": MultiHeadAttention,
+  "ml/llms/transformer-block": TransformerBlock,
+  "ml/llms/pretraining-objectives": PretrainingObjectives,
+  "ml/llms/decoding-strategies": DecodingStrategies,
+  "ml/dl-blocks/inception-block": InceptionBlock,
+  "ml/recsys/retrieval-precision-at-k": RetrievalPrecisionAtK,
+  "ml/classifiers/overview": ClassifiersOverview,
+  "ml/classifiers/naive-bayes": NaiveBayes,
+  "ml/classifiers/logistic-regression": LogisticRegression,
+  "ml/classifiers/softmax-cross-entropy": SoftmaxCrossEntropy,
+  "ml/training/overview": TrainingOverview,
+  "ml/training/gradient-descent-optimizers": GradientDescentOptimizers,
+  "ml/training/bias-variance": BiasVariance,
+  "ml/training/regularization-l1-l2": RegularizationL1L2,
+  "ml/trees/overview": TreesOverview,
+  "ml/trees/decision-tree": DecisionTree,
+  "ml/trees/ensembles": Ensembles,
+  "ml/trees/gbdt": Gbdt,
+  "ml/trees/xgboost-lightgbm": XgboostLightgbm,
+  "ml/representations/overview": RepresentationsOverview,
+  "ml/representations/word2vec": Word2Vec,
+  "ml/representations/sentence-embedding": SentenceEmbedding,
+  "ml/representations/cosine-similarity": CosineSimilarity,
+  "ml/dl-blocks/overview": DlBlocksOverview,
+  "ml/dl-blocks/backprop-chain-rule": BackpropChainRule,
+  "ml/dl-blocks/residual-connection": ResidualConnection,
+  "ml/dl-blocks/normalization": Normalization,
+  "ml/llm-engineering/overview": LlmEngineeringOverview,
+  "ml/llm-engineering/prompt-engineering": PromptEngineering,
+  "ml/llm-engineering/context-engineering": ContextEngineering,
+  "ml/llm-engineering/hallucination": Hallucination,
+  "algorithms/binary-search/templates": BinarySearchTemplates,
+  "algorithms/binary-search/on-answer": BinarySearchOnAnswer,
 };
 
 export const dynamicParams = false;
@@ -90,6 +196,7 @@ export default async function NotePage({ params }: { params: Promise<{ slug: str
   const Content = noteComponents[key as keyof typeof noteComponents];
   if (!note || !Content) notFound();
   const toc = getNoteToc(key);
+  const { prev, next } = getSeriesNeighbors(key);
 
   return (
     <div className="note-layout">
@@ -101,6 +208,12 @@ export default async function NotePage({ params }: { params: Promise<{ slug: str
           <div className="article-meta"><span className={`note-status status-${note.status}`}><span />{note.status === "growing" ? "Growing" : note.status === "stable" ? "Stable" : "Seed"}</span><span><Icon name="calendar" /><time dateTime={note.updated}>{note.updated.replaceAll("-", ".")}</time></span><span><Icon name="clock" />约 {note.readingMinutes} 分钟</span></div>
         </header>
         <article className="prose"><Content components={{ h1: () => null }} /></article>
+        {note.series && (prev || next) && (
+          <nav className="series-nav" aria-label={`系列：${note.series.title}`}>
+            {prev ? <Link className="series-link" href={`/notes/${prev.slug}/`}><small>← 上一篇 · {note.series.title}</small><span>{prev.title}</span></Link> : <span />}
+            {next ? <Link className="series-link is-next" href={`/notes/${next.slug}/`}><small>下一篇 →</small><span>{next.title}</span></Link> : <span />}
+          </nav>
+        )}
         <div className="note-tags"><span>FILED UNDER</span>{note.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div>
         <div className="article-end"><div><Icon name="leaf" /><span>这篇笔记还会继续生长。</span></div><Link href="/">回到知识库 <Icon name="arrow" /></Link></div>
       </div>

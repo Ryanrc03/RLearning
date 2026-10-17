@@ -1,0 +1,46 @@
+import AttentionQkvFigure from "@/components/visualization/ml/llms/AttentionQkvFigure";
+
+# Attention：Q、K、V
+
+## 一句话
+
+**self-attention 让每个 token 用自己的 Query 去和所有 token 的 Key 打分，softmax 成权重后按权重把它们的 Value 加起来，再加回自己的 embedding。**
+
+Transformer 的每一层都靠它让 token 互相读；多模态里图片 patch 和文字 token 也是在这一步互相看。
+
+## 为什么需要它
+
+[上一页](/notes/ml/llms/transformer-vs-rnn/) 说 Transformer 一层能同时算完所有位置，因为每个位置只读上一层的值。那一个位置到底怎么「读」其他位置？embedding 层给每个 token 的向量只和这个词本身有关，「Ryan」在哪句话里都是同一个 E₄，它不知道前面的「I am」在介绍它。要让 E₄ 变成「这句话里的 Ryan」，就得从别的 token 那里拿一点信息过来，而且拿多少要看相关不相关。attention 把「看谁、看多少、拿什么」拆成三个矩阵乘法。
+
+## 怎么工作
+
+<AttentionQkvFigure />
+
+$$
+Q = E\,W_Q,\qquad K = E\,W_K,\qquad V = E\,W_V
+$$
+
+$$
+A = \mathrm{softmax}\!\left(\frac{Q K^{\top}}{\sqrt{d_k}}\right),\qquad a_{ij} = \frac{\exp(s_{ij})}{\sum_k \exp(s_{ik})}
+$$
+
+$$
+\Delta E_i = \sum_j a_{ij}\,V_j,\qquad E_i' = E_i + \Delta E_i
+$$
+
+图里是「Hi I am Ryan」四个 token，每个 token 一个 d = 4 的向量，三个 4 × 4 的投影矩阵固定不变。第 1 步把同一个 E 乘三次：W_Q 给出每个 token 的 Query（我在找什么），W_K 给出 Key（我是什么），W_V 给出 Value（我能给出什么）。三份投影都是 (B, T, d_k)，B 是 batch，T 是序列长度。
+
+第 2 步算相关性：Q 和 Kᵀ 相乘得到 T × T 的 S，s_ij 是第 i 个 token 的 Query 和第 j 个 token 的 Key 的点积，再除以 √d_k 防止维度一大分数就飞。第 3 步对每一行做 softmax，一行变成一组和为 1 的权重：聚焦 Ryan，会看到它的权重大部分落在「I」上。形状仍是 (B, T, T)，这张表就是「每个 token 看每个 token 多少」。
+
+第 4 步把权重乘回去：ΔE₄ = Σ_j a₄ⱼ V_j，权重大的 token 贡献多，输出回到 (B, T, d)。第 5 步 E₄' = E₄ + ΔE₄，Ryan 的向量被改了一点，改动来自它看过的 token。这就是 residual 的用法：原来的 E₄ 不丢，只是叠上上下文。笔记里 GPT-3 尺度的 W_Q、W_K 是 12,288 × 128，把 12,288 维的 embedding 压到 128 维的 query / key 空间去比相关性；W_V 的草图是 12,288 × 12,288，输出要加回 embedding，所以维度得对上。
+
+## 代价与取舍
+
+- S 和 A 都是 T × T，序列长一倍，这两张表大四倍；长上下文时显存先被它吃掉，FlashAttention、滑动窗口都是在省这一步。
+- 图里 Ryan 可以看到「Hi」和「am」，生成模型不允许看后面的词，要在 softmax 前给未来位置加 −∞ 的 mask，上一页讲过。
+- attention 本身对顺序无感：把四行打乱，输出跟着打乱但数值不变，所以位置信息要另外加（position encoding）。
+- 一组 W_Q、W_K、W_V 只能学一种「看谁」的模式：图里 Ryan 看「I」，但「am」和「Ryan」的动宾关系也值得看，这是下一页的问题。
+
+## 再往下看
+
+一组 Q、K、V 只给每个 token 一种看法，[Multi-head 与参数量](/notes/ml/llms/multi-head-attention/) 把 d 拆成几份，让几个 head 各看各的，再算清参数量。图文对齐也是在 attention 里看别的 token，只是那些 token 来自图片，见 [Vision–Language Alignment](/notes/ml/multimodal/vision-language-alignment/)。

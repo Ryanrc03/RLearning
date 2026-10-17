@@ -1,0 +1,127 @@
+import ClipSimilarityLab from "@/components/visualization/multimodal/ClipSimilarityLab";
+import InBatchNegatives from "@/components/visualization/multimodal/InBatchNegatives";
+
+# CLIP：图文对比学习实验台
+
+训练 CLIP 时，没有人告诉模型“这张图里有一只猫”。数据只是几亿对从网上抓来的图片和配文。那它怎么学会把猫图和“一只猫在沙发上”放到一起？更奇怪的是，训练时也没有专门准备“错误的配文”作为负例，负例从哪来？
+
+**一句话答案：** 一次喂入 N 对图文，算出 N×N 的相似度矩阵；对角线是正确配对，batch 里其余组合全当负例；按行、按列各做一次 softmax 交叉熵，让对角线的概率变大。
+
+## 一个 batch 里发生了什么
+
+CLIP 有两个独立的 encoder：图像 encoder $f$（ResNet 或 ViT）和文本 encoder $g$（Transformer）。它们各自把输入变成一个向量，再投影到同一个维度、做 L2 归一化：
+
+$$
+u_i=\frac{f(I_i)}{\lVert f(I_i)\rVert_2},\qquad t_j=\frac{g(T_j)}{\lVert g(T_j)\rVert_2}
+$$
+
+归一化之后，点积就是 cosine similarity，取值在 $[-1, 1]$。把 batch 里每张图和每段文字两两配对，就得到相似度矩阵和 logits：
+
+$$
+S_{ij}=u_i^{\top}t_j,\qquad Z_{ij}=\frac{S_{ij}}{\tau}
+$$
+
+$\tau>0$ 是 temperature。注意一张图只对应**一个全局向量**，这和后面生成式 VLM 把一张图变成几百个 visual token 是两回事。
+
+下面用三张图、三句话做实验。数值是手工构造的教学例子，不来自真实 CLIP。
+
+<ClipSimilarityLab />
+
+值得试的几件事：
+
+- 选 **Before alignment**，切到 *Image→Text 概率*：猫图（I1）这一行最高的是“一只狗在草地上”，狗图那一行也配错了。整体 loss 远高于 After。
+- 选 **After alignment**、τ = 0.1，点左上角的格子：logit 是 $0.83/0.1=8.3$，这一行的 logits 是 $[8.3, 2.0, 1.0]$，正确文字的概率约 0.998。
+- 保持 After，把 τ 从 0.1 拖到 0.5：矩阵本身一个数都没变，概率分布却变平了，loss 变大。
+- 切回 Before，选 I1 这一行再把 τ 往小拖：这一行本来就配错，τ 越小模型越**自信地错**，这一行的 loss 反而越大。
+
+## 双向 Cross-Entropy
+
+把 $Z$ 的每一行看成一个 N 分类问题：给定图像 $i$，在 N 段文字里选出正确的那一段，正确答案就是第 $i$ 列。每一列也是一个 N 分类问题：给定文字 $j$，在 N 张图里选。CLIP 把两个方向的交叉熵取平均：
+
+$$
+L_{I\to T}=-\frac{1}{N}\sum_{i=1}^{N}\log\frac{e^{Z_{ii}}}{\sum_{j} e^{Z_{ij}}}
+$$
+
+$$
+L_{T\to I}=-\frac{1}{N}\sum_{i=1}^{N}\log\frac{e^{Z_{ii}}}{\sum_{j} e^{Z_{ji}}}
+$$
+
+$$
+L=\tfrac{1}{2}\left(L_{I\to T}+L_{T\to I}\right)
+$$
+
+两个式子只有分母不同：$I\to T$ 对**行**求和，$T\to I$ 对**列**求和。实验台里两个概率 tab 一个“每行和为 1”、一个“每列和为 1”，就是这个区别。对应的代码几乎就是 CLIP 论文里的伪代码：
+
+```python
+# image_emb, text_emb: [N, d]，已经 L2 归一化
+logits = image_emb @ text_emb.T / tau          # [N, N]
+labels = torch.arange(N)                         # 正确答案就在对角线
+loss_i2t = F.cross_entropy(logits, labels)       # 按行 softmax
+loss_t2i = F.cross_entropy(logits.T, labels)     # 按列 softmax
+loss = (loss_i2t + loss_t2i) / 2
+```
+
+实现时 softmax 不能直接对 logits 做 `exp`。τ = 0.01 时 logit 能到 100，`exp(100)` 已接近浮点上限。标准做法是先减去每行最大值，即 log-sum-exp：
+
+$$
+\log\sum_j e^{z_j}=m+\log\sum_j e^{z_j-m},\qquad m=\max_j z_j
+$$
+
+`F.cross_entropy` 内部已经这样做了；实验台的计算函数也是这样实现的，并有单元测试覆盖极端 logits。
+
+## Temperature 在调什么
+
+τ 只做一件事：把同一份相似度矩阵整体放大或缩小，再交给 softmax。相似度差 0.1，τ = 0.5 时 logit 只差 0.2，τ = 0.05 时差 2。
+
+- **τ 小**：分布尖，正确配对一旦领先，概率很快接近 1；但如果当前排第一的是错的，模型会更自信地错，loss 更大。
+- **τ 大**：分布平，即使相似度已经排对，正确配对的概率也不高，loss 降不下去。
+
+所以“τ 越小越好”不成立。CLIP 没有手调 τ，而是把它当作一个可学习的参数（以 log 形式参数化），初始化为 0.07，并把 logit 的放大倍数 $1/\tau$ 截断在 100 以内防止训练不稳定。
+
+## 负例从哪来
+
+<InBatchNegatives />
+
+CLIP 不额外采样负例：同一个 batch 里**别人的文字**就是负例。batch size 为 N 时，每张图要在 N 个候选里选出正确的一个，随机猜测的 loss 是 $\log N$。N 越大，任务越难，学到的表示越有区分度。CLIP 用的 batch size 是 32,768。
+
+但“非对应”不等于“语义无关”。同一个 batch 里有两张猫图，或者同一张图有多条 caption，非对角线上就会出现其实正确的描述，即 false negative。单正例的标签会把它们往下压；一种修正是 multi-positive mask：把一行里所有正确描述的概率加起来，再取 $-\log$。
+
+## 它和生成式 VLM 不是一回事
+
+| | CLIP | 生成式 VLM（如 Qwen2-VL） |
+| --- | --- | --- |
+| 结构 | 图像 encoder + 文本 encoder，双塔 | vision encoder + projector/merger + LLM decoder |
+| 一张图变成 | 一个全局向量 | 一串 visual tokens（几十到上千个） |
+| 训练目标 | 图文对比损失 | 以 next-token prediction 的交叉熵为主，可能混合其他目标 |
+| 输出 | 相似度分数 | 文字 |
+| 典型用途 | 图文检索、zero-shot 分类、做别的模型的视觉骨干 | 看图回答、描述、推理 |
+
+CLIP 的图像 encoder 常被拿来当 VLM 的 vision encoder，但 VLM 用的是它**中间层的 patch 特征**，不是最后那个全局向量。这部分在 [一张图片如何变成 Visual Tokens？](/notes/ml/multimodal/visual-tokens/) 和 [视觉与文本是怎么对齐的？](/notes/ml/multimodal/vision-language-alignment/) 展开讲。
+
+## 常见误区
+
+- **“负例是专门挑出来的错误配文。”** 不是。CLIP 的负例就是 batch 里其他样本的文字，不额外构造。
+- **“对角线外的组合一定是错的。”** 它只是“不是同一对”。重复 caption、相似图片都会造成 false negative。
+- **“τ 越小，模型越好。”** 同一份矩阵下，τ 小只是让 softmax 更尖。配对正确时 loss 变小，配错时 loss 变大，训练也更容易不稳定。
+- **“只算 Image→Text 一个方向就够了。”** 两个方向的分母不同。只算一个方向，另一方向的检索不受直接约束。
+
+## Key ideas to remember
+
+1. 一个 batch 产生 N×N 相似度矩阵，对角线是正例，其余 N²−N 个位置当负例。
+2. 先 L2 归一化，点积就是 cosine；再除以 τ 得到 logits。
+3. Loss 是按行和按列两个 softmax 交叉熵的平均。
+4. τ 控制分布的尖锐程度，不保证越小越好；CLIP 把它作为可学习参数。
+5. CLIP 一张图一个全局向量，目标是匹配；生成式 VLM 一张图一串 token，目标是生成。
+
+## Related notes
+
+- [Transformer 为什么比 RNN 更容易并行？](/notes/ml/llms/transformer-vs-rnn/)：CLIP 的两个 encoder 都是 Transformer。
+- [一张图片如何变成 Visual Tokens？](/notes/ml/multimodal/visual-tokens/)：从一个全局向量到一串视觉 token。
+- [视觉与文本是怎么对齐的？](/notes/ml/multimodal/vision-language-alignment/)：生成式 VLM 用什么 loss 对齐。
+
+## Further reading
+
+- [Radford et al. (2021), *Learning Transferable Visual Models From Natural Language Supervision*](https://arxiv.org/abs/2103.00020)：CLIP 论文，Figure 3 是对比损失的伪代码。
+- [OpenAI, *CLIP: Connecting text and images*](https://openai.com/index/clip/)
+- [openai/CLIP](https://github.com/openai/CLIP)：官方代码与预训练权重。
+- [Oord, Li & Vinyals (2018), *Representation Learning with Contrastive Predictive Coding*](https://arxiv.org/abs/1807.03748)：InfoNCE 损失的出处。

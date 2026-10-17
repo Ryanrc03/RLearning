@@ -1,0 +1,23 @@
+import KnowledgeTree from "@/components/visualization/ml/KnowledgeTree";
+
+# Tree Models Overview
+
+## 一句话
+
+**这一章回答「不用梯度也能学」：先让一棵树按信息增益一刀一刀切出规则，再用很多棵树投票或打补丁，然后发现打补丁学的残差就是梯度，最后看工业版怎么把它做快。**
+
+四页是一条问题链，每一页解决上一页留下的问题。每页都是五段：一句话、为什么需要它、怎么工作、代价与取舍、再往下看。
+
+## 这章的问题链
+
+<KnowledgeTree chapter="trees" />
+
+## 怎么读
+
+按顺序读，每页 5 到 7 分钟，步进播放器从第 0 步点到最后一步再往下看。
+
+第 1 页是树的零件：熵、信息增益、贪心切分，12 个点切两刀就能看完整个算法。第 2 页讲一棵树为什么不够，bagging、boosting、stacking 各治什么病，Random Forest 放在 bagging 里。第 3 页把 boosting 的「学残差」和上一章的梯度下降接上，一轮一棵桩、learning rate 加在哪。第 4 页是 XGBoost 和 LightGBM 的提速清单，level-wise 和 leaf-wise 用同一张 gain 表长给你看。
+
+读完应该能用自己的话回答四个问题：信息增益为什么能当「这一刀切得好不好」的尺子；bagging 降的是 variance 还是 bias，boosting 呢；为什么说残差就是负梯度；leaf-wise 用同样的叶子数为什么能换到更多 gain，代价是什么。
+
+这章的出口是推荐系统那一章：[梯度提升树如何给曝光打分](/notes/ml/recsys/lightgbm-explained/) 用的就是一个真实训练的 LightGBM。

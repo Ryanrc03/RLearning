@@ -1,0 +1,43 @@
+import EnsemblesFigure from "@/components/visualization/ml/trees/EnsemblesFigure";
+
+# Ensemble：Bagging / Boosting / Stacking
+
+## 一句话
+
+**集成学习把很多个弱模型合成一个强模型：bagging 让每棵树各看一部分数据再投票，boosting 让后一棵树专修前一棵的残差，stacking 再训一个模型来综合它们的输出。**
+
+Random Forest 是 bagging 加特征抽样；GBDT、XGBoost、LightGBM 都是 boosting。
+
+## 为什么需要它
+
+上一页的树有两个毛病。一是不稳：1000 个样本换掉几十个，第一刀可能就换一个特征，整棵树变样，这是 [Bias 与 Variance](/notes/ml/training/bias-variance/) 里的 variance。二是贪心：切到深度上限就停，剩下的错它自己补不了，这是 bias。一棵树治不了自己，但多棵树可以互相治：variance 高就让很多棵树各自犯各自的错再平均掉，bias 高就让后一棵专门学前一棵没学会的。
+
+## 怎么工作
+
+<EnsemblesFigure />
+
+$$
+\hat y_{\text{bag}}(x) = \operatorname{vote}\big(T_1(x), \dots, T_B(x)\big),\qquad T_b \text{ 训练在第 } b \text{ 份 bootstrap 子集上}
+$$
+
+$$
+\hat y_{\text{boost}}(x) = \sum_{m=1}^{M} T_m(x),\qquad T_m \text{ 拟合的目标是 } y - \sum_{j<m} T_j(x)
+$$
+
+Bagging 面板里 10 个样本，每棵树有放回地抽 10 次：只拿到六七个不同的样本，有的抽到两次。三棵树在各自的数据上切点不一样，对查询点 x = 6.5 两棵说蓝一棵说橙，投票定蓝。被噪声带偏的那棵树没有话语权，这就是把 variance 平均掉。Random Forest 在此之上再加一条：每棵树只能看 M 个特征里随机的 m 个，树和树之间更不像，平均得更干净。
+
+Boosting 面板重放笔记里的例子：一个人身高 180，树 1 猜 160，剩 20；树 2 不再学 180，只学这个 20，补上 10，剩 10；树 3 再补 10，剩 0。三棵树加起来 160 + 10 + 10 = 180。每一棵都在给前面的打补丁，补的是 bias。
+
+Stacking 面板里三个不一样的模型各自训练，对同一条样本给出 0.80、0.55、0.35；这三个数拼成一条新的 3 维特征，再训一个 meta 模型来决定信谁多一点。这里的 meta 模型是线性组合，0.6 × 0.80 + 0.3 × 0.55 + 0.1 × 0.35 = 0.68。
+
+## 代价与取舍
+
+- Bagging 的树可以并行训，boosting 的树必须一棵接一棵，训练慢；但 boosting 通常更准，因为它在定向修错。
+- Bagging 的树要尽量深（低 bias 高 variance，靠平均治），boosting 的树要浅（每棵只补一点，靠累加治）。方向反了效果会变差。
+- Boosting 会把噪声点的残差也当真去补，轮数多了过拟合，要靠 learning rate 和早停收着。
+- Stacking 的 meta 模型必须用基模型没见过的数据训，否则它只会学到「谁在训练集上背得最熟」。
+- 多少棵树都解释不了一条规则：决策树那种「三个 if」的可读性，集成之后就没了。
+
+## 再往下看
+
+Boosting 面板里「学残差」三个字下一页展开：[GBDT](/notes/ml/trees/gbdt/) 说清为什么残差就是梯度，learning rate 加在哪，每轮的小树长什么样。
