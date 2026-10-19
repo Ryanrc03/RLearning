@@ -26,6 +26,20 @@ const SECTIONS: Record<string, Section> = {
     ],
     story: ["内核做两件事：决定谁用 CPU（调度），决定谁看到哪块内存（虚拟内存）。", "这两件事加起来，就是“进程”这个隔离边界的全部含义。"],
   },
+  gpu: {
+    title: "GPU Kernels：先诊断，再优化",
+    description: "七页都是同一个计算的两种写法。前两页是诊断框架，中间四页是减少访存的办法，最后一页讲算力用满之后换什么。点一个节点看它的一句话。",
+    nodes: [
+      { title: "CPU vs GPU", question: "活够多吗？", oneLiner: "CPU 延迟优先，GPU 吞吐优先；GPU 要先有足够多的活，才能摊薄启动开销。", href: "/notes/ai-infra/gpu/cpu-vs-gpu/" },
+      { title: "Compute- vs Memory-bound", question: "卡在算还是搬？", oneLiner: "每字节能算几次决定瓶颈在算力还是带宽；资源加在不是瓶颈的那边没有用。", href: "/notes/ai-infra/gpu/compute-vs-memory-bound/" },
+      { title: "Global vs Shared Memory", question: "数据读几次？", oneLiner: "相邻线程要同一块数据时，先搬进片上 shared memory 再复用，复用够多才快。", href: "/notes/ai-infra/gpu/global-vs-shared-memory/" },
+      { title: "Separate vs Fused Kernels", question: "写回几次？", oneLiner: "把逐元素的小操作合进一个 kernel，少启动一次，中间结果少进出一次显存。", href: "/notes/ai-infra/gpu/separate-vs-fused-kernels/" },
+      { title: "Thread- vs Warp-per-row", question: "一行给谁？", oneLiner: "一行交给一个 warp 的 32 个线程，地址相邻才能合并访存，并行度也高几十倍。", href: "/notes/ai-infra/gpu/thread-vs-warp-per-row/" },
+      { title: "Aggregate- vs Project-first", question: "先乘哪个？", oneLiner: "结合律不改结果，但决定最慢的稀疏乘法处理多宽的矩阵。", href: "/notes/ai-infra/gpu/aggregate-vs-project-first/" },
+      { title: "Implicit GEMM vs FFT", question: "换哪种算法？", oneLiner: "同一个卷积，一种不占显存直接算，一种用 workspace 换大卷积核下更少的计算。", href: "/notes/ai-infra/gpu/implicit-gemm-vs-fft/" },
+    ],
+    story: ["先测：GPU 闲着就加活、合并 kernel；", "跑满了就算算术强度，memory-bound 用第 3 到 6 页减少访存，", "compute-bound 就换算法或上 Tensor Core。"],
+  },
 };
 
 const C1 = "#2a78d6";

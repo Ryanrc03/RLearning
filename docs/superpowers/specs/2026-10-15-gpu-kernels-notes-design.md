@@ -27,6 +27,10 @@
 | 「再往下看」链接站内长文 | 站内有相关长文时链接长文（第 1 页），没有时链接 GitHub 上对应实验的 `report.md` | 站内暂时没有讲 GPU 优化的长文 |
 | 放在 CS Fundamentals | `categoryId: "ai-infra"`、`section: "GPU Kernels"` | 这些主题属于 AI Infra |
 
+## 总览页（2026-10-19 新增）
+
+`overview.mdx` 放在系列第 1 位，slug `ai-infra/gpu/overview`，只总结本章 7 页，不列本章没写的方法。结构：一句话 → 一步训练的时间都花在哪（`TrainingStepFigure`，四段里标出本章只讲 kernel 启动和 GPU 计算）→ 先看哪些指标（表：怎么看、说明什么、对应页）→ 一张图（`TrainingBottleneckMap`：5 个现象按钮 → 高亮 step 的哪一段 → 该查的指标 → 本章哪一页）→ 本章的方法清单（按瓶颈分组，每条链接到页）→ 怎么读这一章（`SectionMapViz` 的 `gpu` 配置）。8 页都挂了 `series: gpu-kernels`，页尾有上一篇/下一篇。
+
 ## 七篇笔记
 
 所有 MDX 放在 `content/ai-infra/gpu/`，所有图放在 `components/visualization/gpu/`。

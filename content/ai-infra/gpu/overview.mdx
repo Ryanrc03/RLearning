@@ -1,0 +1,66 @@
+import SectionMapViz from "@/components/visualization/SectionMapViz";
+import TrainingStepFigure from "@/components/visualization/gpu/TrainingStepFigure";
+import TrainingBottleneckMap from "@/components/visualization/gpu/TrainingBottleneckMap";
+
+# GPU Kernels Overview
+
+## 一句话
+
+**想让训练变快，只有一条路：先测出一步训练的时间花在哪一段，再对着那一段下手。本章讲的是其中「kernel 这一段」——kernel 怎样启动、kernel 里面为什么慢、有哪几种办法让它跑满硬件。**
+
+七页里每一页都是一组对比：同一个计算，两种写法，哪种快、快多少、为什么。例子全部来自 COMP 568 课程实验的实测，或者参数写明的模拟。
+
+## 一步训练的时间都花在哪
+
+<TrainingStepFigure />
+
+优化之前先承认一件事：这四段里，只有 kernel 启动和 GPU 计算是本章能帮上的。如果时间线上 GPU 在等数据、或者多卡在等最慢的那张卡，再怎么改 kernel 也没用。所以第一步永远是测，不是改。
+
+## 先看哪些指标
+
+每个指标回答一个具体的问题。按从粗到细的顺序看：
+
+| 指标 | 怎么看 | 它说明什么 | 本章哪一页 |
+| --- | --- | --- | --- |
+| 一步的耗时和吞吐 | 用 CUDA event 只包住要测的部分，预热几次后取平均；吞吐 = 运算次数 ÷ 时间 | 所有优化最终的衡量标准；吞吐离这块卡的峰值差多远 | 第 2 页「先认单位」 |
+| GPU 利用率 | `nvidia-smi` | 只说「有没有 kernel 在跑」，不说跑得满不满。低且上下跳，说明 GPU 在等 | 第 1 页 |
+| 算术强度 | 数这个 kernel 做了几次运算、搬了几个字节，相除 | 决定它是 memory-bound 还是 compute-bound，也就是该减少访存还是加算力 | 第 2 页 |
+| 带宽利用率 和 算力利用率 | Nsight Compute | 哪一个接近 100%，哪一个就是瓶颈；两个都不高，说明并行度不够或在等启动 | 第 2、3 页 |
+| 每步的 kernel 数量和平均时长 | Nsight Systems 时间线 | 成百上千个几微秒的 kernel，意味着启动开销和显存往返占了大头 | 第 4 页 |
+| 访存合并率 | Nsight Compute 的 global load efficiency | 低说明同一个 warp 的线程在读不相邻的地址，一次访存被拆成很多次 | 第 5 页 |
+| 显存峰值 和 workspace | `torch.cuda.max_memory_allocated`；cuDNN 的 workspace 查询接口 | batch 开不大是不是因为库函数额外申请了显存，或者中间结果太宽 | 第 6、7 页 |
+
+## 一张图
+
+<TrainingBottleneckMap />
+
+## 本章的方法清单
+
+按「先诊断出什么，再用什么」来排。每条只有一句话，细节在对应的页里。
+
+**GPU 闲着：活不够多，或者启动太频繁**
+
+- 一次给 GPU 更多活，让固定的启动开销被摊薄。活少到一定程度，GPU 比 CPU 还慢。→ [第 1 页](/notes/ai-infra/gpu/cpu-vs-gpu/)
+- 把连续的逐元素小操作合进一个 kernel，少启动、少一次显存往返。→ [第 4 页](/notes/ai-infra/gpu/separate-vs-fused-kernels/)
+
+**memory-bound：计算单元在等数据**
+
+- 先算算术强度，确认点落在 roofline 的斜线上，再动手减少访存。→ [第 2 页](/notes/ai-infra/gpu/compute-vs-memory-bound/)
+- 相邻线程要同一块数据时，先搬进 shared memory 再复用；但只搬不复用几乎不快，要让每份数据被用足够多次。→ [第 3 页](/notes/ai-infra/gpu/global-vs-shared-memory/)
+- 让一个 warp 的 32 个线程读相邻的地址，一次访存顶过去的几十次。→ [第 5 页](/notes/ai-infra/gpu/thread-vs-warp-per-row/)
+- 矩阵乘满足结合律：换一个顺序，让最慢的稀疏乘法只处理最窄的矩阵。→ [第 6 页](/notes/ai-infra/gpu/aggregate-vs-project-first/)
+
+**compute-bound：算力已经用满**
+
+- 这时减少访存没有收益，只剩加算力（比如开 TF32 用 Tensor Core）或换计算量更少的算法。→ [第 2 页](/notes/ai-infra/gpu/compute-vs-memory-bound/)、[第 7 页](/notes/ai-infra/gpu/implicit-gemm-vs-fft/)
+
+**显存不够**
+
+- 同一个卷积，不同算法占的 workspace 差很多：implicit GEMM 为 0，FFT 随 batch 增长。→ [第 7 页](/notes/ai-infra/gpu/implicit-gemm-vs-fft/)
+- 先降维再聚合，中间结果只有 hidden 那么宽。→ [第 6 页](/notes/ai-infra/gpu/aggregate-vs-project-first/)
+
+## 怎么读这一章
+
+<SectionMapViz section="gpu" />
+
+按顺序读。前两页是诊断的框架：第 1 页讲 GPU 为什么要喂饱才快，第 2 页讲怎样判断一个 kernel 卡在算还是卡在搬。第 3 到 6 页是四种减少访存的办法，第 7 页讲算力用满之后还能换什么。每页看完，用自己的话说一遍那句定义，再说一遍它的实验比的是什么。

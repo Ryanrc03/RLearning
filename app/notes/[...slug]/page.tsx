@@ -31,6 +31,7 @@ import AgentLoop from "@/content/ai-infra/agent-harness/agent-loop.mdx";
 import ToolsPermissionsHooks from "@/content/ai-infra/agent-harness/tools-permissions-hooks.mdx";
 import SubagentsSkillsMcp from "@/content/ai-infra/agent-harness/subagents-skills-mcp.mdx";
 import GoalsAndHarnessDesign from "@/content/ai-infra/agent-harness/goals-and-harness-design.mdx";
+import GpuOverview from "@/content/ai-infra/gpu/overview.mdx";
 import CpuVsGpu from "@/content/ai-infra/gpu/cpu-vs-gpu.mdx";
 import ComputeVsMemoryBound from "@/content/ai-infra/gpu/compute-vs-memory-bound.mdx";
 import GlobalVsSharedMemory from "@/content/ai-infra/gpu/global-vs-shared-memory.mdx";
@@ -136,6 +137,7 @@ const noteComponents = {
   "ai-infra/agent-harness/tools-permissions-hooks": ToolsPermissionsHooks,
   "ai-infra/agent-harness/subagents-skills-mcp": SubagentsSkillsMcp,
   "ai-infra/agent-harness/goals-and-harness-design": GoalsAndHarnessDesign,
+  "ai-infra/gpu/overview": GpuOverview,
   "ai-infra/gpu/cpu-vs-gpu": CpuVsGpu,
   "ai-infra/gpu/compute-vs-memory-bound": ComputeVsMemoryBound,
   "ai-infra/gpu/global-vs-shared-memory": GlobalVsSharedMemory,

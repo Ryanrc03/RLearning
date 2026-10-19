@@ -1135,6 +1135,21 @@ export const noteEntries: NoteEntry[] = [
     tags: ["agent", "harness", "verification", "design", "interactive"],
   },
   {
+    slug: "ai-infra/gpu/overview",
+    title: "GPU Kernels Overview",
+    description:
+      "想让训练变快，先测出一步的时间花在哪一段。一步训练的时间拆解、先看哪些指标、按现象找到本章哪一页，以及七页的阅读顺序。",
+    categoryId: "ai-infra",
+    category: "AI Infrastructure",
+    section: "GPU Kernels",
+    created: "2026-10-19",
+    updated: "2026-10-19",
+    status: "seed",
+    readingMinutes: 7,
+    tags: ["overview", "gpu", "performance", "interactive"],
+    series: { id: "gpu-kernels", title: "GPU Kernels：先诊断，再优化", order: 1 },
+  },
+  {
     slug: "ai-infra/gpu/cpu-vs-gpu",
     title: "CPU vs GPU",
     description:
@@ -1147,6 +1162,7 @@ export const noteEntries: NoteEntry[] = [
     status: "seed",
     readingMinutes: 7,
     tags: ["gpu", "cuda", "warp", "interactive"],
+    series: { id: "gpu-kernels", title: "GPU Kernels：先诊断，再优化", order: 2 },
   },
   {
     slug: "ai-infra/gpu/compute-vs-memory-bound",
@@ -1161,6 +1177,7 @@ export const noteEntries: NoteEntry[] = [
     status: "seed",
     readingMinutes: 8,
     tags: ["gpu", "roofline", "performance", "interactive"],
+    series: { id: "gpu-kernels", title: "GPU Kernels：先诊断，再优化", order: 3 },
   },
   {
     slug: "ai-infra/gpu/global-vs-shared-memory",
@@ -1175,6 +1192,7 @@ export const noteEntries: NoteEntry[] = [
     status: "seed",
     readingMinutes: 9,
     tags: ["gpu", "memory", "tiling", "interactive"],
+    series: { id: "gpu-kernels", title: "GPU Kernels：先诊断，再优化", order: 4 },
   },
   {
     slug: "ai-infra/gpu/separate-vs-fused-kernels",
@@ -1189,6 +1207,7 @@ export const noteEntries: NoteEntry[] = [
     status: "seed",
     readingMinutes: 8,
     tags: ["gpu", "kernel fusion", "performance", "interactive"],
+    series: { id: "gpu-kernels", title: "GPU Kernels：先诊断，再优化", order: 5 },
   },
   {
     slug: "ai-infra/gpu/thread-vs-warp-per-row",
@@ -1203,6 +1222,7 @@ export const noteEntries: NoteEntry[] = [
     status: "seed",
     readingMinutes: 9,
     tags: ["gpu", "sparse", "spmm", "interactive"],
+    series: { id: "gpu-kernels", title: "GPU Kernels：先诊断，再优化", order: 6 },
   },
   {
     slug: "ai-infra/gpu/aggregate-vs-project-first",
@@ -1217,6 +1237,7 @@ export const noteEntries: NoteEntry[] = [
     status: "seed",
     readingMinutes: 8,
     tags: ["gpu", "gnn", "spmm", "interactive"],
+    series: { id: "gpu-kernels", title: "GPU Kernels：先诊断，再优化", order: 7 },
   },
   {
     slug: "ai-infra/gpu/implicit-gemm-vs-fft",
@@ -1231,6 +1252,7 @@ export const noteEntries: NoteEntry[] = [
     status: "seed",
     readingMinutes: 8,
     tags: ["gpu", "cudnn", "convolution", "interactive"],
+    series: { id: "gpu-kernels", title: "GPU Kernels：先诊断，再优化", order: 8 },
   },
   {
     slug: "algorithms/binary-search/templates",
