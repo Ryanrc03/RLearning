@@ -1,11 +1,29 @@
 import ClipSimilarityLab from "@/components/visualization/multimodal/ClipSimilarityLab";
 import InBatchNegatives from "@/components/visualization/multimodal/InBatchNegatives";
+import ClipArchitecture from "@/components/visualization/multimodal/ClipArchitecture";
 
 # CLIP：图文对比学习实验台
 
 训练 CLIP 时，没有人告诉模型“这张图里有一只猫”。数据只是几亿对从网上抓来的图片和配文。那它怎么学会把猫图和“一只猫在沙发上”放到一起？更奇怪的是，训练时也没有专门准备“错误的配文”作为负例，负例从哪来？
 
 **一句话答案：** 一次喂入 N 对图文，算出 N×N 的相似度矩阵；对角线是正确配对，batch 里其余组合全当负例；按行、按列各做一次 softmax 交叉熵，让对角线的概率变大。
+
+## 模型结构：两座塔
+
+CLIP 是一个**双塔（dual encoder）**模型：一座图像塔、一座文本塔，各自独立地把输入编码成一个向量，两座塔之间没有任何 cross-attention。它们唯一的交汇点是最后那一次点积。这个设计决定了 CLIP 的一切用法：所有图片的向量可以提前算好存起来，来一句话只要编码这一句，再和库里每个向量做点积，所以拿它做检索非常便宜。
+
+<ClipArchitecture />
+
+按 ViT-B/32 走一遍：
+
+- **图像塔**是一个 Vision Transformer。224×224 的图按 32×32 切成 7×7 = 49 块，每块拉平后乘同一个线性层变成 768 维；前面拼一个 [CLS]，加位置编码，过 12 层 Transformer；最后只取 [CLS] 的输出，投影到 512 维。论文还试过 ResNet 版本（把最后的平均池化换成一个 attention pooling），ViT 版本更好也更省算力。
+- **文本塔**是一个 12 层、宽 512 的 Transformer。一句话先做 BPE 分词，前后加 [SOS]、[EOS]，补到 77 个位置；因为带 causal mask，只有 [EOS] 看过整句，所以取它的输出投影到 512 维。
+- **两座塔的 block 长得一样**：pre-LN 的残差结构，attention 里一个 in_proj 同时算 Q、K、V，一个 out_proj 把多头拼回去；MLP 是 c_fc（d → 4d）加 QuickGELU 加 c_proj（4d → d）。这几个名字后面会再见到：做 LoRA 微调时，挑的就是这些线性层。
+- **最后一步**：两边都做 L2 归一化，点积就是余弦相似度；再乘一个可学习的 logit_scale，也就是下面公式里的 $1/\tau$。
+
+举个例子，用它做 **zero-shot 分类**：要分「猫、狗、飞机」三类，就把 "a photo of a cat"、"a photo of a dog"、"a photo of a plane" 三句话过文本塔得到三个向量，当成一个三类分类器的权重；来一张图，过图像塔得到一个向量，和三个向量分别点积，最大的那个就是预测。整个过程没有用任何标注过的猫狗图片训练。
+
+CLIP 在 4 亿对从网上收集的图文上训练了 32 个 epoch，batch size 32,768。下面讲的就是这个训练怎么做。
 
 ## 一个 batch 里发生了什么
 

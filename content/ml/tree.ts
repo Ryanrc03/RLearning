@@ -47,6 +47,7 @@ export const chapters: TreeChapter[] = [
       n("ml/evaluation/roc-auc", "ROC 与 AUC", "阈值不固定时怎么比两个模型？", "把阈值从高扫到低，每个阈值一个 (FPR, TPR) 点连成 ROC；AUC 是随机一个正例分数高于随机一个负例的概率。", "ready"),
       n("ml/evaluation/pr-curve-precision-at-k", "PR 曲线与 Precision@k", "正例很少时 ROC 为什么还好看？", "正例稀少时 FPR 几乎不动，ROC 仍然好看；PR 曲线和 Precision@k 只看正例那一侧，才会暴露问题。", "ready", "PR 与 Precision@k"),
       n("ml/evaluation/ab-test-p-value", "A/B Test 与 p-value", "离线指标好了，上线真的更好吗？", "把用户随机分成 control 和 treatment，先用 power analysis 算要多少样本，再用 p-value 判断差异是不是运气。", "ready"),
+      n("ml/evaluation/t-test", "t 检验", "比的是平均值不是比例，用什么检验？", "方差未知的均值用 t 检验：t = (x̄₁ − x̄₂) / √(s₁²/n₁ + s₂²/n₂)，自由度小时 t 分布尾巴比正态厚，样本大了两者重合。", "ready"),
     ],
   },
   {
@@ -129,6 +130,21 @@ export const chapters: TreeChapter[] = [
     ],
   },
   {
+    id: "post-training",
+    title: "Post-training",
+    short: "Post-train",
+    question: "预训练之后怎么教模型听话",
+    section: "Post-training",
+    overview: "ml/post-training/overview",
+    nodes: [
+      n("ml/post-training/sft", "SFT", "预训练完了，怎么让模型照指令回答？", "用（指令, 好回答）对继续训练；loss 还是逐 token 的 cross-entropy，但 prompt 的 token 被 mask 掉，只在回答上算。", "ready"),
+      n("ml/post-training/lora", "LoRA", "全量微调太贵，能只训一小部分吗？", "冻结 W，只学 W' = W + BA，B 是 d×r、A 是 r×k、r ≪ d；B 初始化为 0，推理时把 BA 合并回 W 没有额外延迟。", "ready"),
+      n("ml/post-training/rlhf", "RLHF：RM、PPO 与 DPO", "好回答很难写出来，但能比出来，怎么用？", "用成对偏好训一个奖励模型（Bradley–Terry），再用 PPO 在和参考模型的 KL 约束下优化；DPO 把这两步合成一个分类式的 loss。", "ready", "RLHF 与 DPO"),
+      n("ml/post-training/grpo", "GRPO", "PPO 的 critic 太贵，能去掉吗？", "每个 prompt 采样 G 个回答各自打分，advantage = (r − 组内均值) / 组内标准差；用组内平均当基线，省掉 critic，其余沿用 PPO 的 clip 和 KL。", "ready"),
+      n("ml/post-training/reward-hacking", "奖励设计与 Reward Hacking", "奖励一加上去，模型为什么学歪了？", "策略只优化你写下的奖励，不优化你心里的目标；长度奖励会被堆字刷分，要用正确性门控、上限和 KL 拉住它。", "ready", "Reward Hacking"),
+    ],
+  },
+  {
     id: "llm-engineering",
     title: "LLM Engineering",
     short: "LLM Eng.",
@@ -139,6 +155,8 @@ export const chapters: TreeChapter[] = [
       n("ml/llm-engineering/prompt-engineering", "Prompt Engineering", "不改模型怎么改答案？", "给模型分配角色、放几个例子、让它先想再答、写清限制，不改参数也能改答案。"),
       n("ml/llm-engineering/context-engineering", "Context Engineering", "prompt 之外还有什么进了模型？", "prompt 只是上下文窗口的一部分，还有记忆、检索来的片段、工具结果和状态，一起决定模型看到什么。"),
       n("ml/llm-engineering/hallucination", "Hallucination", "模型为什么会编，怎么少编？", "模型会生成自相矛盾或与事实不符的内容，原因在数据、采样和输入；清晰的 prompt、降温和 few-shot 能减少它。"),
+      n("ml/llm-engineering/llm-as-judge", "LLM-as-judge 与 GSB", "生成的东西没有标准答案，怎么比两个模型？", "把新旧输出并排给人或模型判 Good / Same / Bad 算胜率；模型当评委有位置偏差和长度偏差，交换顺序判两次再和人工对齐。", "ready", "LLM-as-judge 与 GSB"),
+      n("ml/llm-engineering/eval-harness", "Eval Harness 与数据飞轮", "评估怎么变成自动、可重复的一道关？", "便宜可靠的规则检查放最前面，规则判不了的交给模型门控，不合格自动重生成；过关和不过关的样本回流成下一轮的训练数据。", "ready", "Eval Harness"),
     ],
   },
   {
@@ -151,6 +169,7 @@ export const chapters: TreeChapter[] = [
       n("ml/multimodal/visual-tokens", "Visual Tokens", "一张图片怎么变成 token？", "图片先切 patch，再经过 ViT 和 merger 生成可以送入语言模型的视觉向量。", "ready"),
       n("ml/multimodal/vision-language-alignment", "Vision–Language Alignment", "视觉和文本怎么对齐？", "对齐不只是把两种 embedding 变成相同维度：projector、生成式 loss、冻结与端到端训练一起建立多模态理解。", "ready", "图文对齐"),
       n("ml/multimodal/clip-contrastive-learning", "CLIP 对比学习", "对比学习怎么训？", "三张图、三句话、一个 3×3 相似度矩阵；调 temperature 看图文匹配概率和双向 contrastive loss 怎么变。", "ready"),
+      n("ml/multimodal/multisticker-project", "Project：MultiSticker", "这些拼起来能做什么？", "一个完整项目：对话上下文、检索到的历史记忆和 LLM 意图三路文本过 CLIP 编码，投影进图像空间，从 6,758 张贴纸里排出用户会发的那张；Exact R@30 从 0.28% 到 13.15%。", "ready"),
     ],
   },
   {
@@ -165,6 +184,9 @@ export const chapters: TreeChapter[] = [
       n("ml/recsys/lightgbm-explained", "梯度提升树如何给曝光打分", "树怎么给曝光打分？", "以真实训练的 LightGBM click 模型为例：目标函数与梯度、一轮迭代、直方图与 leaf-wise、一条样本的 407 步轨迹。", "ready"),
       n("ml/recsys/boosting-lab", "提升树训练实验台", "一轮一棵树怎么长？", "16 个点、一个特征，按一轮长一棵树：看残差被压小、LogLoss 下降、森林长出；GBDT / XGBoost / LightGBM 的差别做成开关。", "ready"),
       n("ml/recsys/retrieval-precision-at-k", "检索的 P@30、Recall@30 与 group P@1", "检索出来的前 30 个里有几个是对的？", "P@30 是前 30 个结果里相关的比例，Recall@30 是前 30 个找回了全部相关的多少；MeMe 项目里 exact 匹配 0.23，semantic 检索 0.9344。", "ready", "P@30 / Recall@30"),
+      n("ml/recsys/ctr-cvr-esmm", "CTR、CVR 与 ESMM", "点了之后会不会买，怎么预测？", "CTR = 点击 / 曝光，CVR = 转化 / 点击；CVR 只在点击样本上训练却要对全部曝光打分，ESMM 用 pCTR × pCVR 在曝光空间上一起学。", "ready"),
+      n("ml/recsys/feature-crossing", "特征交叉：FM 与 DCN", "两个特征的组合才有信号，模型怎么学到？", "线性模型只能把特征分开加；FM 给每个特征一个向量、用内积学二阶交叉，DCN 用 x₀·(x_lᵀw) + x_l 每层多一阶。", "ready", "特征交叉"),
+      n("ml/recsys/sample-feature-join", "样本与特征拼接", "label 晚到几小时，训练样本怎么拼？", "转化往往晚于曝光；要把曝光那一刻的特征快照和后到的转化事件在一个时间窗里 join，用转化时刻的特征就是数据穿越。", "ready"),
     ],
   },
   {
@@ -200,6 +222,13 @@ export const edges: TreeEdge[] = [
   { from: "ml/classifiers/softmax-cross-entropy", to: "ml/llms/pretraining-objectives", why: "预训练 loss 就是逐个位置的 cross-entropy" },
   { from: "ml/llms/decoding-strategies", to: "ml/llm-engineering/hallucination", why: "采样策略和 temperature 决定了多容易编" },
   { from: "ml/llms/attention-qkv", to: "ml/multimodal/vision-language-alignment", why: "图文对齐也是在 attention 里看别的 token" },
+  { from: "ml/classifiers/softmax-cross-entropy", to: "ml/post-training/sft", why: "SFT 的 loss 就是只在回答 token 上的 cross-entropy" },
+  { from: "ml/llms/pretraining-objectives", to: "ml/post-training/sft", why: "SFT 沿用预训练的下一词预测，只换数据和 mask" },
+  { from: "ml/evaluation/ab-test-p-value", to: "ml/llm-engineering/llm-as-judge", why: "GSB 胜率也要问一句是不是运气" },
+  { from: "ml/classifiers/logistic-regression", to: "ml/recsys/feature-crossing", why: "线性模型学不到组合，才需要特征交叉" },
+  { from: "ml/llm-engineering/eval-harness", to: "ml/post-training/sft", why: "飞轮把过关的样本喂回 SFT" },
+  { from: "ml/recsys/retrieval-precision-at-k", to: "ml/multimodal/multisticker-project", why: "Exact / Group Recall@K 就是那一页的指标" },
+  { from: "ml/post-training/lora", to: "ml/multimodal/multisticker-project", why: "image / text / dual LoRA 用的就是这个低秩增量" },
 ];
 
 export const nodeBySlug: Record<string, TreeNode & { chapter: TreeChapter }> = Object.fromEntries(

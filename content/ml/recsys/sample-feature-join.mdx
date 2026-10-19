@@ -1,0 +1,44 @@
+import SampleJoinFigure from "@/components/visualization/ml/recsys/SampleJoinFigure";
+
+# 样本与特征拼接：延迟转化与特征快照
+
+## 一句话
+
+**一条训练样本 = 曝光那一刻的特征快照 + 之后才到的转化 label，两者按曝光 id 在一个归因窗口（join window）里拼起来。**
+
+CVR、付费、留存模型的训练数据都这样造；拼错了，模型再好也在学一个偏掉的 label。
+
+## 为什么需要它
+
+上一页的 FM / DCN 默认喂进来的 (x, y) 是对的，但 y 总是晚到：下单晚几小时，App 内付费晚几天。等 label 到了再去查用户「现在」的特征，拿到的是转化之后的状态，比如「近 1 小时下单数」已经含了这一单。这叫数据穿越（label leakage）：离线 AUC 很漂亮，上线时 serving 只能看到曝光时刻的特征，效果立刻掉下来，也就是 training–serving skew。所以 serving 打分时就把用到的特征落一份快照，等 label 回来再拼。
+
+## 怎么工作
+
+<SampleJoinFigure />
+
+$$
+y_i = \mathbb{1}\left[\, t^{\text{conv}}_i - t^{\text{imp}}_i \le W \,\right]
+$$
+
+$$
+\widehat{\text{CVR}}_W = \text{CVR} \cdot F(W), \qquad \text{CVR}_{\text{校正}} = \widehat{\text{CVR}}_W \,/\, F(W)
+$$
+
+图里每个点是一次真实转化，横轴是它比曝光晚了多久，所以这些点连起来就是延迟分布 F。窗口关闭时还没到的转化被写成 label 0，是假负样本（false negative）。下单类转化用 2 小时窗口只标对 19/40，拼出来的 CVR 4.8%，真实的是 10%；拉到 1 天能标对 39/40。切到付费，同样 1 天只有 23/40：窗口长度得按转化类型定。
+
+窗口也不是越长越好。每条样本要等 W 才能出炉，模型学到的永远是 W 之前的用户；7 天窗口意味着 7 天的曝光全挂在 state 里。常见的折中是短窗口先出样本，再修正偏差：最简单的是图里除以历史的 F(W)，复杂一点是晚到的转化补发一条正样本并做重要性加权（delayed feedback modeling）。
+
+流式实现一般用 Flink。曝光流带着特征快照，转化流带着曝光 id 和转化时间，两边按 id keyBy。时间用 event time 而不是 processing time，因为日志会乱序、晚到；watermark 表示「早于它的事件都已经到齐」。Flink 的 interval join 是 inner join，只吐出配上的正样本；要在窗口关闭时吐出负样本，得写 KeyedCoProcessFunction：曝光进 keyed state，注册 t_imp + W 的 event-time timer，转化先到就标 1，timer 触发时发出样本、清掉 state。晚于 watermark 的转化走侧输出，补一条修正。state 大了放 RocksDB 或外部 KV。
+
+还有一类转化根本拼不上：iOS 上没在 ATT 弹窗里授权跟踪的用户，转化回不到某一次曝光，平台只给聚合、粗粒度、随机延迟一天以上的回传（SKAdNetwork 这类）。这时不能想办法把用户再认出来，那是合规红线；能做的是在允许的粒度上造样本，比如 campaign × 时间桶 × 粗粒度上下文，label 是聚合转化数，再把特征 schema、快照时机、归因窗口的定义和可追踪那条链路对齐。
+
+## 代价与取舍
+
+- 窗口：短了假负多、CVR 被低估；长了样本旧、state 贵。按转化类型分别定窗口，再配合 F(W) 校正或晚到补样本。
+- 快照还是回查：每次曝光都落全量特征，存储贵；训练时回查便宜，但必须严格 point-in-time join（按 t_imp 取当时的特征版本），新加的特征也只能这样回填历史。
+- watermark：推太快，乱序数据被当成迟到；推太慢，样本延迟变高。迟到数据走侧输出，别静默丢。
+- 两条链路不对齐，模型只能用两边的特征交集，不可追踪那一路的特征覆盖率就掉下来。面试里讲 TikTok 不可追踪广告训练数据重建，就落在这一点：Go 做合规处理，Java / TBase 做样本–特征 join，Flink 做流式拼接，特征覆盖率 +50%。
+
+## 再往下看
+
+这是推荐系统这一章的最后一页。流处理的基本盘看[数据基础设施](/notes/systems/data/overview/)的「批还是流：Spark vs Flink」一节；[CTR、CVR 与 ESMM](/notes/ml/recsys/ctr-cvr-esmm/) 管的是样本空间上的偏差，这一页管的是时间上的偏差，两页可以对着看。

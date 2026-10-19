@@ -255,3 +255,139 @@ button.mod-card { cursor: pointer; }
 .ceil-ok { color: #0a7a52; }
 .ceil-no { color: var(--vcrit); }
 @media (max-width: 580px) { .bs-array { --bs-cell: 42px; } .bs-cell { height: 38px; font-size: 13.5px; } .koko-row { grid-template-columns: minmax(0, 1fr) auto; } }
+
+/* Monotonic stack visualizer (Algorithms › Stack & Monotonic Stack) */
+.ms-array { --bs-cell: 52px; display: grid; gap: 2px 6px; width: fit-content; margin: 0 auto; align-items: center; }
+.ms-rowlabel { font-family: "Cascadia Code", Consolas, monospace; font-size: 10.5px; color: var(--muted); padding-right: 4px; text-align: right; white-space: nowrap; word-break: keep-all; }
+.ms-cell { display: grid; place-items: center; height: 44px; border: 1px solid #cfcab4; border-radius: 6px; background: #fff; font-family: "Cascadia Code", Consolas, monospace; font-size: 15px; font-variant-numeric: tabular-nums; color: var(--ink); transition: background-color .25s, border-color .25s, opacity .25s; }
+.ms-cell.is-stack { background: #eaf3fd; border-color: #9cc3ef; }
+.ms-cell.is-done { background: #ecf8f3; border-color: var(--v3); }
+.ms-cell.is-never { opacity: .5; background: #efede4; }
+.ms-cell.is-pop { background: #fdf0ee; border-color: var(--vcrit); box-shadow: 0 0 0 1px var(--vcrit); }
+.ms-cell.is-now { background: #fdf0c8; border-color: #b77d00; box-shadow: 0 0 0 1px #b77d00; }
+.ms-sub, .ms-ans { text-align: center; font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); line-height: 20px; }
+.ms-ans { font-size: 13px; font-weight: 600; }
+.ms-ans.is-set { color: #0a7a52; }
+.ms-ans.is-new { background: #fdf3cc; border-radius: 4px; }
+.ms-stackpanel { margin-bottom: 12px; }
+.ms-stack { display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 120px; justify-content: flex-end; padding: 6px 0 0; }
+.ms-item { position: relative; display: grid; grid-template-columns: 1fr 1fr; width: 150px; height: 34px; align-items: center; border: 1px solid #9cc3ef; border-radius: 5px; background: #eaf3fd; font-family: "Cascadia Code", Consolas, monospace; font-size: 13px; font-variant-numeric: tabular-nums; }
+.ms-item b { font-weight: 600; color: #2a78d6; text-align: center; border-right: 1px dashed #9cc3ef; }
+.ms-item > span { text-align: center; color: var(--ink); }
+.ms-item small { position: absolute; right: -32px; font-size: 10.5px; color: var(--muted); }
+.ms-item.is-top { border-color: #2a78d6; }
+.ms-item.is-new { background: #fdf0c8; border-color: #b77d00; }
+.ms-item.is-new b { color: #b77d00; }
+.ms-item.is-pop { background: #fdf0ee; border-color: var(--vcrit); border-style: dashed; opacity: .75; }
+.ms-item.is-pop b { color: var(--vcrit); }
+.ms-base { width: 170px; height: 0; border-top: 2px solid #3b4234; margin-top: 2px; }
+.ms-empty { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+@media (max-width: 580px) { .ms-array { --bs-cell: 40px; } .ms-cell { height: 36px; font-size: 13px; } .ms-item { width: 130px; } .ms-item small { right: -28px; } }
+
+/* RLHF figure (content/ml/post-training/rlhf.mdx) */
+.rlhf-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 14px; }
+.rlhf-controls .viz-slider { margin-bottom: 0; flex: 1 1 280px; }
+.rlhf-table tr.is-top td { background: #eef5fd; }
+.rlhf-bars { display: grid; grid-template-columns: minmax(60px, 1fr) 46px; gap: 2px 8px; align-items: center; min-width: 140px; }
+.rlhf-bar { display: block; height: 7px; border-radius: 3px; background: #efede4; overflow: hidden; }
+.rlhf-bar i { display: block; height: 100%; transition: width .3s; }
+.rlhf-bars .viz-mono { font-size: 11px; text-align: right; color: var(--muted); }
+.rlhf-bt { margin-top: 10px !important; }
+.rlhf-panel + .viz-scroll { margin-top: 12px; }
+
+/* LLM-as-judge figure (content/ml/llm-engineering/llm-as-judge.mdx) */
+.judge-grid { display: grid; grid-template-columns: repeat(15, minmax(0, 1fr)); gap: 3px; max-width: 420px; }
+.judge-cell { aspect-ratio: 1; border-radius: 3px; background: var(--vfixed); transition: background .3s, box-shadow .3s; }
+.judge-cell.is-G, .judge-sw.is-G, .judge-stack .is-G { background: var(--vgood); }
+.judge-cell.is-S, .judge-sw.is-S, .judge-stack .is-S { background: var(--vfixed); }
+.judge-cell.is-B, .judge-sw.is-B, .judge-stack .is-B { background: var(--vcrit); }
+.judge-cell.is-off { box-shadow: inset 0 0 0 2px #3b4234; }
+.viz-legend .judge-sw.is-off { background: #fff; box-shadow: inset 0 0 0 2px #3b4234; }
+.judge-stack { display: flex; height: 18px; margin-top: 10px; border-radius: 4px; overflow: hidden; max-width: 420px; }
+.judge-stack span { display: block; height: 100%; transition: width .3s; font-size: 11px; line-height: 18px; color: #fff; text-align: center; white-space: nowrap; overflow: hidden; }
+.judge-stack .is-S { color: #3b4234; }
+.judge-table tr.is-cur td { background: #eef5fd; font-weight: 600; }
+
+/* Eval harness figure (content/ml/llm-engineering/eval-harness.mdx) */
+.harness-flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px; margin-bottom: 12px; }
+.harness-step { flex: 1 1 130px; background: #fff; border: 1px solid var(--vline); border-radius: 6px; padding: 8px 10px; min-width: 0; transition: opacity .3s; }
+.harness-step h6 { margin: 0 0 2px; font-size: 11px; font-weight: 600; letter-spacing: .05em; color: #8e8d78; }
+.harness-step b { font-family: "Cascadia Code", Consolas, monospace; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; color: #3b4234; }
+.harness-step small { display: block; color: var(--muted); font-size: 11.5px; }
+.harness-step.is-off { opacity: .4; border-style: dashed; }
+.harness-step.is-loop { border-color: var(--v4); }
+.harness-arrow { align-self: center; color: var(--muted); font-size: 14px; }
+.harness-wheel { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; font-size: 12px; }
+.harness-wheel span { background: #fff; border: 1px solid var(--vline); border-radius: 999px; padding: 3px 10px; }
+.harness-wheel span.is-here { border-color: var(--v1); box-shadow: 0 0 0 1px var(--v1); }
+.harness-wheel i { color: var(--muted); font-style: normal; }
+@media (max-width: 580px) { .harness-arrow { display: none; } .judge-grid { grid-template-columns: repeat(12, minmax(0, 1fr)); } }
+
+/* GRPO and Reward hacking figures (content/ml/post-training/grpo.mdx, reward-hacking.mdx) */
+.grpo-controls { justify-content: space-between; }
+.rh-controls .viz-slider { margin-bottom: 0; flex: 1 1 320px; }
+.rh-rows { display: grid; gap: 10px; }
+.rh-row { display: grid; grid-template-columns: 200px minmax(0, 1fr) 200px; gap: 12px; align-items: center; font-size: 12.5px; }
+.rh-row b { display: block; font-weight: 600; }
+.rh-row small { display: block; color: var(--muted); font-size: 11px; }
+.rh-len { position: relative; }
+.rh-limit { position: absolute; top: -4px; bottom: -4px; border-left: 2px dashed var(--vcrit); }
+.rh-nums { text-align: right; white-space: nowrap; }
+@media (max-width: 580px) { .rh-row { grid-template-columns: minmax(0, 1fr); gap: 4px; } .rh-nums { text-align: left; } }
+
+/* MultiSticker project walkthrough (content/ml/multimodal/multisticker-project.mdx) */
+.ms-figure-img { margin: 20px 0; border: 1px solid #eceadc; border-radius: 8px; background: #fff; padding: 10px; }
+.ms-figure-img img { display: block; width: 100%; height: auto; border-radius: 4px; }
+.ms-figure-img figcaption { margin-top: 8px; font-size: 12px; color: var(--muted); }
+.ms-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.ms-stats div { background: #fff; border: 1px solid var(--vline); border-radius: 8px; padding: 10px 12px; }
+.ms-stats b { display: block; font-size: 22px; line-height: 1.2; font-weight: 650; color: #3b4234; font-variant-numeric: tabular-nums; }
+.ms-stats small { display: block; margin-top: 2px; font-size: 11.5px; color: var(--muted); line-height: 1.45; }
+.ms-stats .is-up b { color: #087a08; }
+.ms-funnel { display: grid; gap: 6px; }
+.ms-funnel button { all: unset; box-sizing: border-box; display: grid; grid-template-columns: 170px minmax(0, 1fr) 96px; gap: 10px; align-items: center; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 12.5px; }
+.ms-funnel button:hover, .ms-funnel button.is-on { background: #fff; box-shadow: 0 0 0 1px var(--vline); }
+.ms-funnel button.is-on { box-shadow: 0 0 0 1.5px #3b4234; }
+.ms-funnel-track { height: 14px; background: #efede4; border-radius: 3px; overflow: hidden; }
+.ms-funnel-track span { display: block; height: 100%; border-radius: 3px; transition: width .35s; }
+.ms-funnel-val { text-align: right; font-family: "Cascadia Code", Consolas, monospace; font-variant-numeric: tabular-nums; font-size: 12px; }
+.ms-mix { display: flex; height: 18px; border-radius: 4px; overflow: hidden; margin-top: 6px; font-size: 11px; color: #fff; }
+.ms-mix span { display: flex; align-items: center; justify-content: center; white-space: nowrap; overflow: hidden; }
+.ms-chat { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 14px; }
+.ms-phone { background: #fff; border: 1px solid var(--vline); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.ms-phone-head { font-size: 11px; color: var(--muted); text-align: center; border-bottom: 1px solid var(--vline); padding-bottom: 6px; }
+.ms-bubble { max-width: 86%; padding: 6px 10px; border-radius: 12px; font-size: 12.5px; line-height: 1.45; }
+.ms-bubble small { display: block; font-size: 10.5px; color: var(--muted); margin-bottom: 1px; }
+.ms-bubble.is-a { background: #f0efe8; align-self: flex-start; border-bottom-left-radius: 4px; }
+.ms-bubble.is-b { background: #fde8e3; align-self: flex-end; border-bottom-right-radius: 4px; }
+.ms-bubble.is-ctx { box-shadow: 0 0 0 1.5px var(--v3); }
+.ms-slot { align-self: flex-start; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.ms-slot i { width: 44px; height: 44px; border: 1.5px dashed #b9b39b; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-style: normal; font-size: 18px; color: #b9b39b; }
+.ms-signals { display: grid; gap: 8px; }
+.ms-signal { background: #fff; border: 1px solid var(--vline); border-left: 4px solid var(--vfixed); border-radius: 6px; padding: 8px 10px; font-size: 12px; transition: opacity .25s, border-color .25s; }
+.ms-signal.is-off { opacity: .55; }
+.ms-signal header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
+.ms-signal header b { font-size: 12.5px; }
+.ms-signal code, .ms-mono { font-family: "Cascadia Code", Consolas, monospace; font-size: 11.5px; word-break: break-word; }
+.ms-vec { display: flex; height: 16px; border-radius: 4px; overflow: hidden; margin-top: 8px; font-size: 10.5px; color: #fff; }
+.ms-vec span { flex: 1; display: flex; align-items: center; justify-content: center; transition: opacity .25s; }
+.ms-arch-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 11.5px; color: var(--muted); margin-top: 6px; }
+.ms-arch-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.ms-heat td.ms-cell { text-align: center; font-family: "Cascadia Code", Consolas, monospace; font-variant-numeric: tabular-nums; font-size: 12px; border-radius: 3px; }
+.ms-panel { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.ms-sticker { border: 1px solid var(--vline); border-radius: 10px; background: #fff; padding: 8px 6px; text-align: center; font-size: 11.5px; }
+.ms-sticker i { display: flex; align-items: center; justify-content: center; height: 46px; font-size: 26px; font-style: normal; border-radius: 8px; margin-bottom: 4px; }
+.ms-sticker.is-same i { background: #e5f6ee; }
+.ms-sticker.is-diff i { background: #f4f2ea; filter: grayscale(.6); }
+.ms-gold { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: 10px; font-size: 12.5px; }
+.ms-badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; border: 1px solid var(--vline); background: #fff; }
+.ms-badge.is-hit { border-color: #9fd8a9; background: #eaf7ec; color: #087a08; }
+.ms-badge.is-miss { border-color: #f0c2c2; background: #fdf0f0; color: #b42f2f; }
+.ms-ctx { margin-top: 8px; padding: 8px 10px; background: #fff; border: 1px solid var(--vline); border-radius: 6px; }
+.prose .viz .ms-signal code, .prose .viz .ms-ctx code { padding: 0; border: 0; background: transparent; color: var(--ink); font-size: 11.5px; }
+@media (max-width: 700px) {
+  .ms-chat { grid-template-columns: minmax(0, 1fr); }
+  .ms-funnel button { grid-template-columns: minmax(0, 1fr) 84px; }
+  .ms-funnel-track { grid-column: 1 / -1; grid-row: 2; }
+  .ms-panel { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}

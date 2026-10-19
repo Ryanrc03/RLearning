@@ -32,8 +32,11 @@ const X0 = 70;
 const X1 = 570;
 const Y0 = 200;
 const Y1 = 26;
-const sx = (ai: number) => X0 + ((Math.log10(ai) + 2) / 6) * (X1 - X0);
-const sy = (f: number) => Y0 - ((Math.log10(f) - 10) / 4) * (Y0 - Y1);
+// Rounded so the server and the browser print the same SVG attributes:
+// Math.log10 can differ in the last bit between engines, which breaks hydration.
+const px = (v: number) => Math.round(v * 100) / 100;
+const sx = (ai: number) => px(X0 + ((Math.log10(ai) + 2) / 6) * (X1 - X0));
+const sy = (f: number) => px(Y0 - ((Math.log10(f) - 10) / 4) * (Y0 - Y1));
 
 function rate(f: number) {
   return f >= 1e12 ? `${(f / 1e12).toFixed(1)} TFLOP/s` : `${(f / 1e9).toFixed(0)} GFLOP/s`;

@@ -41,6 +41,7 @@ import TransformerVsRnn from "@/content/ml/llms/transformer-vs-rnn.mdx";
 import VisualTokens from "@/content/ml/multimodal/visual-tokens.mdx";
 import VisionLanguageAlignment from "@/content/ml/multimodal/vision-language-alignment.mdx";
 import ClipContrastiveLearning from "@/content/ml/multimodal/clip-contrastive-learning.mdx";
+import MultistickerProject from "@/content/ml/multimodal/multisticker-project.mdx";
 import MlOverview from "@/content/ml/overview.mdx";
 import EvaluationOverview from "@/content/ml/evaluation/overview.mdx";
 import ConfusionMatrix from "@/content/ml/evaluation/confusion-matrix.mdx";
@@ -84,6 +85,19 @@ import ContextEngineering from "@/content/ml/llm-engineering/context-engineering
 import Hallucination from "@/content/ml/llm-engineering/hallucination.mdx";
 import BinarySearchTemplates from "@/content/algorithms/binary-search/templates.mdx";
 import BinarySearchOnAnswer from "@/content/algorithms/binary-search/on-answer.mdx";
+import MonotonicStack from "@/content/algorithms/stack/monotonic-stack.mdx";
+import PostTrainingOverview from "@/content/ml/post-training/overview.mdx";
+import Sft from "@/content/ml/post-training/sft.mdx";
+import Lora from "@/content/ml/post-training/lora.mdx";
+import Rlhf from "@/content/ml/post-training/rlhf.mdx";
+import Grpo from "@/content/ml/post-training/grpo.mdx";
+import RewardHacking from "@/content/ml/post-training/reward-hacking.mdx";
+import LlmAsJudge from "@/content/ml/llm-engineering/llm-as-judge.mdx";
+import EvalHarness from "@/content/ml/llm-engineering/eval-harness.mdx";
+import CtrCvrEsmm from "@/content/ml/recsys/ctr-cvr-esmm.mdx";
+import FeatureCrossing from "@/content/ml/recsys/feature-crossing.mdx";
+import SampleFeatureJoin from "@/content/ml/recsys/sample-feature-join.mdx";
+import TTest from "@/content/ml/evaluation/t-test.mdx";
 import { getNote, getSeriesNeighbors, noteEntries } from "@/content/notes";
 import { getNoteToc } from "@/lib/content";
 import TableOfContents from "@/components/layout/TableOfContents";
@@ -130,6 +144,7 @@ const noteComponents = {
   "ml/multimodal/visual-tokens": VisualTokens,
   "ml/multimodal/vision-language-alignment": VisionLanguageAlignment,
   "ml/multimodal/clip-contrastive-learning": ClipContrastiveLearning,
+  "ml/multimodal/multisticker-project": MultistickerProject,
   "ml/overview": MlOverview,
   "ml/evaluation/overview": EvaluationOverview,
   "ml/evaluation/confusion-matrix": ConfusionMatrix,
@@ -173,6 +188,19 @@ const noteComponents = {
   "ml/llm-engineering/hallucination": Hallucination,
   "algorithms/binary-search/templates": BinarySearchTemplates,
   "algorithms/binary-search/on-answer": BinarySearchOnAnswer,
+  "algorithms/stack/monotonic-stack": MonotonicStack,
+  "ml/post-training/overview": PostTrainingOverview,
+  "ml/post-training/sft": Sft,
+  "ml/post-training/lora": Lora,
+  "ml/post-training/rlhf": Rlhf,
+  "ml/post-training/grpo": Grpo,
+  "ml/post-training/reward-hacking": RewardHacking,
+  "ml/llm-engineering/llm-as-judge": LlmAsJudge,
+  "ml/llm-engineering/eval-harness": EvalHarness,
+  "ml/recsys/ctr-cvr-esmm": CtrCvrEsmm,
+  "ml/recsys/feature-crossing": FeatureCrossing,
+  "ml/recsys/sample-feature-join": SampleFeatureJoin,
+  "ml/evaluation/t-test": TTest,
 };
 
 export const dynamicParams = false;

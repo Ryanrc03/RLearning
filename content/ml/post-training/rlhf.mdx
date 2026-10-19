@@ -1,0 +1,48 @@
+import RlhfFigure from "@/components/visualization/ml/post-training/RlhfFigure";
+
+# RLHF：奖励模型、PPO 与 DPO
+
+## 一句话
+
+**RLHF 先用人类的成对偏好训一个打分的奖励模型，再用强化学习让模型多写高分回答，同时用 KL 拴住它别离 SFT 模型太远。**
+
+流程是 SFT → reward model → PPO 三段；DPO 把后两段合成一个直接在偏好对上训的 loss。
+
+## 为什么需要它
+
+SFT 和 LoRA 都要先有一份「标准答案」，可「写得有帮助、不啰嗦、不胡编」这种要求，标注员很难亲手写出满分示范。但给他两个回答问「哪个更好」，几秒就能答，而且不同人答得相当一致。RLHF 要解决的就是：手里只有「A 比 B 好」这种比较，怎么变成梯度。
+
+## 怎么工作
+
+<RlhfFigure />
+
+$$
+\mathcal{L}_{\text{RM}} = -\log \sigma\big(r_\phi(x, y_w) - r_\phi(x, y_l)\big)
+$$
+
+$$
+\max_{\pi}\; \mathbb{E}_{y \sim \pi}\big[r(x, y)\big] - \beta\, \mathrm{KL}\big(\pi \,\|\, \pi_{\text{ref}}\big) \;\Rightarrow\; \pi^*(y) \propto \pi_{\text{ref}}(y)\, e^{\,r(x, y)/\beta}
+$$
+
+$$
+\mathcal{L}_{\text{DPO}} = -\log \sigma\Big(\beta \log \frac{\pi_\theta(y_w)}{\pi_{\text{ref}}(y_w)} - \beta \log \frac{\pi_\theta(y_l)}{\pi_{\text{ref}}(y_l)}\Big)
+$$
+
+**奖励模型。** Bradley–Terry 假设每个回答有一个分数 $r$，人选 A 不选 B 的概率是 $\sigma(r_A - r_B)$；第一条 loss 就是在每个偏好对上做二分类。奖励模型通常是 SFT 模型换一个输出标量的头。图里的 RM 分就是从 200 次两两投票拟合出来的，标注员偶尔被客套长文打动，RM 就把 E 排到了第一。
+
+**PPO。** 第二条是 RLHF 真正的目标：拿 RM 分，但为离参考模型（冻结的 SFT 模型）的每一点 KL 付代价。PPO 一步步逼近它：采样回答、RM 打分、算 advantage，再用比值 $\rho = \pi_\theta / \pi_{\text{old}}$ 更新，并把 $\rho$ clip 在 $[1-\epsilon, 1+\epsilon]$ 里，一批数据推不远。RM 只在最后一个 token 给一个分，critic（value model）估计每个位置「从这里往后还能拿多少分」，advantage = 实际回报 − 这个估计：它既是降方差的基线，也负责把总分分摊到每个 token 上。
+
+**为什么要 KL。** 拖 β 看两张图：β 越小，策略离参考模型越远，RM 分一路上涨，专家分却先升后降。RM 只在它见过的回答附近可信，放开约束，策略就去找 RM 的漏洞，把概率压到 E 上。KL 让策略只做「在 SFT 附近挑好的」，也顺带保住语言流畅和输出多样性。
+
+**DPO。** 第二条式子的解是闭式的，反过来写就是 $r = \beta \log(\pi^*/\pi_{\text{ref}}) + \text{常数}$。把它代进第一条 loss，常数消掉，就得到第三条：不训 RM、不采样，直接在偏好对上做分类，让 policy 相对 reference 抬高 $y_w$、压低 $y_l$。
+
+## 代价与取舍
+
+- PPO 训练时显存里有四个模型：policy（训）、reference（冻结）、reward（冻结）、critic（训，通常和 policy 一样大）。critic 最贵，也最难训准。
+- PPO 是 on-policy：能用 RM 给自己新写的回答打分、持续探索，上限高；但超参多、易发散，RM 越被优化越不可信。
+- DPO 是 offline：只要 policy 和 reference 两个模型，像 SFT 一样稳；代价是只能学偏好数据里出现过的回答，见不到自己的新错误，还可能把 $y_w$、$y_l$ 的概率一起压低。
+- β 是同一个旋钮：太小会 reward hacking，太大等于没训；PPO 和 DPO 都有它。
+
+## 再往下看
+
+四个模型里 critic 只是为了给 advantage 一个基线，[GRPO](/notes/ml/post-training/grpo/) 改用同一个 prompt 的一组回答的平均分当基线，把 critic 去掉。

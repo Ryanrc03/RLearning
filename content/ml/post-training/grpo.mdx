@@ -1,0 +1,79 @@
+import GrpoFigure from "@/components/visualization/ml/post-training/GrpoFigure";
+import PolicyGradientStepFigure from "@/components/visualization/ml/post-training/PolicyGradientStepFigure";
+
+# GRPO：组内比较代替 critic
+
+## 一句话
+
+**GRPO 对同一个 prompt 采样 G 个回答各自打分，用组内均值当基线、组内标准差做缩放，得到每个回答的 advantage，于是不再需要 critic。**
+
+它是 policy gradient 这条线（REINFORCE → baseline → actor-critic → TRPO → PPO）的最新一站，来自 DeepSeekMath，DeepSeek-R1 用它做推理 RL；最常见的搭配是可验证奖励：数学答案对不对、代码测试过不过。
+
+## 为什么需要它
+
+LLM 的 RL 是一个循环：拿一道题当 prompt 喂给 LLM，生成 response，打分得到 reward，用 reward 更新 LLM，再拿下一道题重复。RLHF、DPO、GRPO 都是这个循环，区别在「用 reward 怎么更新」。
+
+强化学习有两条路。**Policy-based** 的网络直接输出动作的概率分布：state → NN → action；LLM 本身就是这样一个 policy：context → NN → 下一个 token 的分布。**Value-based** 的网络输出这个状态好不好：state → NN → good / bad，像一个估胜率的评委。PPO 两样都要：policy 之外还要一个和它差不多大的 critic（value network）当基线，多占一份显存和优化器状态；而 LLM 的 reward 只在回答结尾给一次，逐 token 的 value 很难估准。GRPO 只留 policy：同一道题多答几次，平均分本身就是一个好基线。
+
+## 怎么工作
+
+### 参数到底怎么更新：从 SFT 到 policy gradient
+
+SFT 和预训练的更新是 $\theta \leftarrow \theta - \eta\,\nabla_\theta L$，其中 $L = -\log \pi_\theta(y \mid x)$，等价于沿 $\nabla \log \pi$ 往上走，让示范答案 $y$ 更可能。RL 没有示范答案，只有模型自己采样的回答 $o$ 和它的分数 $R$，于是把同一个梯度乘上 reward：
+
+$$
+\theta \leftarrow \theta + \eta \cdot R \cdot \nabla_\theta \log \pi_\theta(o \mid q),\qquad
+\log \pi_\theta(o \mid q) = \sum_t \log \pi_\theta(o_t \mid q, o_{<t})
+$$
+
+梯度给**方向**（让这个回答更可能），reward 给**力度和正负**：分高就推得多，分为负就往反方向推。整条回答的每个 token 共用这一个 $R$。所以 RL 可以读成「在自己的采样上做 SFT，每条按分数加权」。对 softmax policy，$\nabla_{\text{logits}} \log \pi(a) = \text{onehot}(a) - \pi$：采到的 token 的 logit 往上，其余按概率往下，总和为 0，概率只在答案之间挪。
+
+问题在于 reward 稀疏、方差大。像开赛车游戏，一局好成绩里大部分操作其实很普通，却都被同样奖励；分数又都是正的，采到什么就推什么。后面每一步都在治这个病：
+
+1. **Baseline**：用 $R - b$ 代替 $R$。笔记的例子：这次 95 分、平均 92 分，只按 +3 推。减常数不改梯度期望，只降方差，训练变稳。
+2. **Actor-critic（A2C）**：让一个 critic 网络估这个状态的平均分 $V(s)$ 当基线，$A = R - V(s)$ 叫 advantage，即这个动作比平均好多少。
+3. **TRPO**：拿旧 policy 采的样本更新新 policy 时，乘上概率比 $\rho = \pi_{\text{new}} / \pi_{\text{old}}$，它衡量这一步改了多少；再加硬约束 $\mathrm{KL}(\pi_{\text{old}} \,\|\, \pi_{\text{new}}) \le \delta$，限制 $\rho$ 别走太远。约束优化要二阶近似，很贵。
+4. **PPO**：不算 KL 约束，直接把 $\rho$ clip 在 $1 \pm \epsilon$ 里，超出就不再给梯度。
+5. **GRPO**：去掉 value model。同一道题 $q$ 采 G 条 CoT，各自得分 $r_1 \dots r_G$，用组内统计量当基线：
+
+$$
+A_i = \frac{r_i - \operatorname{mean}(r_1,\dots,r_G)}{\operatorname{std}(r_1,\dots,r_G)}
+$$
+
+$$
+J(\theta) = \frac{1}{G}\sum_{i=1}^{G}\frac{1}{|o_i|}\sum_{t}\min\!\big(\rho_{i,t}A_i,\ \operatorname{clip}(\rho_{i,t},1-\epsilon,1+\epsilon)\,A_i\big) - \beta\,D_{\mathrm{KL}}\!\left(\pi_\theta \,\|\, \pi_{\mathrm{ref}}\right)
+$$
+
+比如一组的平均分是 60，低于 60 的回答 $A < 0$ 被压下去，高于 60 的被推上来。$J$ 里除了 $A_i$ 的来源，其余就是 PPO：$\rho_{i,t}$ 是逐 token 的新旧概率比，KL 项把 policy 拉在 reference 附近，而且直接加在 loss 里，不再扣进 reward。
+
+### 一个手算的例子
+
+<PolicyGradientStepFigure />
+
+把 LLM 缩成只会答「2 + 3 = ?」的三个 token，参数是三个 logit，起点全是 0，所以三个答案各 33.3%。采 4 个回答：5 ✓、6 ✗、5 ✓、4 ✗，0 / 1 奖励是 1、0、1、0。
+
+- **算 advantage**：均值 0.5、std 0.5，所以 $A = (+1, -1, +1, -1)$。
+- **算每个样本的推力**：样本 1 是 $+1 \times \big((1,0,0) - (\tfrac13,\tfrac13,\tfrac13)\big) = (+0.67, -0.33, -0.33)$。样本 2 答了 6、$A = -1$，推力 $(+0.33, -0.67, +0.33)$：压下错答案，等于把概率还给另外两个。
+- **平均成梯度、走一步**：$g = (+0.5, -0.25, -0.25)$，lr = 1 时 θ 变成 $(0.5, -0.25, -0.25)$，π(5) 从 33.3% 升到 51.4%。
+- **clip**：这一步之后 $\rho(5) = 0.514 / 0.333 = 1.54$，已越过 1.2；同一批样本再训一轮时，clip 把它的梯度截成 0。真实训练里 lr 小得多，每一步都在信任区里挪一点。
+
+切到「打分奖励」再选「① 只乘 reward」：四个分数都在 90 上下，错答案也被往上推，一步 ‖Δθ‖ ≈ 20，这就是方差大、不稳。选「② 减均值」，95 分那个只按 +3 推；选「③ GRPO」，不管 reward 是 0 / 1 还是百分制，步长都在同一量级。
+
+### 一组全对或全错时没有信号
+
+<GrpoFigure />
+
+默认是一道会做 50% 的题、G = 6：答对的 $A$ 为正，答错的为负，加起来正好是 0。这是结果级的奖励，不去分辨哪一步推理立了功；那本是 critic 该做却难以做好的事，GRPO 干脆不做。
+
+切到简单题、G = 4：四个全对，std = 0，所有 $A$ 都是 0；难题则是全错，同样是 0。白跑的概率是 $p^G + (1-p)^G$：会做 85% 的题，G = 4 时有 52% 的组没有梯度，G = 8 时降到 27%。把难题的 G 拉到 8，第一个答对的回答出现，它的 $A$ 一下子到 +2.65。稀有的成功被推得最狠，R1 报告里那种「aha moment」（模型学会回头检查）就是这样一点点被放大的。
+
+## 代价与取舍
+
+- **为什么不要 critic**：省掉一个和 policy 同尺寸的网络和它的训练，也躲开了在结尾稀疏奖励下估逐 token value 的难题。代价是每个 prompt 要生成 G 次，算力从「训练 critic」挪到了 rollout。
+- **G 个全对或全错怎么办**：这组 advantage 全是 0，等于白采样。常见做法是加大 G、把 std = 0 的组过滤掉再补采（DAPO 的 dynamic sampling），或按当前通过率挑中等难度的题做课程。
+- **除以 std 会放大难度差异**：8 个里只对 1 个，它拿 +2.65；8 个里对 7 个，对的每个只拿 +0.38。Dr. GRPO 认为这带来题目难度偏差，只减均值不除 std；$1/|o_i|$ 的长度归一还会让长的错答案每个 token 罚得更轻，悄悄鼓励写长。
+- **奖励必须可比、最好可验证**：组内只有相对信息，答案对错、单元测试、格式检查最稳；换成学出来的 reward model 也能用，但更容易被钻空子。
+
+## 再往下看
+
+GRPO 只管怎么用 reward，不管 reward 写得对不对。[奖励设计与 Reward Hacking](/notes/ml/post-training/reward-hacking/) 讲策略怎样钻奖励的空子，比如加了长度奖励之后堆字刷分。前一站 PPO 和 critic 的细节在 [RLHF：奖励模型、PPO 与 DPO](/notes/ml/post-training/rlhf/)。

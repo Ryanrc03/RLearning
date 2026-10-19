@@ -1,0 +1,48 @@
+import EsmmFigure from "@/components/visualization/ml/recsys/EsmmFigure";
+
+# CTR、CVR 与 ESMM
+
+## 一句话
+
+**CTR 是曝光后被点击的概率，CVR 是点击后发生转化的概率，两者相乘是曝光后直接转化的 CTCVR；ESMM 把 pCVR 放进 pCTR × pCVR，在全部曝光上一起训练。**
+
+广告和电商排序常按 bid × pCTR × pCVR 一类的公式打分，pCVR 偏了，排在前面的广告就跟着偏。
+
+## 为什么需要它
+
+上一页的检索只问「相关不相关」；广告排序要预测的是行为：点不点，点了之后买不买、下不下载。点击的标签每条曝光都有，转化的标签只在点击之后才存在。直接拿点击样本训练 CVR 模型会遇到两件事：一是 sample selection bias（SSB），训练只见过点了的人，上线却要给每一条曝光打 pCVR；二是 data sparsity，点击只占曝光的几个百分点，转化更少。
+
+## 怎么工作
+
+<EsmmFigure />
+
+$$
+\text{CTR} = \frac{\#\text{click}}{\#\text{imp}},\qquad
+\text{CVR} = \frac{\#\text{conv}}{\#\text{click}},\qquad
+\text{CTCVR} = \frac{\#\text{conv}}{\#\text{imp}} = \text{CTR} \times \text{CVR}
+$$
+
+$$
+\underbrace{p(y{=}1, z{=}1 \mid x)}_{\text{pCTCVR}} = \underbrace{p(y{=}1 \mid x)}_{\text{pCTR}} \cdot \underbrace{p(z{=}1 \mid y{=}1, x)}_{\text{pCVR}}
+$$
+
+$$
+L = \sum_{i \in \text{曝光}} \ell\big(y_i,\ \text{pCTR}(x_i)\big) + \sum_{i \in \text{曝光}} \ell\big(y_i z_i,\ \text{pCTR}(x_i) \cdot \text{pCVR}(x_i)\big)
+$$
+
+左图：s = 0 时点击和兴趣分无关，蓝柱和灰柱形状一样，点击样本只是曝光的一个随机子集。把 s 往右拖，点击越来越集中在高兴趣档。右图的虚线是真实 CVR(x)，高兴趣的人点了之后也更容易转化。橙点是每档的「转化 / 点击」，它们在各自那一档里大体是对的，问题在权重：点击样本把高兴趣档放大了，平均 CVR 从和曝光空间一致，变成 s = 2.5 时的 53% 对 28%。同时左边几档的橙点越来越小，最后一个点击都没有，CVR 在那里没有标签可学。
+
+ESMM 的结构是两个塔：CTR 塔和 CVR 塔共享底层 embedding。两个 loss 都定义在曝光空间上，CTR 的标签是「点没点」，CTCVR 的标签是「点了并且转化」，未点击的曝光对 CTCVR 就是负样本。pCVR 没有自己的 loss，只通过乘积被间接学出来。图里绿线就是只用这两个标签训练出的 CVR 塔（这里是两个一维 logistic），它和虚线几乎重合，在曝光上平均回到真实值。
+
+为什么不先训 pCTCVR、pCTR 再相除？pCTR 很小，一点误差除下来就被放大，结果还可能超过 1；乘积形式让 pCVR 天然留在 [0, 1]。共享 embedding 则让 CVR 塔借用 CTR 任务多几十倍的样本来学 user 和 ad 的表示，这是 ESMM 对 sparsity 的回答。
+
+## 代价与取舍
+
+- ESMM 不是严格的因果去偏。图里两个塔的形式设定对、决定点击的特征也都看得见，ESMM 才恰好对上；在同样条件下，带特征、在点击样本上训练的 CVR 模型逐档也是对的，SSB 真正伤人的是点击稀少区域的外推。点击若依赖模型看不到的因素，ESMM 的 pCVR 仍然有偏；ESCM² 指出了这一点，用 IPS、DR 这类反事实正则去修。
+- 共享 embedding 是双刃：CTR 和 CVR 目标冲突时（标题党素材点击高、转化低）会互相拖累，即负迁移。MMoE、PLE 用多个 expert 加门控来缓解。
+- 转化有延迟，可能在点击后几小时甚至几天才回传。训练时还没回来的转化被当成负样本，pCVR 会系统性偏低，需要等待窗口或延迟反馈建模。
+- 离线 AUC 应在曝光空间上评估 pCTCVR，并单独看点击样本上的 CVR AUC；只看后者会高估模型在线上全部曝光上的效果。
+
+## 再往下看
+
+两个塔要学「年轻用户 × 游戏广告」这类组合信号，靠的是 [特征交叉：FM 与 DCN](/notes/ml/recsys/feature-crossing/)。转化晚到时训练样本怎么拼，在 [样本与特征拼接](/notes/ml/recsys/sample-feature-join/)。

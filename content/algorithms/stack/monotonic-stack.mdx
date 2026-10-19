@@ -1,0 +1,144 @@
+import MonotonicStackVisualizer from "@/components/visualization/algorithms/MonotonicStackVisualizer";
+
+# Monotonic Stack：Daily Temperatures 与 Car Fleet
+
+> 嵌套的 `while` 里套着 `pop`，为什么还是 O(n)？
+
+## The Big Idea
+
+很多数组题问的是同一件事：**对每个元素，离它最近的、比它大（或小）的下一个元素在哪？** 暴力做法是每个元素向右扫一遍，O(n²)。
+
+Monotonic Stack 把“扫一遍”换成“排队等”。栈里放的是**还没找到答案的元素**，并且维护一个单调性：从栈底到栈顶，值单调递减（或递增）。新元素来的时候，所有被它“超过”的栈顶一个个弹出，答案就是当前元素；弹不动了，自己入栈排队。
+
+为什么是 O(n)：**每个下标最多压入一次、弹出一次**。`while` 循环的总次数不超过压入的总次数 n，所以两层循环加起来仍是 2n 次操作。这叫**摊还 O(n)**：某一轮可能弹出很多个，但那是把之前欠的账一次还清，不是新开销。
+
+## When to Use
+
+看到这几种问法，先想 Monotonic Stack：
+
+1. **Next Greater / Next Smaller Element**：每个元素右边（或左边）第一个比它大 / 小的在哪。Daily Temperatures 就是“下一个更大”。
+2. **每个元素能向两边延伸多远**：以它为最小值的最大区间（Largest Rectangle in Histogram）。
+3. **按某个顺序处理，后来者只能影响紧挨着的前者**：Car Fleet 里车只能追上紧挨着的前一个车队。
+
+判定的办法是问自己：**一个元素一旦被“解决”，还会不会再被用到？** 如果不会，就可以把它弹出去忘掉；栈里只留还没解决的，这就是 Monotonic Stack。
+
+栈里**存下标，不存值**。值可以用下标随时查到，反过来不行；而且题目往往要的是距离（`i - j`），只有下标能相减。
+
+## Core Templates
+
+### Template A：Next Greater Element（递减栈）
+
+LeetCode 739 — [Daily Temperatures](https://leetcode.com/problems/daily-temperatures/)
+
+```python
+def daily_temperatures(temps):
+    n = len(temps)
+    ans = [0] * n
+    stack = []   # indices; temps non-increasing
+
+    for i in range(n):
+        while stack and temps[stack[-1]] < temps[i]:
+            j = stack.pop()
+            ans[j] = i - j
+        stack.append(i)
+
+    return ans
+```
+
+| 要素 | 这里的选择 | 为什么 |
+| --- | --- | --- |
+| 栈里装什么 | 还没等到更暖一天的**下标** | 答案是 `i - j`，要用下标相减 |
+| 不变量 | 从底到顶温度**单调不增** | 栈顶是最矮的，新元素只要比栈顶高就能解决栈顶 |
+| 弹出条件 | `temps[stack[-1]] < temps[i]`，严格小于 | 相等不算“更暖”，相等的要留在栈里继续等 |
+| `while` 不是 `if` | 一个 `i` 可能解决好几个 | 今天比前面连续好几天都暖，它们都要结算 |
+| 为什么能停 | 栈顶没被超过，下面的更不会 | 下面的温度比栈顶还高，不用再看 |
+| 入栈 | 每个 `i` 无条件 `append` | `i` 自己也要等它右边更暖的一天 |
+| 剩在栈里的 | `ans` 保持 0 | 右边没有更暖的一天 |
+
+“不变量”这一行是整段代码的灵魂：**栈从底到顶单调不增**，所以“栈顶没被超过”就意味着“栈里没人被超过”，`while` 可以安全地停下来。每次弹出都在维护这个不变量，每次入栈也不会破坏它（入栈的元素一定 `<=` 新栈顶）。
+
+### Template B：按顺序合并（递增栈）
+
+LeetCode 853 — [Car Fleet](https://leetcode.com/problems/car-fleet/)
+
+`target` 处是终点，每辆车在 `position[k]`，速度 `speed[k]`，追上前车后只能跟着前车走。问最后有几个车队。
+
+```python
+def car_fleet(target, position, speed):
+    cars = sorted(zip(position, speed), reverse=True)
+    stack = []   # arrival times; strictly increasing
+
+    for pos, spd in cars:
+        t = (target - pos) / spd
+        stack.append(t)
+        if len(stack) >= 2 and stack[-1] <= stack[-2]:
+            stack.pop()   # caught the fleet ahead
+
+    return len(stack)
+```
+
+| 要素 | 这里的选择 | 为什么 |
+| --- | --- | --- |
+| 处理顺序 | 按 `position` **从大到小** | 车只能追前面的车，先确定最前面的车队，后面的车才知道追谁 |
+| 栈里装什么 | 每个**车队**到达 `target` 的时间 | 一个车队的时间由领头（最慢的那辆）决定 |
+| 不变量 | 从底到顶时间**严格递增** | 后面的车队一定比前面的到得晚，否则它早就并进去了 |
+| 合并条件 | `stack[-1] <= stack[-2]`，含等号 | 同时到达 `target` 也算同一个车队 |
+| 为什么是 `if` 不是 `while` | 一辆车最多并入一个车队 | 它并入前队后，速度就变成前队的速度，不会再越过前队去追更前面的 |
+| 答案 | `len(stack)` | 栈里剩下的每个时间就是一个独立的车队 |
+
+为什么“新车的时间 `<=` 前队的时间”就一定追得上？两辆车都是匀速直线，后车在 `target` 之前（含）到达的时刻不晚于前队，而前队始终在它前面，所以它必然在到达 `target` 之前追上前队。追上以后它的速度变成前队的速度，再也不会超过前队，所以这个比较只需做一次。
+
+### 核心对比
+
+| 特征 | Template A · Daily Temperatures | Template B · Car Fleet |
+| --- | --- | --- |
+| 遍历顺序 | 数组原顺序 | 按位置从大到小 |
+| 栈里的东西 | 下标 | 车队的到达时间 |
+| 单调方向 | 不增（栈顶最小） | 严格递增（栈顶最大） |
+| 比较 | 严格 `<` | `<=` |
+| 弹出几次 | `while`：一次可弹多个 | `if`：最多一个 |
+| 答案在哪 | 弹出时写进 `ans[j]` | 最后数栈的长度 |
+
+两道题的栈方向和比较符号不一样，不是因为模板不同，而是因为**什么算被解决**这件事不同：739 里相等不算更暖，所以相等的要留下；853 里同时到达算一队，所以相等的要合并。写模板之前先把这句话说清楚，符号自然就对了。
+
+## Interactive Dry Run
+
+先看 739 的第一组输入 `[73, 74, 75, 71, 69, 72, 76, 73]`。走到 `i = 6`（温度 76）时，连续弹出 5、3、2 三个下标：这是一次“还账”，之前每一步都只压入了一个。再看第二组 `[30, 30, 40]`，`i = 1` 时 30 没有把 30 弹出，两个 30 一起等到 40。
+
+<MonotonicStackVisualizer />
+
+切到 853，第一组是题目的例子（答案 3）。注意 `i = 1` 的车（位置 8，速度 4）：它的时间 1 和前面位置 10 那辆车的时间 1 相等，`<=` 让它并入前队。第二组 `target = 4, position = [0, 2], speed = [4, 2]` 只有两辆车、两个时间都是 1，答案是 1 不是 2：把 `<=` 改成 `<` 这组就会错。
+
+## Common Mistakes
+
+| 错误写法 | 最小反例 | 为什么错 |
+| --- | --- | --- |
+| 739 弹出条件写 `<=` | `[30, 30, 40]` → 返回 `[1, 1, 0]`，应为 `[2, 1, 0]` | 相等不是更暖；第 0 天在第 1 天被错误结算 |
+| 739 用 `if` 代替 `while` | `[30, 20, 40]` → 返回 `[0, 1, 0]`，应为 `[2, 1, 0]` | `i = 2` 只弹出了下标 1，下标 0 永远留在栈里 |
+| 739 栈里存温度不存下标 | 任何非空输入 | 弹出后不知道那一天是第几天，算不出 `i - j` |
+| 739 把 `append(i)` 放进“没弹出才入栈”的分支 | `[30, 40, 50]` → 返回 `[1, 0, 0]`，应为 `[1, 1, 0]` | `i = 1` 弹出了下标 0 就没入栈，第 1 天没人替它等 |
+| 853 不按位置从大到小处理（不排序，或升序） | `target = 10, position = [2, 5], speed = [4, 1]` 升序处理 → 返回 2，应为 1 | 位置 2 的车要先知道位置 5 的车的时间才能比；顺序反了，它被当成了“前车” |
+| 853 合并条件写 `<` | `target = 4, position = [0, 2], speed = [4, 2]` → 返回 2，应为 1 | 同时到达 `target` 算一个车队 |
+| 853 比位置不比时间 | `target = 10, position = [0, 5], speed = [10, 1]` → 返回 2，应为 1 | 追不追得上取决于到达时间；排序后位置总是递减，按位置比永远并不了 |
+
+## Related Problems
+
+| Problem | Pattern | Difficulty |
+| --- | --- | --- |
+| [LC 739 Daily Temperatures](https://leetcode.com/problems/daily-temperatures/) | Next Greater Element（本文 Template A） | Medium |
+| [LC 496 Next Greater Element I](https://leetcode.com/problems/next-greater-element-i/) | 同一递减栈，答案存进字典再查 | Easy |
+| [LC 503 Next Greater Element II](https://leetcode.com/problems/next-greater-element-ii/) | 循环数组：遍历 `2n` 次，只在第一轮入栈 | Medium |
+| [LC 853 Car Fleet](https://leetcode.com/problems/car-fleet/) | 排序后按顺序合并（本文 Template B） | Medium |
+| [LC 84 Largest Rectangle in Histogram](https://leetcode.com/problems/largest-rectangle-in-histogram/) | 递增栈：弹出时同时得到左右边界 | Hard |
+| [LC 42 Trapping Rain Water](https://leetcode.com/problems/trapping-rain-water/) | 递减栈：弹出时结算一层横向的水 | Hard |
+
+## Key Takeaways
+
+1. Monotonic Stack 解决的是“离我最近的、比我大 / 小的下一个在哪”：栈里只放还没解决的元素，解决了就弹出、忘掉。
+2. 时间复杂度是摊还 O(n)：每个下标最多压入一次、弹出一次，`while` 的总次数不超过 n。
+3. 不变量是“栈从底到顶单调”，它让“栈顶没被超过”推出“栈里没人被超过”，`while` 才能停。
+4. 栈里存下标，不存值。
+5. 比较用 `<` 还是 `<=`，取决于“相等算不算被解决”：739 里相等的要继续等，853 里同时到达算一队。
+6. 一个元素只能影响紧挨着的前一个（Car Fleet）就用 `if`；能连续解决多个（Daily Temperatures）就用 `while`。
+
+上一组：[Binary Search on Answer：Koko Eating Bananas](/notes/algorithms/binary-search/on-answer/)。

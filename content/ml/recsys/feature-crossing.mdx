@@ -1,0 +1,47 @@
+import FeatureCrossFigure from "@/components/visualization/ml/recsys/FeatureCrossFigure";
+
+# 特征交叉：FM 与 DCN
+
+## 一句话
+
+**特征交叉让模型学到「两个特征同时取某个值」才出现的信号：FM 给每个特征一个向量，用内积表示二阶交叉；DCN 用 cross layer，每叠一层把交叉阶数加一。**
+
+CTR、CVR 排序模型（Wide & Deep、DeepFM、DCN-v2 一类）几乎都有一个专门做交叉的模块。
+
+## 为什么需要它
+
+[逻辑回归](/notes/ml/classifiers/logistic-regression/) 的 logit 是各特征权重的和：「18–24 岁」加一点，「游戏广告」加一点。可点击率里的信号常常在组合上：年轻人爱点游戏广告、很少点理财广告，50 岁以上正好反过来。同一个年龄差在不同广告上连符号都不同，任何加法都表示不了。上一页的 pCTR、pCVR 塔要学的正是这种组合。
+
+## 怎么工作
+
+<FeatureCrossFigure />
+
+$$
+\hat y_{\text{FM}} = w_0 + \sum_i w_i x_i + \sum_{i<j} \langle \mathbf v_i, \mathbf v_j \rangle\, x_i x_j
+$$
+
+$$
+\sum_{i<j} \langle \mathbf v_i, \mathbf v_j \rangle\, x_i x_j = \frac12 \sum_{f=1}^{k} \Big[ \Big( \sum_i v_{i,f}\, x_i \Big)^2 - \sum_i v_{i,f}^2\, x_i^2 \Big]
+$$
+
+$$
+\mathbf x_{l+1} = \mathbf x_0 \,(\mathbf x_l^\top \mathbf w_l) + \mathbf b_l + \mathbf x_l
+$$
+
+选 LR 时，右表只是一张「年龄分 + 广告分」的加法表：18–24 × 游戏给低了（12% 对 19%），18–24 × 理财又给高了（6.5% 对 1.5%）。它只能在两种相反的趋势之间折中，训练格平均差两个多点。手工交叉是把 $x_i x_j$ 当成一个新特征，给每个「年龄 × 广告类型」一个独立权重。见过的 24 格都拟合上了，可 50+ × 游戏从来没曝光过，它的权重没收到一次梯度，预测退回加法部分。放大到 100 万用户 × 10 万广告，这种权重有 1000 亿个，绝大多数格子没有样本，工程上只能靠经验挑少数交叉。
+
+FM 把独立的 $w_{ij}$ 换成内积 $\langle \mathbf v_i, \mathbf v_j \rangle$，相当于假设交叉矩阵是低秩的。每个特征只要一个 k 维向量，参数随特征数线性增长；$\mathbf v_i$ 从特征 $i$ 和所有其他特征的共现里学，所以没一起出现过的组合也能算出来，图里 FM 对 50+ × 游戏的猜测接近真实值。第二个公式是 $O(kn)$ 的技巧：每一维先求和再平方，减掉自己乘自己的项，不用枚举 $n^2/2$ 对。
+
+DCN 在 embedding 拼成的 $\mathbf x_0$ 上叠 cross layer。$\mathbf x_l^\top \mathbf w_l$ 是一个标量，乘回 $\mathbf x_0$ 让最高阶比 $\mathbf x_l$ 多一，所以 $l$ 层 cross 最高到 $l + 1$ 阶，每层只多 $2d$ 个参数；末尾的 $+\,\mathbf x_l$ 是残差，保留低阶项。DCN 把 cross 网络和一个普通 MLP 并联；DeepFM 把 FM 和 MLP 并联并共享 embedding，省掉手工交叉。DCN-v2 把向量 $\mathbf w$ 换成矩阵 $W$：$\mathbf x_0 \odot (W \mathbf x_l + \mathbf b) + \mathbf x_l$，表达力更强，再用低秩分解控制成本。
+
+## 代价与取舍
+
+- 交叉模块是训练不稳定的常见来源：DCN 每层都乘一次 $\mathbf x_0$，高阶项让 logit 数值放大，配上大学习率和稀疏 id，loss 容易抖甚至出 NaN。若它带来的离线增益抵不过线上的不稳定，剪掉它，或者减层数、加 LayerNorm 和梯度裁剪，都是合理的取舍。
+- FM 只建模二阶，而且同一个 $\mathbf v_i$ 要和所有 field 交叉；FFM 给每个 field 一套向量，更准，但参数要乘上 field 数。
+- MLP 理论上能拟合任何交叉，但用加法和 ReLU 近似乘法很低效，Rendle 等人 2020 年的实验显示 MLP 连点积都学不好。显式交叉是给模型的归纳偏置。
+- 手工交叉并没有过时：业务上强、稳定、样本充足的组合（广告主 × 地区）配 LR 或 GBDT 简单可靠，也好解释。
+- 阶数不是越高越好：三阶以上收益通常很小，计算量和过拟合风险却在涨。
+
+## 再往下看
+
+交叉学到的信号再好，样本拼错了也白费：[样本与特征拼接](/notes/ml/recsys/sample-feature-join/) 讲转化晚到时怎样用曝光那一刻的特征快照和后到的 label 拼出训练样本。回到上一页，[CTR、CVR 与 ESMM](/notes/ml/recsys/ctr-cvr-esmm/) 的两个塔里通常就放着这样一个交叉模块。

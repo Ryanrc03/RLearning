@@ -1,0 +1,44 @@
+import SftLossMaskFigure from "@/components/visualization/ml/post-training/SftLossMaskFigure";
+
+# SFT：只在回答上算 loss
+
+## 一句话
+
+**SFT（Supervised Fine-Tuning）拿（指令, 好回答）对继续训练预训练模型：loss 还是逐 token 的 next-token cross-entropy，但 prompt 的 token 被 mask 掉，只在回答上算。**
+
+它是 post-training 的第一步，把只会续写的 base model 变成会按指令回答的 chat model；后面的 RLHF、GRPO 都从 SFT 之后的模型出发。
+
+## 为什么需要它
+
+预训练学的是「网上下一个词是什么」。给 base model 一句「推荐一部科幻电影」，它很可能接着写「推荐一部爱情电影、推荐一部动画电影」，因为网页里这种列表最常见：它会说话，但不知道这是一个该回答的问题。SFT 用几千到几十万条人写或筛过的对话示范「问题后面该接什么」，不换目标函数、不改结构，只换数据和 mask。
+
+## 怎么工作
+
+<SftLossMaskFigure />
+
+$$
+L_{\text{SFT}} = -\frac{1}{|R|}\sum_{t \in R} \log P_\theta\left(y_t \mid x,\, y_{<t}\right)
+$$
+
+$$
+\text{label}_t = \begin{cases} y_t & t \in R \;(\text{回答，含结束符}) \\ -100 & t \in \text{prompt} \end{cases}
+$$
+
+一条样本先按模型自己的 chat template 拼成一行：`<|user|>` 指令 `<|assistant|>` 回答 `<|end|>`。特殊 token 告诉模型谁在说话、回答到哪里结束。训练用什么模板，推理就得用同一个，否则模型面对的是没见过的格式。
+
+拼好后整行做一次前向，和预训练一样，每个位置都对下一个 token 给出一个分布（teacher forcing）。区别只在 labels：prompt 位置换成 −100，cross-entropy 遇到 −100 直接跳过。图里默认就是这样，「短指令、长回答」那条只有回答的 8 个 token 交 loss，平均 0.834。`<|end|>` 也算在回答里：模型要学会什么时候停，漏了它，推理时就会一直往下写。
+
+切到「不 mask」，prompt 的柱子全亮起来，平均 loss 涨到 1.150，其中 59% 来自 prompt。prompt 的 −log p 天生就高，用户会问什么模型本来猜不到，这部分梯度是在教模型模仿用户提问，对回答没有帮助。换到「长 prompt、短回答」更明显：两个回答 token 只占 loss 的 3%，真正要学的信号几乎被淹没。
+
+平均是除以计入的 token 数。一个 batch 里回答有长有短，按 token 平均等于长回答权重更大；有的实现先在样本内平均、再跨样本平均，两种做法对长短回答的偏好不同，换框架时 loss 数值对不上常常是这个原因。多轮对话同理：只有 assistant 的轮次交 loss，user 和 system 全部 mask。
+
+## 代价与取舍
+
+- **为什么 mask prompt**：prompt 不是模型要产出的东西，算进去会把梯度花在预测用户输入上，稀释回答信号，长 prompt 短回答时最严重。少数研究发现数据很少、指令很长时把 prompt 也算进去略有帮助，但默认做法是 mask。
+- **只会模仿**：SFT 学的是「像示范」，示范里有错它照学，也学不到比示范更好的回答；它从没见过负例，不知道哪种回答更差。这是下一步要用偏好和奖励的原因。
+- **数据质量比数量要紧**：每个 token 都会被逐字学进去，格式不一、答案错误、风格混杂都会原样出现在输出里。几千条精挑细选的样本常常胜过几十万条噪声数据。
+- **会忘**：学习率太大、epoch 太多或数据分布太窄，会损伤预训练学到的通用能力（catastrophic forgetting）。常用对策是小学习率、1 到 3 个 epoch、混入一部分通用数据，或者干脆不动原权重，只训一个增量。
+
+## 再往下看
+
+全量 SFT 一个 8B 模型，光梯度和 Adam 状态就要上百 GB 显存，能不能只训一小部分？下一页 [LoRA](/notes/ml/post-training/lora/)。loss 本身就是 [Softmax 与 Cross-Entropy](/notes/ml/classifiers/softmax-cross-entropy/) 那一页的 −log p，逐位置的写法和[预训练目标](/notes/ml/llms/pretraining-objectives/)里的 GPT 一侧相同。

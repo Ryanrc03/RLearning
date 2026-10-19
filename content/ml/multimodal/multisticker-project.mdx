@@ -1,0 +1,248 @@
+import MsHeadline from "@/components/visualization/ml/multimodal/multisticker/MsHeadline";
+import MsDataFunnel from "@/components/visualization/ml/multimodal/multisticker/MsDataFunnel";
+import MsSignalComposer from "@/components/visualization/ml/multimodal/multisticker/MsSignalComposer";
+import MsArchitecture from "@/components/visualization/ml/multimodal/multisticker/MsArchitecture";
+import MsLossWalkthrough from "@/components/visualization/ml/multimodal/multisticker/MsLossWalkthrough";
+import MsResultsExplorer from "@/components/visualization/ml/multimodal/multisticker/MsResultsExplorer";
+import MsMemoryAblation from "@/components/visualization/ml/multimodal/multisticker/MsMemoryAblation";
+import MsTrainingCurves from "@/components/visualization/ml/multimodal/multisticker/MsTrainingCurves";
+import MsPerMedia from "@/components/visualization/ml/multimodal/multisticker/MsPerMedia";
+import MsSamplePanel from "@/components/visualization/ml/multimodal/multisticker/MsSamplePanel";
+
+# Project：MultiSticker 对话表情包检索
+
+## 摘要
+
+聊天里发表情包，是在一段对话之后挑一张最合适的图。MultiSticker 把它做成一个检索问题：给定最近的对话、这群人以前的对话、以及这次回复想表达的意图，从 6,758 张贴纸（png、gif、webm）里排出用户最可能发的那一张。我们把三路信号分别用 CLIP 的文本塔编码，拼起来经过一个小的检索头投影进 CLIP 的图像空间，用**对整个贴纸库做 softmax 的交叉熵**加一个意图分类辅助损失训练，并比较了只训检索头、以及在文本塔、图像塔或两者上加 LoRA 的五种设置。在 U-Sticker 上，冻结 CLIP 的 Exact Recall@30 只有 0.28%，我们最好的模型（dual LoRA）达到 13.15%；去掉检索到的对话记忆，同一个模型的 Exact Recall@30 从 12.63% 掉到 4.12%，记忆单独贡献约 3 倍。
+
+代码在 [Ryanrc03/MultiSticker](https://github.com/Ryanrc03/MultiSticker)（COMP 646 期末项目）。下面的数字全部来自仓库里 medium 规模那次运行的结果文件。
+
+<MsHeadline />
+
+<figure className="ms-figure-img">
+  <img src="/projects/multisticker/figure1.jpg" alt="MultiSticker 总览：左边是一段 U-Sticker 真实对话和它之前的 session，中间是可用的三路信息（最近上下文、检索到的记忆、回复意图）和检索模型，右边是用户真发的贴纸和模型排出的前 5 张。" loading="lazy" />
+  <figcaption>图 1（仓库 README）：一段真实对话 → 三路信息 → 排好序的贴纸面板。</figcaption>
+</figure>
+
+## 1 引言
+
+看图 1 左边那段对话：Bob 抱怨了两句，Alice 回了一个「well...」，接下来她发了一张两只小动物抱在一起的贴纸。为什么是这张？光看这几句很难说，她可能在无奈，也可能在调侃。这个任务难在五个地方：
+
+- **只有一个正例。** 每个样本只知道用户发了哪一张；库里语气相同、只是画风不同的几十张，按指标都算错。
+- **贴纸表达的是语气，不是字面内容。** 图里通常没有一个字能和上下文对上，靠文字匹配找不到。
+- **上下文又短又脏。** 真实群聊里有机器人消息（「#USER_ID has increased your reputation」）、只发贴纸不说话的回合、俄语和英语混着聊。
+- **三种格式。** 静态 png、动图 gif、短视频贴纸 webm 都在同一个库里。
+- **人和人习惯不同。** 同样是调侃，不同的群偏爱不同的贴纸套装。
+
+这个项目做了三件事：
+
+1. **三路信号的 query。** 除了最近的对话，再加上从这群人以前的 session 里**检索**到的记忆，以及 LLM 离线写好的回复意图。
+2. **一个简单的检索器和训练目标。** 三路 CLIP 文本向量拼接后投影进图像空间，对全库做 softmax 交叉熵，外加一个意图分类辅助损失（第 4.3 节）。
+3. **五种微调方式的系统比较。** 冻结 CLIP、只训检索头、文本塔 LoRA、图像塔 LoRA、两边都 LoRA，同一份数据、同一个损失，只改「哪些参数能动」（第 4.4 节）。
+
+## 2 背景
+
+**CLIP。** 一个双塔模型：图像塔和文本塔各自把输入编码成一个 512 维向量，在 4 亿对图文上用对比损失训练，让配对的图和文在同一个空间里靠近。两座塔之间没有交互，所以贴纸库可以提前编码好。结构见 [CLIP 对比学习](/notes/ml/multimodal/clip-contrastive-learning/) 的「模型结构」一节。
+
+**LoRA。** 微调大模型时不动原来的权重 $W$，只在旁边加一个低秩增量：$h = Wx + \tfrac{\alpha}{r} BAx$，$B$ 是 $d_{\text{out}} \times r$，$A$ 是 $r \times d_{\text{in}}$，$r$ 远小于 $d$。原理和 rank 怎么选见 [LoRA：只学一个低秩增量](/notes/ml/post-training/lora/)。
+
+**检索指标。** 每个样本只有一个正例，所以 Recall@K 就是「答案在不在前 K 名」，见 [检索的 P@30、Recall@30 与 group P@1](/notes/ml/recsys/retrieval-precision-at-k/)。
+
+## 3 任务与数据
+
+**任务定义。** 一个样本是一次「发贴纸」：输入是最近的上下文 $c$、这个对话之前的若干个 session $H$、以及这次回复的意图描述 $i$；输出是对贴纸库 $\mathcal{S} = \{1, \dots, 6758\}$ 的一个排序；标签是用户真发的那一张 $y \in \mathcal{S}$。
+
+一个样本在数据里长这样（就是图 1 那条）：
+
+| 字段 | 内容 |
+| --- | --- |
+| context_text | Bob: I would prefer this be more common because I run into this exact thing quite often \|\| Alice: yeah \|\| Bob: i just use a flag because it's more obvious to me \|\| Alice: well... |
+| memory_text | A user shared a quote about TF2 engineers. \|\| Another mentioned confusing F-Droid with F-List. \|\| There were detections of a link and offensive content. |
+| intent_text | humor_teasing: The reply is a playful joke, likely a sticker with a humorous face or a funny meme. |
+| label | 用户真发的那张贴纸的 id（库里 6,758 张之一） |
+
+<MsDataFunnel />
+
+切分有两个讲究。第一，按时间：每个文件里前 90% 的 session 做训练，后 10% 做验证，验证的对话永远发生在训练之后。第二，记忆只能来自当前 session **之前**的 session（代码里是 `sessions[:session_index][-8:]`），同一段对话的后文不会漏进记忆。
+
+## 4 方法
+
+### 4.1 三路信号
+
+<MsSignalComposer />
+
+三路都是文本，都过同一个 CLIP 文本塔，各得一个 512 维向量。记忆和意图是离线准备的：每个 session 的摘要、每个样本的意图，都提前用 Qwen 32B（GPTQ 量化版）批量写好存成 JSONL；记忆检索用 multilingual-E5-small 给摘要和当前上下文各算一个向量，在之前最多 8 个 session 里取余弦相似度最高的 3 条。训练和评估时不再调用 LLM。
+
+### 4.2 检索器
+
+<MsArchitecture />
+
+记三路文本的 CLIP 向量为 $e_{\text{ctx}}, e_{\text{mem}}, e_{\text{int}} \in \mathbb{R}^{512}$（各自 L2 归一化），第 $j$ 张贴纸的 CLIP 图像向量为 $v_j$（动图逐帧编码后取平均，再归一化）。检索头是一个两层 MLP：
+
+$$
+q = \operatorname{normalize}\big(W_2\,\operatorname{GELU}(W_1\,\operatorname{LN}([\,e_{\text{ctx}};\ e_{\text{mem}};\ e_{\text{int}}\,]))\big),\qquad
+s_j = q^\top v_j
+$$
+
+$W_1$ 是 1536 → 512，$W_2$ 是 512 → 512，一共约 105 万参数。$s_j$ 是 query 和第 $j$ 张贴纸的余弦相似度，按它从大到小排就是输出。
+
+### 4.3 训练目标与损失
+
+训练要做的事只有一句话：**让用户真发的那张贴纸，在全库 6,758 张里的概率尽量大。**把相似度除以温度 $\tau = 0.07$ 当 logit，对整个库做 softmax，取答案那一项的负对数：
+
+$$
+\mathcal{L}_{\text{ret}} = -\log \frac{e^{s_y/\tau}}{\sum_{j=1}^{6758} e^{s_j/\tau}} = \underbrace{\log \sum_{j=1}^{6758} e^{s_j/\tau}}_{\text{全库}} - \frac{s_y}{\tau}
+$$
+
+再加一个辅助任务：检索头的输出 $q$ 接一个线性分类器，预测答案贴纸属于哪个**意图组** $g_y$（这张贴纸在训练集里最常被打上的意图标签）。总损失是
+
+$$
+\mathcal{L} = \mathcal{L}_{\text{ret}} + 0.2 \cdot \big(-\log p(g_y \mid q)\big)
+$$
+
+辅助任务的作用是逼 $q$ 先把语气分对，再在同一组里找具体那张。
+
+<MsLossWalkthrough />
+
+**例 1：瞎猜是多少 loss。** 如果模型对 6,758 张一视同仁，每张概率 1/6758，loss 就是 $\log 6758 = 8.82$。head_only 第 5 个 epoch 的平均训练 loss 是 7.03，对应 $p(\text{答案}) \approx e^{-7.03} = 0.00088$，大约是瞎猜的 6 倍。这个数看起来很小，但已经足够让答案常常进前 30。
+
+**例 2：排第一了，loss 为什么还很大。** 在上图里把 $s_{\text{gold}}$ 拖到 0.45：答案已经排第 1，可 $p(\text{答案})$ 只有约 0.4%，loss 还有 5.5。原因是分母里有 6,757 项，每张负例只分到一点点概率，加起来仍是大头。全库 softmax 不满足于「排第一」，它要求答案和其他贴纸拉开足够大的距离。这也解释了为什么训练 loss 降得很慢，Recall 却涨得很快。右边那条 loss 曲线几乎是直线，也是同一个原因：分母被 6,757 张负例主导，拖动答案时它几乎不变，于是 loss ≈ 常数 − $s_{\text{gold}}/\tau$，答案的相似度每涨 0.07，loss 就少 1。
+
+**例 3：梯度往哪推。** 对每个相似度求导：
+
+$$
+\frac{\partial \mathcal{L}_{\text{ret}}}{\partial s_j} = \frac{1}{\tau}\big(p_j - \mathbb{1}[j = y]\big)
+$$
+
+答案那一项是 $(p_y - 1)/\tau \approx -14.3$：被往上拉；每张负例是 $p_j/\tau$：按自己当前的概率被往下压，越像答案的负例被压得越狠。和 CLIP 用 batch 里别人的文字当负例不同，这里每一步都和**全库**比，正好是推理时要做的事；代价是整个贴纸库的向量要放在显存里。
+
+### 4.4 LoRA：同一个损失，改的是「哪些参数能动」
+
+五种设置用的是**同一个损失** $\mathcal{L}$，区别只在优化变量 $\theta$：
+
+$$
+\min_{\theta}\ \mathbb{E}_{(c, H, i, y)}\big[\mathcal{L}(\theta)\big],\qquad
+e = f_{\text{text}}(\,\cdot\,;\ W_0 + \Delta W_{\text{text}}),\quad
+v = f_{\text{img}}(\,\cdot\,;\ W_0 + \Delta W_{\text{img}})
+$$
+
+| 设置 | 能动的参数 $\theta$ | 每一步要重新算什么 | 可以缓存什么 | 每个 epoch |
+| --- | --- | --- | --- | --- |
+| direct_clip | 无（不训练，query 只用上下文） | — | 全部 | — |
+| head_only | 检索头 + 意图分类头 | 只有检索头 | 三路文本向量、整个贴纸库 | 2.6 秒 |
+| text_lora | 头 + 文本塔里的 $\Delta W_{\text{text}}$ | 这一批的三路文本要带梯度重新编码 | 整个贴纸库 | 1.8 分钟 |
+| image_lora | 头 + 图像塔里的 $\Delta W_{\text{img}}$ | 这一批的答案贴纸要带梯度重新编码（动图最多 4 帧） | 文本向量；贴纸库每个 epoch 开头重编一次 | 3.0 小时 |
+| dual_lora | 头 + 两边的 $\Delta W$ | 两边都要重算 | 贴纸库每个 epoch 开头重编一次 | 3.1 小时 |
+
+每个 $\Delta W = \tfrac{\alpha}{r} BA$，加在每一层的 `attn.out_proj`、`mlp.c_fc`、`mlp.c_proj` 上，$r = 8$、$\alpha = 16$。优化器是 AdamW，分两组：检索头 lr 1e-3、weight decay 1e-4；LoRA lr 1e-4、不加 weight decay。
+
+**例 4：一层 LoRA 有多少参数。** 文本塔某一层的 `mlp.c_fc` 是一个 2048 × 512 的矩阵，冻结的 $W_0$ 有 1,048,576 个参数。LoRA 加的是 $B$（2048 × 8）和 $A$（8 × 512），一共 20,480 个，约占 2%。前向时这一层算的是 $W_0 x + 2 \cdot B(Ax)$（$\alpha / r = 2$）。$B$ 初始化为 0，所以第 0 步的模型和冻结 CLIP 一模一样：所有 LoRA 设置都从 head_only 的起点出发，只是多了一些能动的方向。
+
+**例 5：梯度怎么流到 LoRA 上。** 在上面的结构图里勾选「显示反向传播」。
+
+- **text_lora**：$\partial\mathcal{L}/\partial q$ 先流过检索头，再分成三份流回 $e_{\text{ctx}}, e_{\text{mem}}, e_{\text{int}}$。三路文本过的是同一个文本塔、同一套 LoRA，三份梯度在 $\Delta W_{\text{text}}$ 上相加。它学的是「把这类对话编码成更靠近它常配的贴纸的向量」。
+- **image_lora**：梯度从 $s_j$ 流到贴纸向量 $v_j$，但只有这一批的答案贴纸是带梯度重新编码的；其余 6,000 多张用的是 epoch 开头算好的旧向量，在这一步是常数。所以它学的是「把每张答案贴纸往它常被配的那些 query 挪」，负例这一步不动。副作用是库在一个 epoch 内逐渐变旧，这也是逐 epoch 验证曲线偏低的原因（第 5.3 节）。
+- **dual_lora**：两条路都有。
+
+## 5 实验
+
+**设置。** 训练 30,000 条（对得上库的 28,819 条），验证 4,998 条，贴纸库 6,758 张；OpenCLIP ViT-B-32（laion2b_s34b_b79k）；5 个 epoch；batch 256（head_only）或 96（LoRA）；seed 42。
+
+**指标。** **Exact R@K**：答案在不在前 K 名，单正例时它同时是 Hit@K 和 Recall@K，MRR 也等于 MAP。**Group R@K**：前 K 名里有没有任何一张和答案属于同一个意图组。前者问「找没找到那一张」，后者问「语气对不对」。
+
+### 5.1 五种训练方式
+
+**想知道什么。** 冻结的 CLIP 能做到什么程度？只训一个小头够不够？再加 LoRA 值不值？
+
+**怎么做。** 五种设置用同一份数据、同一个验证集、同样的记忆设置，只改第 4.4 节表里的 $\theta$。
+
+**预期会看到。** 训练会大幅拉高 Exact；Group 本来就高，涨不了多少。
+
+<MsResultsExplorer />
+
+**为什么。** 冻结 CLIP 的 Group R@30 有 95.9%，Exact R@30 却只有 0.28%：CLIP 学的是「图和描述它的话」，能判断一张贴纸大概是什么情绪，却分不清同一情绪下几十张贴纸里这群人会挑哪张。这种偏好只能从聊天数据里学，所以哪怕只训一个约 105 万参数的头，Exact R@30 也从 0.28% 跳到 12.6%。再加 LoRA 的增益就小得多（最多 +0.5 个百分点），还会让 Group R@1 掉下去。
+
+**一个例子。** 实验 5 里的第一条 Finance 样本：冻结 CLIP 的排序没有记录，但 head_only 把答案排到第 70，dual_lora 排到第 14。
+
+### 5.2 对话记忆值多少
+
+**想知道什么。** 「检索到的历史记忆」到底有没有用，还是只是多喂了一段文本？
+
+**怎么做。** 同一个 head_only 模型跑两遍，唯一的区别是记忆那一路换成字面上的 "memory disabled"。冻结 CLIP 只读上下文，拿来当对照。
+
+**预期会看到。** 如果记忆有用，Exact 应该明显掉；冻结 CLIP 的数字应该不动。
+
+<MsMemoryAblation />
+
+**为什么。** 记忆告诉模型「这群人平时聊什么、用什么语气」，这正是从眼前三五句里看不出来、却决定挑哪一套贴纸的信息。Group 指标几乎不动，说明粗粒度的情绪光看上下文就够；记忆帮的是从「该发个开心的」走到「该发这群人常用的那张开心的」。
+
+**一个例子。** 同一条 Finance 样本，没有记忆时答案排第 1,369，加上记忆排第 70。另一条 Finance 样本从 1,869 到 391。
+
+### 5.3 训练曲线与代价
+
+**想知道什么。** 不同设置训练起来是什么样子？效果差一点点，代价差多少？
+
+**怎么做。** 看每个 epoch 的训练 loss、验证 Exact R@30、Group R@30，以及每个 epoch 的耗时。
+
+**预期会看到。** 能缓存向量的设置（head、text LoRA）应该快得多。
+
+<MsTrainingCurves />
+
+**为什么。** 慢的根源是贴纸库：head_only 和 text LoRA 时图像塔不动，6,758 张贴纸（包括所有动图帧）只编码一次就能缓存；一旦图像塔有 LoRA，每个 epoch 开头要重编整个库，每一步还要把这一批的答案贴纸带梯度重编。2.6 秒对 3 小时，换来的 Exact R@30 只多了半个百分点。
+
+### 5.4 按贴纸格式拆开
+
+**想知道什么。** 三种格式难度一样吗？
+
+**怎么做。** 把验证集按答案的格式拆成 png、gif、webm，分别算指标。
+
+**预期会看到。** 动图信息更多，但帧平均会把动作抹掉，可能更难。
+
+<MsPerMedia />
+
+**为什么。** webm 是最难的一类：短视频贴纸靠动作表达语气，帧向量一平均，动作就没了。
+
+### 5.5 一条一条看
+
+<MsSamplePanel />
+
+把聚合指标摊回样本上，有两件事很清楚。第一，Exact 没中不代表推荐得差：好几条样本的前 5 张全部同组，用户在面板上大概能找到合适的，只是不是他真发的那张。第二，模型之间的差别在单条样本上很大：第三条 Media Sharing 样本，head_only 排第 1,155，dual_lora 排第 37。
+
+## 6 讨论
+
+- **冻结 CLIP 懂语义，不懂偏好。** Group R@30 已经 95.9%，Exact R@30 只有 0.28%。项目的增益几乎都来自「学这份数据里的偏好」。
+- **记忆是最划算的一步。** 不加参数、不加训练时间，同一个头的 Exact R@30 × 3.07。
+- **只训头就拿到了大部分收益。** head_only 12.6%，最好的 dual LoRA 13.15%；后者每个 epoch 贵 4,000 多倍。
+- **想要排序最准选 image_lora，想要面板最稳选 dual_lora。** image_lora 的 Exact R@5 和 MRR 最高；dual_lora 的 Exact R@30 和 Group R@5 最高，前五张里最容易有一张语气对得上。
+- **训得越狠，Group R@1 越低。** dual_lora 的 Group R@1 只有 62.8%，比冻结 CLIP 还低：追求「那一张」会牺牲第一名的语气稳定性。
+
+## 7 局限与下一步
+
+- **单正例低估了效果。** 同组的其他贴纸也可能让用户满意，Exact 全记 0。可以标多正例，或者把 Group 指标当主指标。
+- **Group 指标依赖 LLM 打的意图标签。** 标签错了，指标也跟着错；意图组又是多数投票来的，同一张贴纸被用在多种语气里时会被压成一种。
+- **验证和训练来自同一批群。** 按时间切避免了泄露，但没测对全新的群能不能泛化。
+- **webm 帧平均太粗。** 换成时序模型（比如帧间注意力）是最直接的改进点。
+- **image LoRA 的负例不更新。** 一个 epoch 内库是旧的，负例只在 epoch 开头被重编；更频繁地刷新库，或者用 momentum encoder 维护库，可能让 image 侧的训练更有效。
+- **只有一个 seed、没有独立测试集。** 训练过的四种设置之间差距不到 1.3 个百分点，可能落在随机波动里。
+
+## 附录 A：面试怎么讲
+
+**30 秒版本。** 「我们做的是对话里的表情包检索：给一段聊天，从 6,758 张贴纸里排出用户会发的那张。query 侧把最近对话、用 E5 从历史 session 里检索的记忆、LLM 生成的回复意图三路文本用 CLIP 编码后拼起来，过一个 MLP 投影到 CLIP 图像空间，和全库做点积，用全库 softmax 交叉熵加一个意图分类辅助损失训练。冻结 CLIP 的 Exact Recall@30 只有 0.3%，我们的模型到 13.2%；消融显示对话记忆单独贡献了约 3 倍。」
+
+可能的追问：
+
+- **训练目标是什么？** 全库 softmax 交叉熵：让答案贴纸在 6,758 张里的概率最大，再加 0.2 倍的意图组分类损失。所有设置都是这个损失，LoRA 只改哪些参数能动。
+- **为什么对全库做 softmax，不用 in-batch 负例？** 库只有 6,758 张，放得进显存；全库 softmax 和推理完全一致。库再大一个数量级就要换成采样负例，或者 ANN 检索加重排。
+- **LoRA 加在哪、为什么从 head_only 的起点出发？** 加在每层的 out_proj、c_fc、c_proj 上，r = 8；$B$ 初始化为 0，所以开训时等于冻结 CLIP。
+- **image LoRA 为什么那么慢、收益又小？** 图像塔一动，贴纸库就不能缓存，每个 epoch 要重编整个库；而且每一步只有答案贴纸有梯度，负例是旧向量。
+- **为什么 Group R@30 那么高，Exact 那么低？** 意图组数量远小于贴纸数，前 30 名里碰到一张同组的很容易；精确那一张是 6,758 选 1。
+- **记忆怎么防泄露？** 只从当前 session 之前的 session 里检索，验证集在时间上排在训练集之后。
+- **如果要上线？** 贴纸向量离线算好建索引，query 侧只有三次文本编码加一个 MLP；记忆摘要可以在每个 session 结束时异步生成，意图可以用小模型蒸馏替代 32B 的 LLM。
+
+## 参考与相关页面
+
+- [CLIP 对比学习](/notes/ml/multimodal/clip-contrastive-learning/)：双塔结构、对比损失、temperature。
+- [LoRA：只学一个低秩增量](/notes/ml/post-training/lora/)：$W + BA$、rank 怎么选。
+- [Context Engineering](/notes/ml/llm-engineering/context-engineering/)：记忆检索属于「往上下文里放什么」。
+- [检索的 P@30、Recall@30 与 group P@1](/notes/ml/recsys/retrieval-precision-at-k/)：指标定义。
+- Radford et al. (2021), *Learning Transferable Visual Models From Natural Language Supervision*；Hu et al. (2021), *LoRA: Low-Rank Adaptation of Large Language Models*。
