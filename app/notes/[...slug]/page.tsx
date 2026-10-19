@@ -25,6 +25,7 @@ import DesignCache from "@/content/systems/design/cache.mdx";
 import DesignSharding from "@/content/systems/design/sharding.mdx";
 import DesignDataModeling from "@/content/systems/design/data-modeling.mdx";
 import DesignApi from "@/content/systems/design/api.mdx";
+import DesignAbPlatform from "@/content/systems/design/ab-testing-analytics-platform.mdx";
 import Serverless from "@/content/systems/backend/serverless.mdx";
 import AgentLoop from "@/content/ai-infra/agent-harness/agent-loop.mdx";
 import ToolsPermissionsHooks from "@/content/ai-infra/agent-harness/tools-permissions-hooks.mdx";
@@ -129,6 +130,7 @@ const noteComponents = {
   "systems/design/sharding": DesignSharding,
   "systems/design/data-modeling": DesignDataModeling,
   "systems/design/api": DesignApi,
+  "systems/design/ab-testing-analytics-platform": DesignAbPlatform,
   "systems/backend/serverless": Serverless,
   "ai-infra/agent-harness/agent-loop": AgentLoop,
   "ai-infra/agent-harness/tools-permissions-hooks": ToolsPermissionsHooks,
@@ -235,7 +237,7 @@ export default async function NotePage({ params }: { params: Promise<{ slug: str
           <p className="article-description">{note.description}</p>
           <div className="article-meta"><span className={`note-status status-${note.status}`}><span />{note.status === "growing" ? "Growing" : note.status === "stable" ? "Stable" : "Seed"}</span><span><Icon name="calendar" /><time dateTime={note.updated}>{note.updated.replaceAll("-", ".")}</time></span><span><Icon name="clock" />约 {note.readingMinutes} 分钟</span></div>
         </header>
-        <article className="prose"><Content components={{ h1: () => null }} /></article>
+        <article className={note.layout === "case-study" ? "prose prose-case" : "prose"}><Content components={{ h1: () => null }} /></article>
         {note.series && (prev || next) && (
           <nav className="series-nav" aria-label={`系列：${note.series.title}`}>
             {prev ? <Link className="series-link" href={`/notes/${prev.slug}/`}><small>← 上一篇 · {note.series.title}</small><span>{prev.title}</span></Link> : <span />}

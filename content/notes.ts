@@ -12,6 +12,8 @@ export type NoteEntry = {
   tags: string[];
   /** Notes in the same series get previous/next links in reading order. */
   series?: { id: string; title: string; order: number };
+  /** "case-study" switches the article to the hand-drawn case-study styling (styles/sketch.css). */
+  layout?: "case-study";
 };
 
 // Published notes share this metadata across navigation, search, and article pages.
@@ -1046,6 +1048,21 @@ export const noteEntries: NoteEntry[] = [
     status: "growing",
     readingMinutes: 9,
     tags: ["API", "REST", "GraphQL", "RPC", "pagination", "interactive"],
+  },
+  {
+    slug: "systems/design/ab-testing-analytics-platform",
+    title: "从 Excel + Notebook 到 A/B 实验分析平台",
+    description:
+      "一个案例走完一个轻量内部数据平台：上游 API → 清洗 → PostgreSQL ↔ FastAPI ↔ React。点架构节点看职责，选实验和日期模拟一次请求的 SQL、JSON 和 p-value；schema、索引、部署分工和面试追问。",
+    categoryId: "systems",
+    category: "Systems",
+    section: "System Design",
+    created: "2026-10-19",
+    updated: "2026-10-19",
+    status: "growing",
+    readingMinutes: 16,
+    tags: ["case study", "PostgreSQL", "FastAPI", "React", "A/B test", "SQL", "index", "interactive"],
+    layout: "case-study",
   },
   {
     slug: "systems/backend/serverless",

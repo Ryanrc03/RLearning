@@ -34,3 +34,5 @@ import DataModelViz from "@/components/visualization/design/DataModelViz";
 ## 面试里怎么用
 
 系统设计题画完高层架构后，主动列出核心实体和它们的主键、外键，三五张表就够；然后说出最频繁的那个查询，以及为它建的索引；最后说数据库选型的理由，比如“订单要事务，用 PostgreSQL；浏览计数量大且能容忍延迟，放 Redis”。面试官要看的是你从访问模式推出设计，而不是背出所有数据库的名字。
+
+一个完整的例子：[从 Excel + Notebook 到 A/B 实验分析平台](/notes/systems/design/ab-testing-analytics-platform/)，从表格型数据推出 PostgreSQL、两张表和一个复合索引。

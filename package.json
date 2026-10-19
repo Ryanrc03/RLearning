@@ -20,7 +20,8 @@
     "react-dom": "latest",
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
-    "remark-math": "^6.0.0"
+    "remark-math": "^6.0.0",
+    "roughjs": "^4.6.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "latest",

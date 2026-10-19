@@ -1,0 +1,363 @@
+import Callout, { RequirementList } from "@/components/visualization/sketch/Callout";
+import CodeBlock from "@/components/visualization/sketch/CodeBlock";
+import DeliveryMapViz from "@/components/visualization/design/ab-platform/DeliveryMapViz";
+import StepStrip from "@/components/visualization/design/ab-platform/StepStrip";
+import EntitiesSketch from "@/components/visualization/design/ab-platform/EntitiesSketch";
+import HighLevelDesignViz from "@/components/visualization/design/ab-platform/HighLevelDesignViz";
+import RequestFlowViz from "@/components/visualization/design/ab-platform/RequestFlowViz";
+import OwnershipSketch from "@/components/visualization/design/ab-platform/OwnershipSketch";
+
+# 从 Excel + Notebook 到 A/B 实验分析平台
+
+**一句话：** 原来每个人从上游 API 拉数据，在 Excel 和 Notebook 里各自清洗、各自算 p-value。现在数据自动进 PostgreSQL，FastAPI 用同一套逻辑查询和做统计，React 看板按实验和日期过滤。20 多个实验的分析因此用的是同一份数据、同一种算法。
+
+<Callout tone="example" title="关于这篇案例">
+业务背景是真实的。**表名、字段、索引、Endpoint、指标和所有数字都是为教学虚构的**，不对应任何公司的内部系统。另外，这是一个实验**分析**平台，不负责实验**分流**：用户被分到 control 还是 treatment，是上游业务系统决定的。
+</Callout>
+
+## 背景：旧流程哪里不行
+
+上游业务 API 每分钟更新一次数据。旧流程分析一个实验，要先手动取数，再在自己的 Notebook 里清洗，用公式算指标，最后把截图贴进文档。
+
+| | Excel + Notebook | 平台化之后 |
+| --- | --- | --- |
+| 取数据 | 每人手动调 API 或导出文件 | 定时任务统一拉取，记下拉到哪一分钟 |
+| 清洗 | 每个 Notebook 各写一版 | 一段代码，每次跑的规则都一样 |
+| 存储 | 散在各人电脑上的 `.xlsx` / `.csv` | PostgreSQL 一份 |
+| 统计 | 公式 + 复制粘贴，容易算错列 | 后端一个函数，有单元测试 |
+| 换日期范围 | 重跑整个 Notebook | 看板上拖一下，几百毫秒 |
+| 复现 | “你那份数据是哪天导出的？” | 同一个 URL，同一张看板 |
+
+Excel 和 Notebook 本身没错，探索新问题时它们最快。问题在于**同一件事被重复做了很多遍**，而且每次都可能做得不一样。平台化就是把重复的部分固定成系统，把探索留给 Notebook。
+
+下面按系统设计面试的 Delivery Framework 走一遍这个设计。
+
+<DeliveryMapViz />
+
+## Step 1 · Requirements
+
+<StepStrip n={1} />
+
+功能需求写成“用户应该能…”，挑最核心的三条；非功能需求尽量带数字，并且说清楚是系统的哪一部分。
+
+<RequirementList kind="functional" items={[
+  { id: "FR1", text: "上游的分钟级数据能自动、可靠地进入平台，不需要人手动导出。", detail: "包括清洗、校验和去重。" },
+  { id: "FR2", text: "用户能选一个实验和一段日期，看到两组的核心指标和每日趋势。", detail: "20 多个实验，每个都能看。" },
+  { id: "FR3", text: "用户能看到统计结论：差值、置信区间、p-value，以及分流是否正常。", detail: "所有人看到的是同一种算法算出的同一个数。" },
+]} />
+
+<RequirementList kind="non-functional" items={[
+  { id: "NFR1", text: "数据新鲜度：上游更新后，看板能在几分钟内看到。", target: "< 10 min" },
+  { id: "NFR2", text: "看板查询要快，换个日期范围马上出结果。", target: "p95 < 1 s" },
+  { id: "NFR3", text: "结果一致、可复现：同样的实验和日期区间，任何人、任何时候看到的数字都一样。", detail: "这条比可用性更重要：宁可晚一点，也不能给出两个版本的结论。" },
+  { id: "NFR4", text: "只在公司内网使用，接入统一登录；不在代码里出现任何凭据。", target: "internal only" },
+]} />
+
+<RequirementList kind="out" items={[
+  { id: "—", text: "随机分流：由上游业务系统负责。" },
+  { id: "—", text: "秒级实时流处理：分钟级更新、分钟级可见已经够用。" },
+  { id: "—", text: "通用 BI：平台只回答“这个实验有没有效果”。" },
+]} />
+
+<Callout tone="tip" title="需要估算容量吗？">
+只在会影响设计时才算。这里快速算一下：20 多个实验 × 2 组 × 每天 1440 分钟 ≈ 每天 6 万行原始快照，一年两千多万行；按天汇总后每年只有约 1.5 万行。结论是**单机 PostgreSQL 足够**，不需要分片，也不需要专门的大数据组件。这句话本身就是设计决定。
+</Callout>
+
+## Step 2 · Core Entities
+
+<StepStrip n={2} />
+
+先只列名词，不写全字段。字段在 Step 5 画到数据库旁边时再补。
+
+- **Experiment**：一个实验，带名称、主指标、起止时间、状态。
+- **Variant**：实验里的一组（control / treatment），带预期分流比，后面检查分流是否正常时要用。
+- **Metric Snapshot**：上游给的一条分钟级原始数据，原样保存，方便回溯和重算。
+- **Daily Stats**：清洗后按（实验，组，日期）汇总的一行，是看板真正查询的表。
+
+<EntitiesSketch />
+
+## Step 3 · API
+
+<StepStrip n={3} />
+
+用户是浏览器里的看板，默认用 REST。资源用复数名词，筛选条件放在 query string 里。三个接口刚好对应 FR2 和 FR3：
+
+<CodeBlock lang="http" title="api.http · 教学示例">{`
+GET /api/experiments?status=running
+  -> Experiment[]
+
+GET /api/experiments/{experiment_id}/summary?start_date=2026-09-01&end_date=2026-09-07
+  -> { variants: [...], absolute_diff, relative_lift, ci95, p_value, srm_p_value }
+
+GET /api/experiments/{experiment_id}/daily?start_date=...&end_date=...
+  -> [{ date, control_rate, treatment_rate }, ...]
+`}</CodeBlock>
+
+几个取舍：
+
+- **为什么全是 GET。** 看板只读，FR1 的写入由后台任务完成，不对外暴露写接口。GET 可以安全重试，也方便以后加缓存。
+- **为什么 summary 和 daily 分开。** summary 每次都要算检验，daily 只是画线。分开后，各自可以单独优化和缓存。
+- **用户身份从哪里来。** 从统一登录的 token 里来，而不是从参数里来。
+
+## Step 4 · Data Flow
+
+<StepStrip n={4} />
+
+这是一个数据处理系统，值得把两条路径分别列出来。
+
+**写入路径**（后台定时任务，对应 FR1）：
+
+1. 从水位线开始，向上游 API 拉取新的分钟级数据。
+2. 原样写入 `raw_snapshots`。
+3. 清洗：类型转换、去重，检查 `converted_users ≤ users` 和日期是否在实验期内。
+4. 按（实验，组，日期）汇总，upsert 进 `daily_variant_stats`。
+5. 推进水位线。
+
+**读取路径**（一次 HTTP 请求，对应 FR2 和 FR3）分五步，下面可以逐步模拟。也可以把结束日期选得比开始日期早，看请求在哪一步被挡下。
+
+<RequestFlowViz />
+
+后端代码大致长这样（教学示例，`db.fetch_all` 代表任何一个支持参数化查询的驱动）：
+
+<CodeBlock lang="python" title="app/routes/experiments.py">{`
+from datetime import date
+from fastapi import FastAPI, HTTPException
+
+app = FastAPI()
+
+@app.get("/api/experiments/{experiment_id}/summary")
+def experiment_summary(experiment_id: int, start_date: date, end_date: date):
+    if end_date < start_date:
+        raise HTTPException(422, "end_date must be on or after start_date")
+
+    rows = db.fetch_all(SUMMARY_SQL, {
+        "experiment_id": experiment_id,
+        "start_date": start_date,
+        "end_date": end_date,
+    })
+    if len(rows) != 2:
+        raise HTTPException(404, "experiment or data not found")
+
+    control, treatment = rows                           # ORDER BY variant
+    return two_proportion_summary(control, treatment)   # pure function, unit-tested
+`}</CodeBlock>
+
+<Callout tone="warn" title="绝不用 f-string 拼 SQL">
+`f"... WHERE experiment_id = {experiment_id}"` 会让用户输入变成 SQL 代码，这就是 SQL 注入。参数化查询只在 SQL 里写占位符，值由驱动单独发给数据库。FastAPI 的类型声明（`experiment_id: int`、`start_date: date`）是第一道防线，参数化查询是第二道。
+</Callout>
+
+## Step 5 · High-level Design
+
+<StepStrip n={5} />
+
+按功能需求一条条加组件：FR1 需要一个拉数据的 worker 和一个数据库；FR2 需要一个 API 服务和一个看板；FR3 需要在 API 服务里加一个统计模块。点一下需求，看每条需求用到了哪些组件。
+
+<HighLevelDesignViz />
+
+这张图里最关键的决定，是**统计逻辑放在后端**：
+
+- 放在前端，每个页面都要重写一遍，而且浏览器要拉回所有原始行。
+- 全部写在 SQL 里，z 检验、置信区间写起来很别扭，也很难测试。
+- 放在后端的一个纯函数里，SQL 负责把几十万行缩成两行，Python 负责拿这两行算统计量。这个函数可以单独测试，所有看板共用。
+
+### 为什么选 PostgreSQL
+
+| 数据和查询的特点 | 对选型意味着什么 |
+| --- | --- |
+| 表格型：每行都是“实验、组、时间、几个数字”，列是固定的 | schema 能在写入时用类型、`NOT NULL`、`CHECK` 和外键挡住脏数据 |
+| 核心查询是 过滤 → 聚合 → 关联 | 正好是 `WHERE` + `GROUP BY` + `JOIN` |
+| 量小：汇总表每年约 1.5 万行 | 单机就够，不需要[分片](/notes/systems/design/sharding/) |
+| 团队熟悉，生态成熟 | 驱动、迁移工具、BI 都能直接连 |
+
+### Schema（教学示例）
+
+<CodeBlock lang="sql" title="migrations/001_init.sql">{`
+CREATE TABLE experiments (
+    experiment_id   INTEGER PRIMARY KEY,
+    experiment_key  TEXT    NOT NULL UNIQUE,      -- e.g. checkout_button_copy
+    name            TEXT    NOT NULL,
+    primary_metric  TEXT    NOT NULL,             -- e.g. conversion_rate
+    start_date      DATE    NOT NULL,
+    end_date        DATE,
+    status          TEXT    NOT NULL DEFAULT 'running'
+);
+
+CREATE TABLE variants (
+    experiment_id   INTEGER REFERENCES experiments(experiment_id),
+    variant         TEXT    CHECK (variant IN ('control', 'treatment')),
+    expected_share  NUMERIC NOT NULL DEFAULT 0.5,
+    PRIMARY KEY (experiment_id, variant)
+);
+
+CREATE TABLE daily_variant_stats (
+    experiment_id    INTEGER NOT NULL,
+    variant          TEXT    NOT NULL,
+    metric_date      DATE    NOT NULL,
+    users            INTEGER NOT NULL CHECK (users >= 0),          -- first exposed that day
+    converted_users  INTEGER NOT NULL CHECK (converted_users BETWEEN 0 AND users),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (experiment_id, variant, metric_date),
+    FOREIGN KEY (experiment_id, variant) REFERENCES variants
+);
+
+CREATE INDEX idx_stats_exp_date ON daily_variant_stats (experiment_id, metric_date);
+`}</CodeBlock>
+
+`raw_snapshots` 结构和上游的格式一致，这里省略。选型的一般思路，见[数据建模：先选对数据库，再设计表](/notes/systems/design/data-modeling/)。
+
+## Step 6 · Deep Dives
+
+<StepStrip n={6} />
+
+回到非功能需求，挑四处往深里讲。
+
+### 1. 不漏不重地拉数据（NFR1、NFR3）
+
+上游每分钟更新，拉取任务随时可能失败、超时、被重启。做法是**至少一次拉取 + 幂等写入**：
+
+- 记一个水位线（上次成功拉到的分钟），每次从水位线往后拉，全部写入成功后才推进。失败了就从原水位线重拉，所以不会漏。
+- 写入以主键为准做 upsert。同一段数据拉两次，第二次只是把同一行覆盖一遍，所以不会重。
+
+<CodeBlock lang="sql" title="rollup.sql">{`
+INSERT INTO daily_variant_stats AS s
+       (experiment_id, variant, metric_date, users, converted_users)
+VALUES (%(experiment_id)s, %(variant)s, %(metric_date)s, %(users)s, %(converted_users)s)
+ON CONFLICT (experiment_id, variant, metric_date)
+DO UPDATE SET users           = EXCLUDED.users,
+              converted_users = EXCLUDED.converted_users,
+              updated_at      = now();
+`}</CodeBlock>
+
+注意，汇总时要**从当天全部原始数据重新算出整行再覆盖**，不能写成 `users = s.users + EXCLUDED.users`。累加式的写法一旦重跑就会重复计数。投递语义的一般讨论，见[消息队列](/notes/systems/design/message-queue/)。
+
+### 2. 查询性能：索引和 GROUP BY（NFR2）
+
+看板的核心查询：
+
+<CodeBlock lang="sql" title="summary.sql">{`
+SELECT s.variant,
+       SUM(s.users)           AS users,
+       SUM(s.converted_users) AS converted_users
+FROM daily_variant_stats AS s
+JOIN experiments AS e ON e.experiment_id = s.experiment_id
+WHERE s.experiment_id = %(experiment_id)s
+  AND s.metric_date BETWEEN %(start_date)s AND %(end_date)s
+  AND e.status <> 'archived'
+GROUP BY s.variant
+ORDER BY s.variant;
+`}</CodeBlock>
+
+| 设计 | 为什么 |
+| --- | --- |
+| 索引 `(experiment_id, metric_date)` | 等值列放前面、范围列放后面，一次索引范围扫描就能拿到这个实验连续的一段 |
+| 不用 `(metric_date, experiment_id)` | 这样会扫过日期区间内所有实验的行，再过滤掉别的实验 |
+| `GROUP BY` 在库里做 | 网络上只传 2 行，不传几百行原始数据 |
+| 查汇总表，不查 raw | 分钟级明细只用于回溯；看板永远查按天汇总的结果 |
+| 先 `EXPLAIN ANALYZE` 再加索引 | 主键 `(experiment_id, variant, metric_date)` 可能已经够用，要看实际的执行计划 |
+
+查询变慢时的排查顺序：先看执行计划有没有走索引，估算行数准不准（不准就 `ANALYZE` 更新统计信息）；再看是不是返回了太多行；最后才考虑预聚合或[缓存](/notes/systems/design/cache/)。
+
+### 3. 统计正确性（NFR3）
+
+数字算错比系统慢更糟。三个最容易错的地方：
+
+- **先求和，再相除。** 总转化率是 `SUM(converted_users) / SUM(users)`，不是每日转化率的平均。每天的人数不一样，简单平均会给人少的日子过多权重。
+- **跨天相加的前提。** `users` 必须按“当天首次进入实验”计数，否则同一个人每天都会被算一次。这要在清洗规则里写清楚。
+- **偷看。** 在上面的模拟器里选“价格按月展示”，只看第一周，p 约等于 0.02，看起来显著；看满 28 天，p 约等于 0.06，反而不显著了。每天看一眼，一显著就停，误判率会远高于 5%。看板应该显示实验计划的结束日期，提前看时给出提示。
+
+另外还有一个系统层面的检查：**SRM（sample ratio mismatch）**。两组人数比应该接近预期的分流比，比如 50/50。如果 SRM 的 p-value 极小，通常说明上游分流或者数据管道出了问题。这时候先别看效果，先查数据。
+
+检验方法的原理见 [A/B Test 与 p-value](/notes/ml/evaluation/ab-test-p-value/)。如果指标是停留时长这类均值，要换成 [Welch t 检验](/notes/ml/evaluation/t-test/)。真实平台用哪种检验，取决于指标定义。
+
+### 4. 部署分工与技术选型
+
+<OwnershipSketch />
+
+应用团队不需要成为运维专家，也不应该绕过公司的安全规范自己搭一套；基础设施团队也不需要知道 p-value 是什么。
+
+| | Excel / Notebook | PostgreSQL + FastAPI + React | MongoDB | 现成 BI 工具 |
+| --- | --- | --- | --- | --- |
+| 上手成本 | 最低 | 中，要写前后端 | 中 | 低，拖拽建图 |
+| 数据一致性 | 每人一份 | 一份，有 schema 约束 | 一份，约束弱 | 取决于底层数据库 |
+| 表格聚合 | 量大就卡 | `GROUP BY` + 索引 | 聚合管道，不如 SQL 自然 | 依赖底层 SQL |
+| 自定义统计 | 最灵活 | Python，可测试 | 同左，要靠后端 | 有限 |
+| 适合 | 一次性探索 | 重复分析的标准化 | 结构多变的文档 | 只看图，不做检验 |
+
+- **为什么不用 MongoDB。** 数据是固定列的表格，查询以聚合和关联为主。文档型数据库的长处（schema 灵活、一次读出嵌套对象）这里用不上，还会丢掉外键和 `CHECK` 约束。
+- **为什么不直接用 BI 工具。** 置信区间、z 检验、首次暴露去重、SRM，在拖拽界面里很难写对，也没法测试。两者可以共存：BI 连同一个 PostgreSQL 做探索，实验结论以平台为准。
+- **平台的代价。** 多了一套系统要维护：schema 迁移、上游字段变化、权限申请都得有人负责。只有两三个实验时，Excel 也许更合适；到了 20 多个实验，重复劳动和结果不一致的成本才明显超过维护成本。
+- **什么时候加组件。** 同一个查询被反复执行时，加缓存；单机装不下时，再考虑分区、分片或列式存储。没有问题的时候不要提前加。
+
+## Interview Questions
+
+从架构一路追问到数据库性能。每题先自己想，再点开看要点。
+
+<details>
+<summary>用两分钟介绍这个系统。</summary>
+
+问题（Excel + Notebook 重复劳动、结果不一致）→ 需求（3 条功能、4 条非功能）→ 架构（worker 写入，PostgreSQL 存储，FastAPI 查询加统计，React 展示）→ 一次请求的五步 → 结果（20 多个实验，同一份数据、同一种算法）。强调这是分析平台，分流在上游。
+</details>
+
+<details>
+<summary>为什么统计逻辑放在后端，而不是前端或 SQL 里？</summary>
+
+前端拿不到也不该拿全部原始数据，而且每个页面都要各写一版；SQL 写统计检验不自然，也难测试。后端的纯函数可以单独做单元测试，SQL 先把数据缩成两行，Python 再算统计量。
+</details>
+
+<details>
+<summary>上游每分钟更新，怎么保证不漏、不重？</summary>
+
+水位线保证不漏：从上次成功的位置往后拉，全部写成功后才推进。主键 upsert 保证不重：重拉只是覆盖同一行。两者合起来就是至少一次拉取加幂等写入，效果上等于恰好一次。另外要注意汇总必须重算整行再覆盖，不能累加。
+</details>
+
+<details>
+<summary>为什么选 PostgreSQL 而不是 MongoDB？</summary>
+
+数据是固定列的表格，查询是过滤加聚合加关联，schema 约束能在写入时挡住脏数据，数据量单机就装得下。MongoDB 的灵活 schema 和嵌套文档在这里用不上。
+</details>
+
+<details>
+<summary>什么是参数化查询？不用会怎样？</summary>
+
+SQL 文本里只写占位符，值由驱动单独发给数据库。如果用字符串拼接，传入 `1; DROP TABLE experiments; --` 就会被当成 SQL 执行，这就是 SQL 注入。参数化查询还能让数据库复用执行计划。
+</details>
+
+<details>
+<summary>看板查询变慢了，怎么排查？</summary>
+
+先 `EXPLAIN ANALYZE`：有没有走索引，估算行数和实际行数差多少（差得多就 `ANALYZE`）。再看索引列的顺序和查询条件是否匹配，以及是否返回了过多的行。最后才考虑预聚合表或缓存。
+</details>
+
+<details>
+<summary>复合索引 (experiment_id, metric_date) 和反过来有什么区别？</summary>
+
+B-tree 先按第一列排序，第一列相同再按第二列。条件是 `experiment_id = ?` 加日期范围时，前者能直接定位到这个实验连续的一段；后者要扫过区间内所有实验的条目。这就是最左前缀原则：等值条件的列放在前面。
+</details>
+
+<details>
+<summary>总转化率为什么先求和再相除？</summary>
+
+对每日比例取简单平均，会给人少的日子和人多的日子同样的权重。`SUM(converted) / SUM(users)` 才是按用户加权的整体转化率。前提是 `users` 按首次进入实验计数，否则跨天相加会重复算人。
+</details>
+
+<details>
+<summary>用户每天打开看板看 p-value，会有什么问题？</summary>
+
+这是偷看（peeking）。每天检验一次、一显著就停，第一类错误率远高于 5%。平台可以显示计划的结束日期和样本量，提前查看时给出提示，或者改用为连续监控设计的序贯检验。
+</details>
+
+<details>
+<summary>实验从 20 个涨到 2000 个，哪里先撑不住？</summary>
+
+先是写入：原始快照每天会有几百万行，拉取和清洗任务要能并行、批量写入。然后是查询：保持看板只查汇总表，原始表按日期分区，老数据归档。访问量大、查询又重复时，加缓存。单机还是撑不住，再按 `experiment_id` [分片](/notes/systems/design/sharding/)或者改用列式存储。顺序是先改查询和表结构，再加组件。
+</details>
+
+<details>
+<summary>你怎么知道看板上的数字是对的？</summary>
+
+分三层。清洗阶段做约束检查；统计函数写单元测试，用已知的输入对已知的 p-value；上线前拿同一份数据和旧 Notebook 的结果逐条对账，每个差异都要解释清楚。另外每次查询都附带 SRM 检查，分流比例异常时先查数据，再看结果。
+</details>
+
+## 小结
+
+这个案例的核心不在用了哪几种技术，而在三处分工：**写入路径和读取路径分开；SQL 做过滤和聚合，Python 做统计；基础设施团队管运行环境，应用团队管数据和逻辑。** 每一层只做一件事，所以接入第 21 个实验时，什么都不用重写。
