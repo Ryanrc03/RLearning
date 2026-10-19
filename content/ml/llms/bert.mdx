@@ -1,0 +1,250 @@
+import MaskedLmViz from "@/components/visualization/ml/llms/bert/MaskedLmViz";
+import ClsFineTuneViz from "@/components/visualization/ml/llms/bert/ClsFineTuneViz";
+import BertVsGptAttentionViz from "@/components/visualization/ml/llms/bert/BertVsGptAttentionViz";
+import PretrainFinetuneFlow from "@/components/visualization/ml/llms/bert/PretrainFinetuneFlow";
+import BertInputEmbeddingViz from "@/components/visualization/ml/llms/bert/BertInputEmbeddingViz";
+import BertEncoderStackViz from "@/components/visualization/ml/llms/bert/BertEncoderStackViz";
+
+# BERT：双向编码器怎样读懂一句话
+
+BERT（Bidirectional Encoder Representations from Transformers，Devlin 等，2018）是一个只用 Transformer **编码器**堆起来的模型：先在没有标注的文本上做"填空"预训练，再在每个具体任务上接一个小头微调。这篇笔记按四个问题走：模型长什么样、损失算在哪、怎样训练、拿它做一次情感分类是什么样；最后和同期的 GPT 放在一起比。它是 [LLMs](/notes/ml/llms/overview/) 这一章的最后一页：前面几页拆开的 attention、Transformer Block 和预训练目标，在这里拼成一个完整的模型。文中的尺寸、超参和分数都来自原论文。
+
+## What is it?
+
+一句话：BERT 是一个把每个词变成"带上下文的向量"的编码器，用**掩码语言模型**（Masked Language Model，MLM）在 33 亿词的无标注文本上预训练，然后用很少的标注数据微调到具体任务。
+
+<PretrainFinetuneFlow />
+
+论文给了两个尺寸：
+
+| | 层数 L | 隐藏维度 H | 注意力头 A | 参数量 |
+| --- | --- | --- | --- | --- |
+| BERT_BASE | 12 | 768 | 12 | 1.1 亿 |
+| BERT_LARGE | 24 | 1024 | 16 | 3.4 亿 |
+
+BERT_BASE 的尺寸是故意选成和 OpenAI GPT（第一代）一样的，方便比较。两者的差别不在大小，而在**注意力能看哪边**和**预训练预测什么**。
+
+## Why does it exist?
+
+2018 年以前，把词变成向量有两条路，各有一个硬伤：
+
+- **静态词向量**（word2vec、GloVe）：一个词一个向量，"bank" 在河岸和银行里是同一个向量。
+- **上下文表示**：要么只看一边（GPT 从左往右），要么是两个独立的单向模型浅浅地拼在一起（ELMo 的左右两个 LSTM）。
+
+理解类任务需要两边一起看：判断 "it" 指什么、一个问题的答案在段落哪里，左右的词都重要。但标准语言模型做不到真正的双向：如果每个位置既看左又看右，多层堆叠之后每个词会**间接看到自己**，预测自己就成了抄答案。
+
+BERT 的办法是改任务：先把一部分词遮掉，再让模型用剩下的词把它们猜回来。这就是完形填空（cloze），被遮的词不在输入里，所以两边都可以放心看。代价是什么，后面"Trade-offs"一节再说。
+
+## Architecture
+
+### 输入：三个嵌入相加
+
+文本先用 WordPiece 切成子词（词表 3 万），再拼成一条序列：开头放 `[CLS]`，句子之间和末尾放 `[SEP]`。每个位置的输入向量是三个查表结果**逐位相加**：
+
+<BertInputEmbeddingViz />
+
+- `E_token`：词嵌入，30,522 行 × H 列。
+- `E_segment`：只有两行，A 或 B，告诉模型这个词属于第一句还是第二句（问答里是"问题 / 段落"）。
+- `E_position`：位置嵌入，**学出来的**，最多 512 行，所以 BERT 最长只能处理 512 个 token。
+
+相加之后过一次 LayerNorm 和 dropout，就进编码器。
+
+### 编码器层
+
+每一层就是原始 Transformer 的编码器层（零件逐个拆开见 [Attention：Q、K、V](/notes/ml/llms/attention-qkv/) 和 [Transformer Block](/notes/ml/llms/transformer-block/)），BERT_BASE 叠 12 层：
+
+<BertEncoderStackViz />
+
+和原始 Transformer 相比，BERT 只保留编码器：没有 decoder，没有 cross-attention，也**没有因果掩码**。注意力里唯一被遮住的是 padding 位置。每个位置在每一层都能看到整条序列，所以第 12 层出口处每个位置的向量都混进了全句的信息。
+
+### 输出怎么用
+
+编码器输出是一个形状为 `[序列长度, H]` 的矩阵，每行对应一个位置。两种用法：
+
+- **按位置用**：命名实体识别、抽取式问答（预测答案的起止位置）直接在每个位置的向量上接分类器。
+- **按句子用**：`[CLS]` 位置的向量经过一层 $\tanh(W_p h + b_p)$（叫 pooler）作为整句的表示，接分类头。`[CLS]` 本身没有词义，它的向量完全来自注意力汇聚的上下文。
+
+预训练时还有两个头：MLM 头把每个位置的向量先过 dense + GELU + LayerNorm，再乘以**词嵌入矩阵的转置**（和输入共享权重）得到对整个词表的 logits；NSP 头在 pooler 输出上接一个 2 类分类器。微调时这两个头都丢掉。
+
+## Loss functions
+
+### 掩码语言模型（MLM）
+
+每条序列随机选 15% 的 WordPiece 位置作为预测目标，记作集合 M。被选中的位置不是一律换成 `[MASK]`：
+
+| 选中的 15% 里 | 模型看到的输入 | 要预测的 |
+| --- | --- | --- |
+| 80% 换成 `[MASK]` | the cat `[MASK]` on the mat | sat |
+| 10% 换成一个随机词 | the cat apple on the mat | sat |
+| 10% 保持不变 | the cat sat on the mat | sat |
+
+损失是这些位置上对整个词表的交叉熵，**只在 M 里的位置计算**，其余 85% 的位置的输出不进损失：
+
+$$
+L_{\text{MLM}} = -\frac{1}{|M|} \sum_{i \in M} \log p\left(x_i \mid \tilde{x}\right)
+$$
+
+$$
+p\left(\cdot \mid \tilde{x}\right)_i = \operatorname{softmax}\left(E\, g(h_i) + b\right)
+$$
+
+$\tilde{x}$ 是腐蚀后的输入，$h_i$ 是第 12 层在位置 $i$ 的输出，$g$ 是 MLM 头里的 dense + GELU + LayerNorm，$E$ 是和输入层共享的词嵌入矩阵。GPT 和 BERT 的 loss 逐项对照算一遍，见 [预训练目标](/notes/ml/llms/pretraining-objectives/)。
+
+为什么是 80 / 10 / 10 而不是 100% `[MASK]`：`[MASK]` 这个符号只在预训练出现，微调时永远不会出现，两个阶段的输入分布就对不上。留 10% 随机词和 10% 原词，模型就不能只在看到 `[MASK]` 时才认真干活，它必须对**每一个**位置都保持一个好的表示，因为它不知道哪个位置会被要求预测。
+
+<MaskedLmViz />
+
+### 下一句预测（NSP）
+
+问答和自然语言推理都要理解两句话的关系，MLM 不直接教这个。所以预训练时同时做一个二分类：句子 B 有 50% 是语料里 A 的真实下一句（标签 IsNext），50% 从语料里随机抽（NotNext），由 `[CLS]` 位置的 pooler 输出来判断。
+
+$$
+L_{\text{NSP}} = -\log p\left(\text{label} \mid \operatorname{pooler}(h_{\text{[CLS]}})\right)
+$$
+
+总损失就是两项相加：$L = L_{\text{MLM}} + L_{\text{NSP}}$。
+
+后来 RoBERTa 发现，去掉 NSP、只用更长的连续文本做 MLM，下游任务不掉反升。此后的编码器模型大多不再用 NSP。它留下来的东西是 `[CLS]` + 句对格式这套输入约定。
+
+## How is it trained?
+
+### 预训练
+
+| 项目 | 取值 |
+| --- | --- |
+| 数据 | BooksCorpus（8 亿词）+ 英文维基百科（25 亿词，只取正文） |
+| 批大小 | 256 条序列 × 512 token = 每步 12.8 万 token |
+| 步数 | 100 万步，约等于把 33 亿词的语料过 40 遍 |
+| 优化器 | Adam，学习率 1e-4，β₁ = 0.9，β₂ = 0.999，L2 权重衰减 0.01 |
+| 学习率调度 | 前 1 万步线性 warmup，之后线性衰减 |
+| 正则 | 所有层 dropout 0.1 |
+| 激活函数 | GELU |
+| 序列长度 | 前 90% 的步数用 128，最后 10% 用 512 |
+| 硬件 | BASE：16 块 TPU 芯片；LARGE：64 块 TPU 芯片；各 4 天 |
+
+两个细节值得记：
+
+- **先 128 后 512**。注意力的开销随长度平方增长，大部分步数用短序列省算力；最后 10% 切到 512 是为了把 129 到 512 这些位置的位置嵌入学出来。
+- **每步只有 15% 的位置有梯度**。同样读一遍语料，MLM 拿到的监督信号比从左往右的语言模型少得多，所以收敛更慢。论文自己也承认这一点，只是用下游效果证明值得。
+
+### 微调
+
+微调的做法是把预训练好的全部参数当初始值，加上任务需要的最少新参数，然后**所有参数一起**在标注数据上训练。输入格式按任务套到 A / B 两段上：
+
+| 任务 | 输入排布 | 接头的位置 |
+| --- | --- | --- |
+| 单句分类 | `[CLS]` 句子 `[SEP]` | `[CLS]` 向量 → 分类头 |
+| 句对分类 / 推理 | `[CLS]` 句子 A `[SEP]` 句子 B `[SEP]` | `[CLS]` 向量 → 分类头 |
+| 抽取式问答 | `[CLS]` 问题 `[SEP]` 段落 `[SEP]` | 段落每个位置 → 起点 / 终点分数 |
+| 序列标注 | `[CLS]` 句子 `[SEP]` | 每个位置 → 标签分类头 |
+
+超参的范围很窄：批大小 16 或 32，学习率 5e-5 / 3e-5 / 2e-5，2 到 4 个 epoch，dropout 0.1。学习率比预训练小两个数量级，因为权重已经很好了，微调只是把它们往任务方向轻轻推。一次微调在单块 TPU 上不到一小时，GPU 上几小时。
+
+## A classification example
+
+拿 SST-2 这种影评情感二分类来走一遍。输入一句话，输出"正面"或"负面"。
+
+**第 1 步，分词。** `the movie was a complete waste of time` 经 WordPiece 变成 8 个 token，加上 `[CLS]` 和 `[SEP]` 一共 10 个，补 `[PAD]` 到固定长度；同时生成 `attention_mask`（真实位置 1，补位 0）和全 0 的 `token_type_ids`（单句没有 B 段）。
+
+**第 2 步，嵌入。** 三个嵌入相加，得到 `[1, T, 768]`。
+
+**第 3 步，编码。** 12 层双向自注意力，形状不变，但 "waste" 的向量已经混进了 "complete" 和 "of time"。
+
+**第 4 步，取 `[CLS]`。** 第 0 行过 pooler，得到 `[1, 768]`。
+
+**第 5 步，分类头和损失。** 一个 $W \in \mathbb{R}^{2 \times 768}$ 和 $b \in \mathbb{R}^{2}$，这是**仅有的新参数**（1,538 个）。logits 过 softmax，损失是标签类别的负对数概率，梯度流回全部 1.09 亿个参数。
+
+<ClsFineTuneViz />
+
+用 Hugging Face transformers 写出来就是：
+
+```python
+import torch
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
+tok = AutoTokenizer.from_pretrained("bert-base-uncased")
+model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased", num_labels=2)
+# 编码器 + pooler 载入预训练权重；分类头 (768 → 2) 随机初始化，日志会提示这一点
+
+batch = tok(["the movie was a complete waste of time"],
+            padding=True, truncation=True, max_length=128, return_tensors="pt")
+# batch["input_ids"].shape == [1, 10]；attention_mask、token_type_ids 同形状
+
+out = model(**batch, labels=torch.tensor([0]))   # 0 = 负面
+out.loss.backward()                              # 梯度流回全部参数
+
+optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5)
+optimizer.step()
+# 完整训练：批大小 32，3 个 epoch，SST-2 的 6.7 万条句子约 6,300 步
+```
+
+效果（GLUE 测试集，论文表 1）：
+
+| 模型 | SST-2 准确率 | GLUE 平均分 |
+| --- | --- | --- |
+| OpenAI GPT（同尺寸） | 91.3 | 75.1 |
+| BERT_BASE | 93.5 | 79.6 |
+| BERT_LARGE | 94.9 | 82.1 |
+
+几个实践里会碰到的点：
+
+- **`[CLS]` 不是魔法**。它的向量好用，是因为预训练时 NSP 逼着它汇总全句；也可以对所有位置的输出取平均再接头，有时更稳（两种取法的对比见 [Sentence Embedding](/notes/ml/representations/sentence-embedding/)）。
+- **小数据集上微调不稳定**。几千条样本时，不同随机种子的结果差好几个点；常见做法是多跑几个种子、用更小的学习率、更多 epoch 配早停。
+- **长文本要截断**。位置嵌入只有 512 行，更长的文本要切块或只取开头。
+
+## BERT vs GPT
+
+两者都是 2018 年的"预训练 + 微调"模型，都是 Transformer，第一代尺寸相同。差别集中在三处：
+
+| | BERT | GPT |
+| --- | --- | --- |
+| 结构 | Transformer 编码器 | Transformer 解码器（无 cross-attention） |
+| 注意力 | 双向，每个位置看整句 | 因果，每个位置只看左边 |
+| 预训练目标 | 填空（MLM）+ 下一句预测 | 预测下一个 token |
+| 每条序列的监督信号 | 15% 的位置 | 每个位置 |
+| 每个预测看到的上下文 | 左右两边 | 只有左边 |
+| 原生能做的事 | 给每个词 / 整句一个表示 | 一个 token 一个 token 地生成 |
+| 擅长 | 分类、序列标注、抽取式问答、检索的句向量 | 生成、对话，以及用 prompt 描述的任何任务 |
+| 怎样用到新任务 | 每个任务微调一个副本 | GPT-1 也微调；从 GPT-2 / 3 起改用 prompt、few-shot、指令 |
+| 规模走向 | 1.1 亿 → 3.4 亿，后继多在十亿以内 | 1.17 亿 → 15 亿 → 1750 亿 → … |
+
+<BertVsGptAttentionViz />
+
+**为什么后来走远的是 GPT 这条路。** 下一个 token 预测在每个位置都有损失，同样的数据和算力能榨出更多监督；生成这个动作能把分类、翻译、问答全部统一成"把答案写出来"，一个模型不用为每个任务留一个副本；规模上去之后，few-shot 和指令跟随让微调本身都可以省掉。BERT 的双向性在这条路上反而成了负担：它没法一个词一个词地往外吐。
+
+**BERT 这条路留下了什么。** 在"读懂一段文本然后给个判断"这类任务上，同样大小的编码器仍然比解码器强，而且一次前向就出结果，不用生成；今天的检索、重排、句向量、分类模型大多还是编码器（2024 年的 ModernBERT 就是把现代架构改进装回 BERT 的形状）。它也教会了整个领域"先在无标注文本上预训练，再微调"这件事可以多有效。
+
+## Trade-offs
+
+- **预训练与微调的输入不一致**。`[MASK]` 只在预训练出现，80 / 10 / 10 只能缓解，不能消除。ELECTRA 换成"判断每个词有没有被替换"，每个位置都有损失，也没有 `[MASK]`。
+- **监督信号稀**。每条序列只有 15% 的位置给梯度，同算力下比自回归模型学得慢。
+- **被遮的词之间互相独立**。一句话里同时遮住 "New" 和 "York"，BERT 分别预测，看不到它们的联合分布。XLNet 用排列语言模型回应这一点。
+- **512 的长度上限**和学出来的位置嵌入，换长度要重训或插值。
+- **不能生成**，每个任务要一个微调副本，没有零样本能力。
+- NSP 的收益存疑，RoBERTa 之后基本被放弃。
+
+后继者各改一处：RoBERTa（更多数据、更大批、动态掩码、去 NSP）、ALBERT（跨层共享参数）、DistilBERT（蒸馏成 6 层）、ELECTRA（替换检测）、DeBERTa（解耦的内容 / 位置注意力）、ModernBERT（8192 长度、RoPE、现代训练配方）。
+
+## Key ideas to remember
+
+1. BERT 是**只有编码器**的 Transformer，注意力双向、没有因果掩码，每个位置的输出都是带全句上下文的向量。
+2. 预训练目标是**填空**：随机选 15% 的位置，按 80 / 10 / 10 腐蚀，交叉熵只在这些位置算；NSP 是可选的第二项，后来被放弃。
+3. 训练分两段：无标注文本上 100 万步的预训练，然后在标注数据上**全参数**微调 2 到 4 个 epoch，学习率 2e-5 量级。
+4. 做分类就是接一个 `2 × 768` 的头到 `[CLS]` 的 pooler 输出上；新参数只有一千多个，但整个模型都在更新。
+5. 和 GPT 的根本差别只有两点：**看哪边**（双向 vs 只看左边）和**预测什么**（被遮的词 vs 下一个词）；前者让 BERT 更会"读"，后者让 GPT 会"写"，并最终能靠规模和 prompt 统一所有任务。
+
+## Related notes
+
+- [Transformer Block：一层里有什么](/notes/ml/llms/transformer-block/)：编码器层里每个零件的形状和数。
+- [预训练目标：自回归与 Masked LM](/notes/ml/llms/pretraining-objectives/)：GPT 和 BERT 的 loss 逐项算一遍。
+- [Decoding：greedy、sampling、top-k、top-p、beam](/notes/ml/llms/decoding-strategies/)：GPT 那一侧生成时怎么选词。
+- [Sentence Embedding：CLS 与 Mean Pooling](/notes/ml/representations/sentence-embedding/)：BERT 的输出怎样变成一句话的向量。
+
+## Further reading
+
+- Devlin, J., Chang, M.-W., Lee, K. & Toutanova, K. (2018), [*BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding*](https://arxiv.org/abs/1810.04805), NAACL 2019.
+- Vaswani, A. et al. (2017), [*Attention Is All You Need*](https://arxiv.org/abs/1706.03762), NeurIPS.（编码器层的来源）
+- Radford, A. et al. (2018), [*Improving Language Understanding by Generative Pre-Training*](https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf).（GPT-1）
+- Liu, Y. et al. (2019), [*RoBERTa: A Robustly Optimized BERT Pretraining Approach*](https://arxiv.org/abs/1907.11692).（去 NSP、动态掩码）
+- Clark, K. et al. (2020), [*ELECTRA: Pre-training Text Encoders as Discriminators Rather Than Generators*](https://arxiv.org/abs/2003.10555), ICLR.
+- Warner, B. et al. (2024), [*Smarter, Better, Faster, Longer: A Modern Bidirectional Encoder*](https://arxiv.org/abs/2412.13663).（ModernBERT）

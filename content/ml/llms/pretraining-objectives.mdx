@@ -40,4 +40,4 @@ BERT 那一侧：先把两个位置换成 [MASK]，然后每个位置都能读�
 
 ## 再往下看
 
-GPT 学的是「下一个词的分布」，可一个分布不是一个词：生成时到底取最高的、按概率抽，还是留几个再抽？下一页 [Decoding：greedy、sampling、top-k、top-p、beam](/notes/ml/llms/decoding-strategies/)。位置 t 为什么只能看左边、训练为什么还能并行，见 [Transformer vs RNN](/notes/ml/llms/transformer-vs-rnn/) 里的 mask 和 train / prefill / decode。
+GPT 学的是「下一个词的分布」，可一个分布不是一个词：生成时到底取最高的、按概率抽，还是留几个再抽？下一页 [Decoding：greedy、sampling、top-k、top-p、beam](/notes/ml/llms/decoding-strategies/)。位置 t 为什么只能看左边、训练为什么还能并行，见 [Transformer vs RNN](/notes/ml/llms/transformer-vs-rnn/) 里的 mask 和 train / prefill / decode。BERT 这一侧从输入、微调到一次分类的完整模型，见本章最后一页 [BERT](/notes/ml/llms/bert/)。
