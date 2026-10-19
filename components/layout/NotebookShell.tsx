@@ -43,6 +43,7 @@ export default function NotebookShell({ children, activity }: { children: React.
     <div className="notebook-shell">
       <a className="skip-link" href="#main-content">跳到正文</a>
       {mobileOpen && <button className="sidebar-overlay" aria-label="关闭目录" onClick={() => setMobileOpen(false)} />}
+      <div className="sidebar-hotzone" aria-hidden="true" />
       <aside id="notebook-sidebar" ref={sidebar} className={`sidebar ${mobileOpen ? "is-open" : ""}`} aria-label="知识库目录">
         <div className="sidebar-heading">
           <Link href="/" className="brand" onClick={() => setMobileOpen(false)}><span className="brand-mark"><Icon name="book" /></span><span>RLearning<span className="brand-dot">.</span></span></Link>

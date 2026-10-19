@@ -206,6 +206,35 @@ a.topic-card:hover { background: #fffdf5; border-color: #e3d5a6; }
 .site-footer svg { width: 13px; height: 13px; color: #c5b878; }
 .footer-separator { padding: 0 8px; color: #d4d6c8; }
 
+/* Split reading: an in-article note link opens on the right half; both contents panels fold away. */
+html.is-split .note-toc, html.is-split .activity-panel { display: none; }
+/* While split, the sidebar hides off-screen and floats back in when the pointer reaches the left edge. */
+.sidebar-hotzone { display: none; }
+html.is-split .sidebar-hotzone { display: block; position: fixed; inset: 0 auto 0 0; z-index: 39; width: 14px; }
+html.is-split .sidebar-hotzone::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: #ece4c4; transition: background .15s; }
+html.is-split .sidebar-hotzone:hover::after { background: #cfb356; }
+html.is-split .sidebar { z-index: 50; transform: translateX(-100%); visibility: hidden; box-shadow: 8px 0 28px #2e302c1f; transition: transform .2s ease .25s, visibility 0s linear .45s; }
+html.is-split .sidebar-hotzone:hover + .sidebar, html.is-split .sidebar:hover, html.is-split .sidebar:focus-within { transform: translateX(0); visibility: visible; transition: transform .2s ease, visibility 0s; }
+html.is-split .workspace { margin-left: 0; margin-right: var(--split-width, 50vw); }
+html.is-split .note-layout { display: block; max-width: 780px; margin-left: auto; margin-right: auto; }
+.split-pane { position: fixed; inset: 0 0 0 auto; z-index: 45; width: var(--split-width, 50vw); display: flex; flex-direction: column; background: var(--paper); border-left: 1px solid #e7e3cf; box-shadow: -8px 0 24px #2e302c0d; }
+.split-pane-bar { display: flex; align-items: center; gap: 14px; height: 73px; flex-shrink: 0; padding: 0 18px 0 28px; border-bottom: 1px solid var(--line); background: var(--cream); }
+.split-pane-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: Georgia, "Times New Roman", serif; font-size: 15px; color: #4d5145; }
+.split-pane-open { display: flex; align-items: center; gap: 6px; flex-shrink: 0; font-size: 11px; color: #8d742c; }
+.split-pane-open svg { width: 12px; height: 12px; }
+.split-pane iframe { flex: 1; width: 100%; border: 0; }
+.split-pane-handle { position: absolute; top: 0; bottom: 0; left: -5px; z-index: 1; width: 10px; cursor: col-resize; touch-action: none; }
+.split-pane-handle::after { content: ""; position: absolute; top: 50%; left: 3px; width: 4px; height: 44px; margin-top: -22px; border-radius: 2px; background: #ddd6b8; transition: background .15s; }
+.split-pane-handle:hover::after, .split-pane-handle:focus-visible::after, html.is-resizing .split-pane-handle::after { background: #cfb356; }
+.split-pane-handle:focus-visible { outline: none; }
+html.is-resizing { cursor: col-resize; user-select: none; }
+html.is-resizing .split-pane iframe { pointer-events: none; }
+/* The note page as rendered inside the split pane. */
+html.is-embedded .sidebar, html.is-embedded .sidebar-overlay, html.is-embedded .topbar, html.is-embedded .activity-panel, html.is-embedded .note-toc, html.is-embedded .site-footer, html.is-embedded .skip-link, html.is-embedded .article-end > a { display: none; }
+html.is-embedded .workspace { margin-left: 0; }
+html.is-embedded .workspace-content { padding: 6px 36px 48px; }
+html.is-embedded .note-layout { display: block; max-width: 780px; margin-left: auto; margin-right: auto; }
+
 @media (min-width: 1600px) { .workspace-content { padding-left: 58px; padding-right: 58px; } }
 @media (max-width: 1250px) {
   :root { --sidebar-width: 234px; }

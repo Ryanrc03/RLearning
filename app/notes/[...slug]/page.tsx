@@ -104,6 +104,7 @@ import TTest from "@/content/ml/evaluation/t-test.mdx";
 import { getNote, getSeriesNeighbors, noteEntries } from "@/content/notes";
 import { getNoteToc } from "@/lib/content";
 import TableOfContents from "@/components/layout/TableOfContents";
+import SplitReader from "@/components/layout/SplitReader";
 import Icon from "@/components/ui/Icon";
 
 const noteComponents = {
@@ -250,6 +251,8 @@ export default async function NotePage({ params }: { params: Promise<{ slug: str
         <div className="article-end"><div><Icon name="leaf" /><span>这篇笔记还会继续生长。</span></div><Link href="/">回到知识库 <Icon name="arrow" /></Link></div>
       </div>
       <TableOfContents items={toc} />
+      {/* Keyed by note so moving to another note (e.g. from the sidebar) closes the split. */}
+      <SplitReader key={key} />
     </div>
   );
 }
