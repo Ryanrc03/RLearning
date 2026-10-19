@@ -29,7 +29,7 @@
 
 ## 总览页（2026-10-19 新增）
 
-`overview.mdx` 放在系列第 1 位，slug `ai-infra/gpu/overview`，只总结本章 7 页，不列本章没写的方法。结构：一句话 → 一步训练的时间都花在哪（`TrainingStepFigure`，四段里标出本章只讲 kernel 启动和 GPU 计算）→ 先看哪些指标（表：怎么看、说明什么、对应页）→ 一张图（`TrainingBottleneckMap`：5 个现象按钮 → 高亮 step 的哪一段 → 该查的指标 → 本章哪一页）→ 本章的方法清单（按瓶颈分组，每条链接到页）→ 怎么读这一章（`SectionMapViz` 的 `gpu` 配置）。8 页都挂了 `series: gpu-kernels`，页尾有上一篇/下一篇。
+`overview.mdx` 放在系列第 1 位，slug `ai-infra/gpu/overview`，只总结本章 7 页，不列本章没写的方法。结构：一句话 → 一步训练的时间都花在哪（`TrainingStepFigure`，四段里标出本章只讲 kernel 启动和 GPU 计算）→ 先看哪些指标（表：怎么看、说明什么、对应页）→ 一张图（`TrainingBottleneckMap`：5 个现象按钮 → 高亮 step 的哪一段 → 该查的指标 → 本章哪一页）→ 本章的方法清单（`MethodCards`：八张卡片，每张一个前后对比的小图加两三句话，页码只是辅助）→ 怎么读这一章（`SectionMapViz` 的 `gpu` 配置）。8 页都挂了 `series: gpu-kernels`，页尾有上一篇/下一篇。
 
 ## 七篇笔记
 

@@ -1,6 +1,7 @@
 import SectionMapViz from "@/components/visualization/SectionMapViz";
 import TrainingStepFigure from "@/components/visualization/gpu/TrainingStepFigure";
 import TrainingBottleneckMap from "@/components/visualization/gpu/TrainingBottleneckMap";
+import MethodCards from "@/components/visualization/gpu/MethodCards";
 
 # GPU Kernels Overview
 
@@ -36,28 +37,9 @@ import TrainingBottleneckMap from "@/components/visualization/gpu/TrainingBottle
 
 ## 本章的方法清单
 
-按「先诊断出什么，再用什么」来排。每条只有一句话，细节在对应的页里。
+<MethodCards />
 
-**GPU 闲着：活不够多，或者启动太频繁**
-
-- 一次给 GPU 更多活，让固定的启动开销被摊薄。活少到一定程度，GPU 比 CPU 还慢。→ [第 1 页](/notes/ai-infra/gpu/cpu-vs-gpu/)
-- 把连续的逐元素小操作合进一个 kernel，少启动、少一次显存往返。→ [第 4 页](/notes/ai-infra/gpu/separate-vs-fused-kernels/)
-
-**memory-bound：计算单元在等数据**
-
-- 先算算术强度，确认点落在 roofline 的斜线上，再动手减少访存。→ [第 2 页](/notes/ai-infra/gpu/compute-vs-memory-bound/)
-- 相邻线程要同一块数据时，先搬进 shared memory 再复用；但只搬不复用几乎不快，要让每份数据被用足够多次。→ [第 3 页](/notes/ai-infra/gpu/global-vs-shared-memory/)
-- 让一个 warp 的 32 个线程读相邻的地址，一次访存顶过去的几十次。→ [第 5 页](/notes/ai-infra/gpu/thread-vs-warp-per-row/)
-- 矩阵乘满足结合律：换一个顺序，让最慢的稀疏乘法只处理最窄的矩阵。→ [第 6 页](/notes/ai-infra/gpu/aggregate-vs-project-first/)
-
-**compute-bound：算力已经用满**
-
-- 这时减少访存没有收益，只剩加算力（比如开 TF32 用 Tensor Core）或换计算量更少的算法。→ [第 2 页](/notes/ai-infra/gpu/compute-vs-memory-bound/)、[第 7 页](/notes/ai-infra/gpu/implicit-gemm-vs-fft/)
-
-**显存不够**
-
-- 同一个卷积，不同算法占的 workspace 差很多：implicit GEMM 为 0，FFT 随 batch 增长。→ [第 7 页](/notes/ai-infra/gpu/implicit-gemm-vs-fft/)
-- 先降维再聚合，中间结果只有 hidden 那么宽。→ [第 6 页](/notes/ai-infra/gpu/aggregate-vs-project-first/)
+卡片的顺序就是诊断的顺序：先看 GPU 有没有被喂饱，再算算术强度分清卡在带宽还是算力，memory-bound 用中间四张减少访存，compute-bound 用最后两张加算力或换算法。
 
 ## 怎么读这一章
 
