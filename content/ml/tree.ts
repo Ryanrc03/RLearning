@@ -97,6 +97,7 @@ export const chapters: TreeChapter[] = [
       n("ml/representations/word2vec", "Word2Vec：CBOW 与 Skip-gram", "词怎么变向量？", "用上下文预测中心词（CBOW）或用中心词预测上下文（Skip-gram），训练出的隐层权重就是词向量。", "ready", "Word2Vec"),
       n("ml/representations/sentence-embedding", "Sentence Embedding：CLS 与 Mean Pooling", "一句话怎么变一个向量？", "BERT 把一句话变成每个 token 一个向量；取 [CLS] 位置或把所有 token 平均，就得到整句的向量。", "ready", "Sentence Embedding"),
       n("ml/representations/cosine-similarity", "Cosine Similarity", "两个向量多像？", "两个向量夹角的余弦：只看方向不看长度，所以适合比较 embedding。"),
+      n("ml/representations/tf-idf", "TF-IDF", "不训练模型，句子能变向量吗？", "每一维是一个词或字符 n-gram，权重 = (1 + ln tf) × idf，再 L2 归一化；两句的 cosine 就是共同 n-gram 上的权重乘积之和。", "ready", "TF-IDF"),
     ],
   },
   {

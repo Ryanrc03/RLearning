@@ -555,6 +555,21 @@ export const noteEntries: NoteEntry[] = [
     series: { id: "ml-representations", title: "Representations：东西怎么变成向量", order: 3 },
   },
   {
+    slug: "ml/representations/tf-idf",
+    title: "TF-IDF",
+    description:
+      "不训练模型也能把一句话变成向量：字符 1/2-gram，权重 (1 + ln tf) × idf，L2 归一化后点积。用语义缓存的「国补多少」vs「国补多少钱」走一遍，看多一个字为什么掉到 0.870。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Representations",
+    created: "2026-10-20",
+    updated: "2026-10-20",
+    status: "seed",
+    readingMinutes: 6,
+    tags: ["ml-fundamentals", "representations", "tf-idf", "retrieval", "interactive"],
+    series: { id: "ml-representations", title: "Representations：东西怎么变成向量", order: 4 },
+  },
+  {
     slug: "ml/dl-blocks/overview",
     title: "Deep Learning Blocks Overview",
     description:
