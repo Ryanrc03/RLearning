@@ -565,7 +565,7 @@ export const noteEntries: NoteEntry[] = [
     created: "2026-10-20",
     updated: "2026-10-20",
     status: "seed",
-    readingMinutes: 6,
+    readingMinutes: 8,
     tags: ["ml-fundamentals", "representations", "tf-idf", "retrieval", "interactive"],
     series: { id: "ml-representations", title: "Representations：东西怎么变成向量", order: 4 },
   },

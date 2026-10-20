@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import VisualizationFrame from "@/components/visualization/VisualizationFrame";
 import Tabs from "@/components/visualization/ml/primitives/Tabs";
 import Bars from "@/components/visualization/ml/primitives/Bars";
-import { BASE_ALIASES, cosineTable, DEMO_IDF, DROP_TRAILING_QIAN, normalize, tfidf } from "@/lib/ml/tfidf";
+import { BASE_ALIASES, charNgrams, cosineTable, DEMO_IDF, DROP_TRAILING_QIAN, normalize, tfidf } from "@/lib/ml/tfidf";
 
 // Representations, TF-IDF: a semantic cache compares a cached query with a new
 // one in three steps — alias normalisation, character 1/2-gram TF-IDF with L2
@@ -27,6 +27,12 @@ const GOOD = "#1d9e75";
 const MUTED = "#76796f";
 
 const f3 = (x: number) => x.toFixed(3);
+
+/** Split a key into its 1-grams and 2-grams, in sliding-window order. */
+function grams(text: string): { one: string[]; two: string[] } {
+  const all = [...charNgrams(text).keys()];
+  return { one: all.filter((g) => Array.from(g).length === 1), two: all.filter((g) => Array.from(g).length === 2) };
+}
 
 // The un-fixed 「钱」 cosine, quoted in the third scenario.
 const QIAN_COS = cosineTable(tfidf("国补多少"), tfidf("国补多少钱")).cosine;
@@ -56,7 +62,7 @@ export default function TfidfFigure() {
   return (
     <VisualizationFrame
       title="语义缓存：两条查询的 TF-IDF 余弦"
-      description="缓存里有「国补多少」，新来一条查询。先按别名表归一化成键，再拆成字符 1-gram 和 2-gram，权重是 (1 + ln tf) × idf，除以长度后逐项相乘求和。蓝色是缓存那条的权重，橙色是新查询的，最后一列是乘积。"
+      description="缓存里有「国补多少」，新来一条查询。先按别名表归一化成键，再用宽 1 和宽 2 的窗口切成字符 n-gram，权重是 (1 + ln tf) × idf，除以长度后逐项相乘求和。蓝色是缓存那条的权重，橙色是新查询的，最后一列是乘积。"
     >
       <div className="viz-row">
         <Tabs options={SCENARIOS} value={key} onChange={setKey} ariaLabel="对比的两条查询" />
@@ -69,14 +75,44 @@ export default function TfidfFigure() {
         <div><small>‖a‖ / ‖b‖（未归一化长度）</small><b>{a.norm.toFixed(2)} / {b.norm.toFixed(2)}</b></div>
       </div>
 
+      <div className="viz-panel" style={{ marginBottom: 12 }} aria-label="切成字符 n-gram">
+        <h5 className="nocase">第 2 步 · 切词：窗口宽 1 和 2，各滑一遍</h5>
+        {[{ name: "a", text: keyA, other: keyB, color: V1 }, { name: "b", text: keyB, other: keyA, color: V2 }].map((row) => {
+          const g = grams(row.text);
+          const otherGrams = new Set(charNgrams(row.other).keys());
+          const chip = (x: string) => (
+            <span key={x} className="tok" style={{ minWidth: 30, ...(otherGrams.has(x) ? {} : { borderColor: V2, background: "#fdeee6", color: V2 }) }}>
+              {x}
+            </span>
+          );
+          return (
+            <div key={row.name} style={{ marginBottom: 8 }}>
+              <div className="tok-strip" style={{ marginBottom: 4 }}>
+                <span className="viz-k" style={{ width: 76, color: row.color }}>{row.name}：{row.text}</span>
+                <span className="viz-k" style={{ width: 52 }}>1-gram</span>
+                {g.one.map(chip)}
+                <span className="viz-k" style={{ marginLeft: 6 }}>{g.one.length} 个</span>
+              </div>
+              <div className="tok-strip">
+                <span style={{ width: 76 }} />
+                <span className="viz-k" style={{ width: 52 }}>2-gram</span>
+                {g.two.map(chip)}
+                <span className="viz-k" style={{ marginLeft: 6 }}>{g.two.length} 个，共 {g.one.length + g.two.length} 维</span>
+              </div>
+            </div>
+          );
+        })}
+        <p className="viz-k" style={{ margin: 0 }}>{same ? "两条键切出来的 n-gram 完全相同。" : "橙色是只有一边才有的 n-gram：它们不贡献乘积，只把自己那一边的长度撑大。"}</p>
+      </div>
+
       <table className="viz-table" aria-label="每个 n-gram 的权重和乘积">
         <thead>
           <tr>
-            <th>第 2 步 · n-gram</th>
+            <th>第 3 步 · n-gram</th>
             <th className="num">idf</th>
             <th className="num" style={{ color: V1 }}>a：{keyA}</th>
             <th className="num" style={{ color: V2 }}>b：{keyB}</th>
-            <th className="num">第 3 步 · a × b</th>
+            <th className="num">第 4 步 · a × b</th>
           </tr>
         </thead>
         <tbody>
