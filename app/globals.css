@@ -29,26 +29,39 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 23px; letter-spacing: -.9px; }
 .brand-mark { display: grid; place-items: center; width: 34px; height: 37px; border-radius: 9px; background: #e4e3fc; color: #5f50a5; }
 .brand-mark svg { width: 21px; height: 21px; }
-.brand-caption { margin: 12px 0 31px 2px; color: #8f8f8f; font-family: Georgia, serif; font-size: 12px; font-style: italic; }
+.brand-caption { margin: 12px 0 20px 2px; color: #8f8f8f; font-family: Georgia, serif; font-size: 12px; font-style: italic; }
 .sidebar-nav { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding-bottom: 24px; }
 .home-link { display: flex; align-items: center; gap: 10px; padding: 11px 12px; color: #666666; border-radius: 8px; font-size: 13px; transition: background .15s; }
 .home-link:hover { background: #eeeeee; }
 .home-link.is-active { background: #e7e6fc; color: #564b92; font-weight: 600; }
 .home-link svg { width: 17px; height: 17px; }
 .nav-shortcut { margin-left: auto; color: #9d9d9d; font-size: 16px; }
-.nav-heading { display: flex; align-items: center; justify-content: space-between; margin: 31px 10px 15px; color: #878787; font-size: 10px; font-weight: 650; letter-spacing: 1.5px; }
+.nav-heading { display: flex; align-items: center; justify-content: space-between; margin: 22px 10px 10px; color: #878787; font-size: 10px; font-weight: 650; letter-spacing: 1.5px; }
 .nav-heading > span:last-child { font-weight: 400; letter-spacing: .1px; }
-.nav-groups { display: flex; flex-direction: column; gap: 16px; }
-.nav-group summary, .nav-group-empty { display: flex; align-items: center; gap: 9px; padding: 7px 9px; font-size: 12.5px; font-weight: 600; color: #585858; }
-.nav-group summary { cursor: pointer; list-style: none; }
-.nav-group summary::-webkit-details-marker { display: none; }
-.nav-group summary > svg:first-child, .nav-group-empty > svg { width: 17px; height: 17px; color: #8a8a8a; flex-shrink: 0; }
-.nav-group summary > span:nth-child(2), .nav-group-empty > span:nth-child(2) { flex: 1; }
+.nav-groups { display: flex; flex-direction: column; gap: 4px; }
+.nav-search { display: flex; align-items: center; gap: 8px; margin: 0 2px 14px; padding: 0 9px; height: 34px; border: 1px solid #e3e3e3; border-radius: 8px; background: var(--paper); color: #929292; transition: border-color .15s, box-shadow .15s; }
+.nav-search:focus-within { border-color: #b6adfd; box-shadow: 0 0 0 3px var(--accent-soft); }
+.nav-search svg { width: 14px; height: 14px; flex-shrink: 0; }
+.nav-search input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: var(--ink); font-size: 12.5px; }
+.nav-search input::placeholder { color: #a3a3a3; }
+.nav-search input::-webkit-search-cancel-button { display: none; }
+.nav-search kbd { font: inherit; font-size: 10px; color: #a3a3a3; padding: 1px 5px; border: 1px solid #e6e6e6; border-radius: 4px; }
+.nav-group-toggle, .nav-group-empty { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 9px; border: 0; border-radius: 7px; background: transparent; text-align: left; font-size: 12.5px; font-weight: 600; color: #585858; }
+.nav-group-toggle:hover, .nav-section-toggle:hover { background: #eeeeee; }
+.nav-group-toggle > svg:first-child, .nav-group-empty > svg { width: 17px; height: 17px; color: #8a8a8a; flex-shrink: 0; }
+.nav-group.is-open .nav-group-toggle > svg:first-child { color: var(--accent); }
+.nav-group-toggle > span:nth-child(2), .nav-group-empty > span:nth-child(2) { flex: 1; }
 .nav-count { color: #929292; font-size: 10px; font-weight: 400; }
-.nav-group summary .nav-chevron { width: 10px; height: 10px; color: #929292; transition: transform .15s; }
-.nav-group[open] .nav-chevron { transform: rotate(90deg); }
-.nav-sections { margin: 5px 0 0 17px; padding-left: 10px; border-left: 1px solid #dfdfdf; }
-.nav-section-title { color: #909090; font-size: 10.5px; margin: 9px 0 7px 9px; }
+.nav-chevron { width: 10px; height: 10px; color: #929292; flex-shrink: 0; transition: transform .15s; }
+.nav-group.is-open > .nav-group-toggle .nav-chevron, .nav-section.is-open > .nav-section-toggle .nav-chevron { transform: rotate(90deg); }
+.nav-sections { margin: 2px 0 8px 17px; padding-left: 8px; border-left: 1px solid #dfdfdf; }
+.nav-section-toggle { display: flex; align-items: center; gap: 7px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; text-align: left; color: #6f6f6f; font-size: 11.5px; }
+.nav-section-toggle > span:nth-child(2) { flex: 1; }
+.nav-section.is-open > .nav-section-toggle { color: #3f3f3f; font-weight: 600; }
+.nav-section > .note-link { margin-left: 12px; }
+.nav-result-title { color: #909090; font-size: 10.5px; margin: 12px 0 4px 9px; }
+.nav-empty { color: #929292; font-size: 12px; margin: 4px 10px; line-height: 1.7; }
+.note-link mark { background: var(--accent-soft); color: #5b38d1; border-radius: 2px; }
 .note-link { display: flex; align-items: center; gap: 8px; padding: 9px; margin-left: -3px; border-radius: 6px; color: #6f6f6f; font-size: 12px; line-height: 1.65; }
 .note-link:hover { background: #eeeeee; }
 .note-link.is-active { background: #e8e7fe; color: #604ead; font-weight: 600; }
@@ -56,10 +69,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
 .note-link.is-active .note-bullet { background: #9178fe; }
 .nav-group-empty { color: #868686; }
 .sidebar-bottom { margin-top: auto; padding-bottom: 22px; }
-.garden-note { display: flex; gap: 10px; margin: 16px 4px 25px; padding: 16px 11px; background: #eeeeee; border: 1px solid #e6e6e6; border-radius: 9px; }
-.garden-note svg { color: #8f9264; width: 18px; margin-top: 2px; }
-.garden-note strong { font-size: 11px; font-weight: 600; color: #747474; }
-.garden-note p { margin-top: 5px; color: #8f8f8f; font-size: 10px; }
 .sidebar-signature { display: flex; align-items: center; gap: 6px; padding: 0 5px; font-size: 10px; color: #939393; }
 .sidebar-signature > span:last-child { margin-left: auto; font-size: 8px; letter-spacing: 1px; }
 .status-dot { display: inline-block; width: 5px; height: 5px; background: #929d66; border-radius: 50%; flex-shrink: 0; }
