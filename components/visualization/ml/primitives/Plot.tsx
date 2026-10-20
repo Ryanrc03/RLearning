@@ -17,6 +17,8 @@ export type PlotProps = {
   yLabel?: string;
   title?: string;
   format?: (v: number) => string;
+  /** Formatter for the x ticks only; defaults to `format`. */
+  xFormat?: (v: number) => string;
   /** Dashed y = x reference line (ROC chance line). */
   diagonal?: boolean;
   children: (frame: PlotFrame) => ReactNode;
@@ -28,7 +30,7 @@ const GRID = "#e4dfcb";
 
 export const PAD = { left: 40, right: 12, top: 22, bottom: 34 };
 
-export default function Plot({ box, xDomain, yDomain, xTicks, yTicks, xLabel, yLabel, title, format, diagonal, children }: PlotProps) {
+export default function Plot({ box, xDomain, yDomain, xTicks, yTicks, xLabel, yLabel, title, format, xFormat, diagonal, children }: PlotProps) {
   const x0 = box.x + PAD.left;
   const x1 = box.x + box.w - PAD.right;
   const y0 = box.y + box.h - PAD.bottom;
@@ -36,6 +38,7 @@ export default function Plot({ box, xDomain, yDomain, xTicks, yTicks, xLabel, yL
   const x: Scale = (v) => x0 + ((v - xDomain[0]) / (xDomain[1] - xDomain[0])) * (x1 - x0);
   const y: Scale = (v) => y0 - ((v - yDomain[0]) / (yDomain[1] - yDomain[0])) * (y0 - y1);
   const fmt = format ?? ((v: number) => String(Math.round(v * 100) / 100));
+  const xFmt = xFormat ?? fmt;
   const xt = xTicks ?? [xDomain[0], (xDomain[0] + xDomain[1]) / 2, xDomain[1]];
   const yt = yTicks ?? [yDomain[0], (yDomain[0] + yDomain[1]) / 2, yDomain[1]];
   return (
@@ -48,7 +51,7 @@ export default function Plot({ box, xDomain, yDomain, xTicks, yTicks, xLabel, yL
       {xt.map((t) => (
         <g key={`x${t}`}>
           <line x1={x(t)} y1={y1} x2={x(t)} y2={y0} stroke={GRID} strokeWidth={1} />
-          <text x={x(t)} y={y0 + 15} fontSize={11} textAnchor="middle" fill={MUTED}>{fmt(t)}</text>
+          <text x={x(t)} y={y0 + 15} fontSize={11} textAnchor="middle" fill={MUTED}>{xFmt(t)}</text>
         </g>
       ))}
       {yt.map((t) => (

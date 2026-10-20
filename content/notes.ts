@@ -733,6 +733,21 @@ export const noteEntries: NoteEntry[] = [
     series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 6 },
   },
   {
+    slug: "ml/llms/deepseek-moe",
+    title: "DeepSeekMoE：让 FFN 按 token 选择专家",
+    description:
+      "从 28 层模型定位 MoE，再放大共享与路由专家；用两个 token 算一次路由、下一词 loss、均衡项和参数更新，比较普通 FFN 的训练路径。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "LLMs",
+    created: "2026-10-19",
+    updated: "2026-10-19",
+    status: "growing",
+    readingMinutes: 14,
+    tags: ["ml-fundamentals", "llms", "DeepSeekMoE", "moe", "interactive"],
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 7 },
+  },
+  {
     slug: "ml/llms/decoding-strategies",
     title: "Decoding：greedy、sampling、top-k、top-p、beam",
     description:
@@ -745,7 +760,7 @@ export const noteEntries: NoteEntry[] = [
     status: "seed",
     readingMinutes: 7,
     tags: ["ml-fundamentals", "llms", "interactive"],
-    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 7 },
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 8 },
   },
   {
     slug: "ml/llms/bert",
@@ -760,7 +775,7 @@ export const noteEntries: NoteEntry[] = [
     status: "growing",
     readingMinutes: 15,
     tags: ["BERT", "llms", "transformer", "pre-training", "fine-tuning", "GPT", "interactive"],
-    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 8 },
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 9 },
   },
   {
     slug: "ml/llm-engineering/overview",
@@ -882,6 +897,21 @@ export const noteEntries: NoteEntry[] = [
     series: { id: "multimodal-path", title: "从 Transformer 到多模态", order: 5 },
   },
   {
+    slug: "ml/multimodal/dae-fuse-project",
+    title: "Project：DAE-Fuse 红外与可见光图像融合",
+    description:
+      "按小论文写的 DAE-Fuse（arXiv 2409.10080）：CNN、ViT、GAN、AE / VAE、YOLO 各有一张结构图、一个在浏览器里真跑的小训练和一个对比实验；再讲两阶段方法和每一项损失，最后五个论文实验：28 个指标格子 21 个第一，YOLOv8n mAP@50 0.887。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Multimodal Learning",
+    created: "2026-10-19",
+    updated: "2026-10-19",
+    status: "growing",
+    readingMinutes: 45,
+    tags: ["project", "image-fusion", "gan", "autoencoder", "vae", "vit", "cnn", "yolo", "cross-attention", "multimodal", "interactive"],
+    series: { id: "multimodal-path", title: "从 Transformer 到多模态", order: 6 },
+  },
+  {
     slug: "ml/recsys/kuairand-input",
     title: "一条曝光的 84 维输入",
     description:
@@ -955,14 +985,14 @@ export const noteEntries: NoteEntry[] = [
     slug: "systems/distributed/core",
     title: "分布式系统：机器多了，就一定有机器在出事",
     description:
-      "五节五个演示：网线断了选一致还是选可用，回复丢了怎么安全重试，八张卡怎么凑齐一起启动，一千张卡挂一张从 checkpoint 丢多少，下游慢了攒还是顶回去。最后是那道“一张卡挂了怎么办”。",
+      "先用一家奶茶店开成连锁店讲清楚什么是分布式系统，再分五节五个演示：网线断了选一致还是选可用，回复丢了怎么安全重试，八张卡怎么凑齐一起启动，一千张卡挂一张从 checkpoint 丢多少，下游慢了攒还是顶回去。",
     categoryId: "systems",
     category: "Systems",
     section: "Distributed Systems",
     created: "2026-10-16",
-    updated: "2026-10-16",
+    updated: "2026-10-19",
     status: "growing",
-    readingMinutes: 12,
+    readingMinutes: 15,
     tags: ["distributed systems", "CAP", "idempotency", "scheduling", "checkpoint", "backpressure", "interactive"],
   },
   {

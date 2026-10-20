@@ -44,6 +44,7 @@ import VisualTokens from "@/content/ml/multimodal/visual-tokens.mdx";
 import VisionLanguageAlignment from "@/content/ml/multimodal/vision-language-alignment.mdx";
 import ClipContrastiveLearning from "@/content/ml/multimodal/clip-contrastive-learning.mdx";
 import MultistickerProject from "@/content/ml/multimodal/multisticker-project.mdx";
+import DaeFuseProject from "@/content/ml/multimodal/dae-fuse-project.mdx";
 import MlOverview from "@/content/ml/overview.mdx";
 import EvaluationOverview from "@/content/ml/evaluation/overview.mdx";
 import ConfusionMatrix from "@/content/ml/evaluation/confusion-matrix.mdx";
@@ -57,6 +58,7 @@ import AttentionQkv from "@/content/ml/llms/attention-qkv.mdx";
 import MultiHeadAttention from "@/content/ml/llms/multi-head-attention.mdx";
 import TransformerBlock from "@/content/ml/llms/transformer-block.mdx";
 import PretrainingObjectives from "@/content/ml/llms/pretraining-objectives.mdx";
+import DeepSeekMoE from "@/content/ml/llms/deepseek-moe.mdx";
 import DecodingStrategies from "@/content/ml/llms/decoding-strategies.mdx";
 import Bert from "@/content/ml/llms/bert.mdx";
 import InceptionBlock from "@/content/ml/dl-blocks/inception-block.mdx";
@@ -151,6 +153,7 @@ const noteComponents = {
   "ml/multimodal/vision-language-alignment": VisionLanguageAlignment,
   "ml/multimodal/clip-contrastive-learning": ClipContrastiveLearning,
   "ml/multimodal/multisticker-project": MultistickerProject,
+  "ml/multimodal/dae-fuse-project": DaeFuseProject,
   "ml/overview": MlOverview,
   "ml/evaluation/overview": EvaluationOverview,
   "ml/evaluation/confusion-matrix": ConfusionMatrix,
@@ -164,6 +167,7 @@ const noteComponents = {
   "ml/llms/multi-head-attention": MultiHeadAttention,
   "ml/llms/transformer-block": TransformerBlock,
   "ml/llms/pretraining-objectives": PretrainingObjectives,
+  "ml/llms/deepseek-moe": DeepSeekMoE,
   "ml/llms/decoding-strategies": DecodingStrategies,
   "ml/llms/bert": Bert,
   "ml/dl-blocks/inception-block": InceptionBlock,
