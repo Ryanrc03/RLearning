@@ -1,4 +1,4 @@
-import FinetunePipelineFigure from "@/components/visualization/ml/llms/finetune/FinetunePipelineFigure";
+import FinetuneArchitectureFigure from "@/components/visualization/ml/llms/finetune/FinetuneArchitectureFigure";
 import TokenizeBatchFigure from "@/components/visualization/ml/llms/finetune/TokenizeBatchFigure";
 import HeadLossFigure from "@/components/visualization/ml/llms/finetune/HeadLossFigure";
 import TrainingRunFigure from "@/components/visualization/ml/llms/finetune/TrainingRunFigure";
@@ -12,9 +12,11 @@ import ConfusionMatrixFigure from "@/components/visualization/ml/llms/finetune/C
 
 一句话：**微调就是把预训练好的编码器整个搬过来，在 `[CLS]` 后面接一个 768 → 3 的线性层，用带标签的数据和很小的学习率把全部参数一起再训几个 epoch。**
 
-<FinetunePipelineFigure />
+<FinetuneArchitectureFigure />
 
 新东西只有分类头的 2,307 个参数；编码器的一亿多个参数都从 checkpoint 载入，但训练时也跟着更新。这就是「全参数微调」。
+
+容易误解的一点：微调的不是「`[CLS]` 这个 token」。`[CLS]` 只是词表里第 101 号的普通 token，分类头约定读它那一列的输出而已；梯度从那里顺着每一层的注意力传到所有真实位置，整座编码器一起更新。如果编码器冻住、只训分类头，那是另一种做法（见下一节的表），编码器不会为这个任务调整。读出位置也可以换成所有 token 输出的平均（mean pooling）。
 
 ## Why fine-tune?
 

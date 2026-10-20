@@ -6,7 +6,7 @@ Numbers and pure functions live in `lib/ml/finetune.ts` (tests in `tests/finetun
 
 | Component | Section | What it shows |
 | --- | --- | --- |
-| `FinetunePipelineFigure` | What is it? | Static pipeline: batch → tokenizer → encoder → [CLS] pooler → new Linear(768, 3) → softmax; training-only row (labels, CE, backward). Buttons focus 「哪些是新的」 and 「哪些只在训练时」. |
+| `FinetuneArchitectureFigure` | What is it? | Model structure for one padded sentence: tokens + mask, summed embeddings, layer 1, layers 2–11 folded, layer 12 with the [CLS] attention fan, per-position outputs; only the [CLS] column feeds pooler → new Linear(768, 3) → softmax → loss (training only). Buttons focus 「哪些是新的」 and 「梯度更新到哪里」 ([PAD] gets no gradient). |
 | `TokenizeBatchFigure` | Step 2 | Step player: three reviews → characters → [CLS]/[SEP] → truncation at max_len 20 → dynamic padding + attention_mask → ids and labels. Special-token ids are real; character ids are 示意. |
 | `HeadLossFigure` | Step 4 | One review at three training moments: 示意 logits, computed softmax, −log p_y, gradient p − y, batch loss vs ln 3. |
 | `TrainingRunFigure` | Step 5 | Animated toy run (seeded): 2-D stand-in for [CLS] with the head's decision regions, warmup + linear-decay lr, train/val loss, val accuracy. Preset: 2e-5 vs 1e-4 (features wash out). The head is trained by real softmax-CE gradients; the encoder's effect is a stylised drift. |
