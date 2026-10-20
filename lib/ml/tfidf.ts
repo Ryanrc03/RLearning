@@ -75,3 +75,10 @@ export function cosineTable(a: TfidfVector, b: TfidfVector, idf: Record<string, 
   });
   return { rows, cosine: rows.reduce((s, r) => s + r.product, 0) };
 }
+
+/** Smoothed IDF as scikit-learn fits it: ln((1 + N) / (1 + df)) + 1, each document counted once per n-gram. */
+export function fitIdf(docs: string[]): Record<string, number> {
+  const df = new Map<string, number>();
+  for (const d of docs) for (const g of charNgrams(d).keys()) df.set(g, (df.get(g) ?? 0) + 1);
+  return Object.fromEntries([...df].map(([g, n]) => [g, Math.log((1 + docs.length) / (1 + n)) + 1]));
+}

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BASE_ALIASES, charNgrams, cosineTable, DROP_TRAILING_QIAN, normalize, tfidf } from "@/lib/ml/tfidf";
+import { BASE_ALIASES, charNgrams, cosineTable, DROP_TRAILING_QIAN, fitIdf, normalize, tfidf } from "@/lib/ml/tfidf";
 
 const r3 = (x: number) => Math.round(x * 1000) / 1000;
 
@@ -43,4 +43,16 @@ test("国补多少 vs 国补多少钱: two extra n-grams pull the cosine to 0.87
   assert.ok(Math.abs(cosine - a.norm / b.norm) < 1e-12);
   assert.ok(cosine < 0.9 && cosine > 0.85);
   assert.deepEqual(rows.filter((r) => r.product === 0).map((r) => r.gram).sort(), ["少钱", "钱"].sort());
+});
+
+test("fitting idf on the four-sentence toy corpus gives the page's hand-computed table", () => {
+  const idf = fitIdf(["国补多少", "国补怎么领", "运费多少", "多少钱"]);
+  assert.equal(r3(idf["多少"]), 1.223);
+  assert.equal(r3(idf["国补"]), 1.511);
+  assert.equal(r3(idf["补多"]), 1.916);
+});
+
+test("8.15 back-solves to (1 + N) / (1 + df) ≈ 1274; N = 2547 with df = 1 reproduces it", () => {
+  assert.equal(Math.round(Math.exp(8.15 - 1)), 1274);
+  assert.equal(Math.round((Math.log(2548 / 2) + 1) * 100) / 100, 8.15);
 });
