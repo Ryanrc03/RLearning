@@ -65,8 +65,8 @@ export default function SidebarNav({ pathname, onNavigate, onSearchShortcut }: P
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const typing = target?.closest("input, textarea, select, [contenteditable='true']");
+      const target = event.target;
+      const typing = target instanceof Element && target.closest("input, textarea, select, [contenteditable='true']");
       const isCmdK = event.key.toLowerCase() === "k" && (event.metaKey || event.ctrlKey);
       if (!isCmdK && (event.key !== "/" || typing)) return;
       event.preventDefault();

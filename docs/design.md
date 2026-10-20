@@ -2,6 +2,8 @@
 
 > 2026-09-29 界面更新：用户选定白色正文、浅黄色背景点缀、常驻左侧目录，以及顶部活动统计和头像。当前实现以此配色为准；活动方格统计笔记记录，头像通过 `content/profile.ts` 配置。头像素材取自当前 Git 用户名 `Ryanrc03` 的公开 GitHub 头像。下文的原始配色建议与暗色模式属于早期设计参考。
 
+> 2026-10-20 更新：配色从浅黄改为 Obsidian 风格的紫色点缀（`--accent: #7852ee`、`--accent-soft: #efeafd`），灰色改为中性灰；图里的数据配色不变。左侧目录改为「搜索 + 折叠」，首页主体改为知识路线图，详见第 6、9 节。
+
 > A personal, evolving knowledge base for Computer Science, Machine Learning, LLMs, and AI Infrastructure.
 
 ## 1. Overview
@@ -292,6 +294,8 @@ Example:
 - collapse state 保存在 localStorage
 - mobile 下变成 drawer
 
+> 当前实现（2026-10-20，`components/layout/SidebarNav.tsx`）：顶部是搜索框（⌘K 或 / 聚焦），按标题、section、分类和 tag 过滤，结果按「分类 / section」分组，Enter 打开第一条。目录默认只展开当前笔记所在的分类和 section，其余各占一行；切换笔记时重新折叠到新位置，并把当前笔记滚到侧栏中间。折叠状态没有存 localStorage：每次跟着当前页面走，比记住旧状态更好找。
+
 顶部：
 
 ```text
@@ -440,6 +444,13 @@ and trying to understand how systems actually work.
 ```
 
 但不要把主页变成 Resume。
+
+> 当前实现（2026-10-20，设计稿 `docs/superpowers/specs/2026-10-19-home-roadmap-design.md`）：首页依次是 intro、**知识路线图**、最近记录（6 条，其余折叠在「查看全部」里）。原来的「探索主题」卡片已删除。
+>
+> - 路线图数据在 `content/roadmap.ts`：一个 section 一个节点，手工摆 `row/col`。ML 章节之间的边由 `content/ml/tree.ts` 的跨章节边推出，其余手写；被更长路径蕴含的边会自动去掉。`tests/roadmap.test.ts` 保证每个 section 都在图上、边都朝下、没有环。新增 section 时要在这里加一个节点。
+> - 节点颜色按分类区分，进度条显示 stable / growing / seed 的比例（目前全站还没有 stable 笔记，所以只看得到 growing）。
+> - 点节点打开右侧抽屉：按阅读顺序列出笔记，下面是「先修」「接下来」。Esc 或点遮罩关闭。
+> - 路线图区域窄于 880px 时（不论是窄屏还是分屏），改为按层分组的列表，避免缩得太小看不清。
 
 ---
 
