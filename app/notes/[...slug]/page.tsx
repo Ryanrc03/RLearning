@@ -61,6 +61,8 @@ import PretrainingObjectives from "@/content/ml/llms/pretraining-objectives.mdx"
 import DeepSeekMoE from "@/content/ml/llms/deepseek-moe.mdx";
 import DecodingStrategies from "@/content/ml/llms/decoding-strategies.mdx";
 import Bert from "@/content/ml/llms/bert.mdx";
+import BertVsMacbert from "@/content/ml/llms/bert-vs-macbert.mdx";
+import BertFinetuning from "@/content/ml/llms/bert-finetuning.mdx";
 import InceptionBlock from "@/content/ml/dl-blocks/inception-block.mdx";
 import RetrievalPrecisionAtK from "@/content/ml/recsys/retrieval-precision-at-k.mdx";
 import ClassifiersOverview from "@/content/ml/classifiers/overview.mdx";
@@ -80,6 +82,7 @@ import RepresentationsOverview from "@/content/ml/representations/overview.mdx";
 import Word2Vec from "@/content/ml/representations/word2vec.mdx";
 import SentenceEmbedding from "@/content/ml/representations/sentence-embedding.mdx";
 import CosineSimilarity from "@/content/ml/representations/cosine-similarity.mdx";
+import Tfidf from "@/content/ml/representations/tf-idf.mdx";
 import DlBlocksOverview from "@/content/ml/dl-blocks/overview.mdx";
 import BackpropChainRule from "@/content/ml/dl-blocks/backprop-chain-rule.mdx";
 import ResidualConnection from "@/content/ml/dl-blocks/residual-connection.mdx";
@@ -170,6 +173,8 @@ const noteComponents = {
   "ml/llms/deepseek-moe": DeepSeekMoE,
   "ml/llms/decoding-strategies": DecodingStrategies,
   "ml/llms/bert": Bert,
+  "ml/llms/bert-vs-macbert": BertVsMacbert,
+  "ml/llms/bert-finetuning": BertFinetuning,
   "ml/dl-blocks/inception-block": InceptionBlock,
   "ml/recsys/retrieval-precision-at-k": RetrievalPrecisionAtK,
   "ml/classifiers/overview": ClassifiersOverview,
@@ -189,6 +194,7 @@ const noteComponents = {
   "ml/representations/word2vec": Word2Vec,
   "ml/representations/sentence-embedding": SentenceEmbedding,
   "ml/representations/cosine-similarity": CosineSimilarity,
+  "ml/representations/tf-idf": Tfidf,
   "ml/dl-blocks/overview": DlBlocksOverview,
   "ml/dl-blocks/backprop-chain-rule": BackpropChainRule,
   "ml/dl-blocks/residual-connection": ResidualConnection,

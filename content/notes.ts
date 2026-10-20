@@ -555,6 +555,21 @@ export const noteEntries: NoteEntry[] = [
     series: { id: "ml-representations", title: "Representations：东西怎么变成向量", order: 3 },
   },
   {
+    slug: "ml/representations/tf-idf",
+    title: "TF-IDF",
+    description:
+      "不训练模型也能把一句话变成向量：字符 1/2-gram，权重 (1 + ln tf) × idf，L2 归一化后点积。用语义缓存的「国补多少」vs「国补多少钱」走一遍，看多一个字为什么掉到 0.870。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Representations",
+    created: "2026-10-20",
+    updated: "2026-10-20",
+    status: "seed",
+    readingMinutes: 8,
+    tags: ["ml-fundamentals", "representations", "tf-idf", "retrieval", "interactive"],
+    series: { id: "ml-representations", title: "Representations：东西怎么变成向量", order: 4 },
+  },
+  {
     slug: "ml/dl-blocks/overview",
     title: "Deep Learning Blocks Overview",
     description:
@@ -632,7 +647,7 @@ export const noteEntries: NoteEntry[] = [
     slug: "ml/llms/overview",
     title: "LLMs Overview",
     description:
-      "这一章回答「模型怎么读一串 token」：从 RNN 的递推到 attention 的矩阵，再到一层的全部零件、训练目标和生成策略。八页的问题链和阅读顺序。",
+      "这一章回答「模型怎么读一串 token」：从 RNN 的递推到 attention 的矩阵，再到一层的全部零件、训练目标和生成策略，最后把 BERT 微调到自己的任务上。十页的问题链和阅读顺序。",
     categoryId: "ml",
     category: "ML & LLM",
     section: "LLMs",
@@ -776,6 +791,36 @@ export const noteEntries: NoteEntry[] = [
     readingMinutes: 15,
     tags: ["BERT", "llms", "transformer", "pre-training", "fine-tuning", "GPT", "interactive"],
     series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 9 },
+  },
+  {
+    slug: "ml/llms/bert-vs-macbert",
+    title: "BERT vs MacBERT",
+    description:
+      "结构完全一样，都是 12 层 base，差别只在预训练任务：bert-base-chinese 随机遮单字、用 [MASK] 占位；MacBERT 按整词和 n-gram 选，用近义词替换再纠错回原词，换 SOP、加大数据。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "LLMs",
+    created: "2026-10-20",
+    updated: "2026-10-20",
+    status: "seed",
+    readingMinutes: 5,
+    tags: ["BERT", "MacBERT", "llms", "pre-training", "chinese", "ml-fundamentals", "interactive"],
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 10 },
+  },
+  {
+    slug: "ml/llms/bert-finetuning",
+    title: "BERT 微调：用 MacBERT 做三分类",
+    description:
+      "拿预训练好的 MacBERT 把评论分成负面、中性、正面：准备数据、按字切成 batch、接 768 → 3 的分类头、交叉熵与梯度 p − y、warmup 加线性衰减的训练循环、混淆矩阵与 macro-F1、推理上线，外加常见坑。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "LLMs",
+    created: "2026-10-20",
+    updated: "2026-10-20",
+    status: "growing",
+    readingMinutes: 16,
+    tags: ["BERT", "MacBERT", "fine-tuning", "llms", "classification", "interactive"],
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 11 },
   },
   {
     slug: "ml/llm-engineering/overview",
