@@ -128,6 +128,7 @@ export const chapters: TreeChapter[] = [
       n("ml/llms/pretraining-objectives", "预训练目标：自回归与 Masked LM", "训练时在预测什么？", "GPT 用因果 mask 预测下一个 token，loss 是 −Σ log P(y_t | y_<t)；BERT 遮住 15% 的 token 再猜回来，外加一个句子对的二分类。", "ready", "预训练目标"),
       n("ml/llms/decoding-strategies", "Decoding：greedy、sampling、top-k、top-p、beam", "生成时怎么选下一个词？", "greedy 取最高，sampling 按概率抽，top-k / top-p 先截断再抽，beam search 多留几条路选总分最大的；temperature 把分布变尖或变平。", "ready", "Decoding"),
       n("ml/llms/bert", "BERT：双向编码器怎样读懂一句话", "这些零件拼成一个只读不写的模型，怎么训、怎么用？", "只有 encoder 的 Transformer：遮住 15% 的词再猜回来做预训练，再接一个小头全参数微调去做分类；读得懂整句，但不会生成。", "ready", "BERT"),
+      n("ml/llms/bert-vs-macbert", "BERT vs MacBERT", "中文 BERT 还能怎么训得更好？", "结构完全一样，都是 12 层 base，差别只在预训练任务：MacBERT 按整词和 n-gram 选，用近义词代替 [MASK] 再让模型纠错回原词，并用 SOP 和更多数据。", "ready", "MacBERT"),
     ],
   },
   {

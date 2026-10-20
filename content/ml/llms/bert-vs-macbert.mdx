@@ -1,0 +1,42 @@
+import BertVsMacbertFigure from "@/components/visualization/ml/llms/BertVsMacbertFigure";
+
+# BERT vs MacBERT
+
+## 一句话
+
+**MacBERT 和 BERT 的结构完全一样，都是 12 层的 base 模型，差别只在预训练任务。**
+
+做中文的分类、匹配、阅读理解时，`bert-base-chinese` 和 `hfl/chinese-macbert-base` 可以直接互换：同一个模型类、同一张按字切分的词表（21,128 个 token），换一个权重名就行。
+
+## 为什么需要它
+
+[BERT](/notes/ml/llms/bert/) 那一页留下一个问题：预训练时输入里到处是 `[MASK]`，微调和推理时的真实句子里一个都没有，模型在两种分布不同的输入上工作，这就是训练和推理的不一致。中文还多一个麻烦：`bert-base-chinese` 按字遮，「模型」只遮掉「模」，留下的「型」几乎直接给出答案。MacBERT 就是冲着这两点改的预训练任务。
+
+## 怎么工作
+
+<BertVsMacbertFigure />
+
+两个模型的 loss 形式相同，都是被选中位置上的交叉熵；变的只是被选中的位置 $\mathcal{M}$ 怎么选、输入 $\tilde{x}$ 怎么造：
+
+$$
+\mathcal{L}_{\text{MLM}}=-\sum_{i\in\mathcal{M}}\log P\left(x_i\mid \tilde{x}\right)
+$$
+
+**bert-base-chinese**（Google，2018）：按字切分，随机选 15% 的字；选中的字 80% 换成 `[MASK]`、10% 换成随机字、10% 保持不变。另加一项下一句预测（NSP）。训练语料是中文维基百科。
+
+**MacBERT**（哈工大讯飞联合实验室，2020，Mac 是 *MLM as correction*）：输入仍按字切分，但先用 LTP 分词，按**整词**选，再按 40% / 30% / 20% / 10% 的概率一次选 1 到 4 个相邻的词（N-gram）。选中的词不放 `[MASK]`，80% 换成**近义词**（用 word2vec 相似度找，找不到就退回随机词）、10% 换成随机词、10% 不变，然后让模型把它纠回原词。图里切到最后一档：输入是一句带错字的通顺句子，`[MASK]` 一个都没有，和微调时看到的输入是同一种东西。
+
+另外两处改动：句子级任务从 NSP 换成 ALBERT 的**句序预测**（SOP，判断两段话的顺序有没有被交换），NSP 用随机句子做负例，太容易靠主题区分；预训练数据在中文维基之外加了百科、新闻和问答网站，总量约 54 亿词，比只用维基大一个数量级。
+
+## 代价与取舍
+
+- **不一致只是被缓解，没有消失。** BERT 的 80 / 10 / 10 本来就有 20% 不放 `[MASK]`；MacBERT 把剩下的 80% 也换成真词，但「预训练要纠错、微调要分类」这个差别还在。
+- **依赖分词和近义词表。** 整词和近义词都靠 LTP 与词向量，分错的词、不够近的"近义词"会变成噪声；这些工具只在预训练时用，微调和推理时不需要分词。
+- **提升来自三处叠加。** 遮法、SOP、更多数据是一起改的，论文的消融里每一项都有贡献；只换遮法拿不到全部收益。
+- **它仍是 BERT。** 512 长度上限、不能生成、每个任务一份微调副本，这些限制原样保留。
+
+## 再往下看
+
+MacBERT 的输出和 BERT 一样，每个字一个带上下文的向量；把它们变成整句的一个向量，见 [Sentence Embedding：CLS 与 Mean Pooling](/notes/ml/representations/sentence-embedding/)。
+
+论文：Cui, Y. et al. (2020), [*Revisiting Pre-Trained Models for Chinese Natural Language Processing*](https://arxiv.org/abs/2004.13922), Findings of EMNLP 2020。

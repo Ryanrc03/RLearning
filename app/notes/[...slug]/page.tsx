@@ -59,6 +59,7 @@ import TransformerBlock from "@/content/ml/llms/transformer-block.mdx";
 import PretrainingObjectives from "@/content/ml/llms/pretraining-objectives.mdx";
 import DecodingStrategies from "@/content/ml/llms/decoding-strategies.mdx";
 import Bert from "@/content/ml/llms/bert.mdx";
+import BertVsMacbert from "@/content/ml/llms/bert-vs-macbert.mdx";
 import InceptionBlock from "@/content/ml/dl-blocks/inception-block.mdx";
 import RetrievalPrecisionAtK from "@/content/ml/recsys/retrieval-precision-at-k.mdx";
 import ClassifiersOverview from "@/content/ml/classifiers/overview.mdx";
@@ -165,6 +166,7 @@ const noteComponents = {
   "ml/llms/pretraining-objectives": PretrainingObjectives,
   "ml/llms/decoding-strategies": DecodingStrategies,
   "ml/llms/bert": Bert,
+  "ml/llms/bert-vs-macbert": BertVsMacbert,
   "ml/dl-blocks/inception-block": InceptionBlock,
   "ml/recsys/retrieval-precision-at-k": RetrievalPrecisionAtK,
   "ml/classifiers/overview": ClassifiersOverview,

@@ -763,6 +763,21 @@ export const noteEntries: NoteEntry[] = [
     series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 8 },
   },
   {
+    slug: "ml/llms/bert-vs-macbert",
+    title: "BERT vs MacBERT",
+    description:
+      "结构完全一样，都是 12 层 base，差别只在预训练任务：bert-base-chinese 随机遮单字、用 [MASK] 占位；MacBERT 按整词和 n-gram 选，用近义词替换再纠错回原词，换 SOP、加大数据。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "LLMs",
+    created: "2026-10-20",
+    updated: "2026-10-20",
+    status: "seed",
+    readingMinutes: 5,
+    tags: ["BERT", "MacBERT", "llms", "pre-training", "chinese", "ml-fundamentals", "interactive"],
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 9 },
+  },
+  {
     slug: "ml/llm-engineering/overview",
     title: "LLM Engineering Overview",
     description:
