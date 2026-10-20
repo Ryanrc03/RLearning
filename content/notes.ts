@@ -647,7 +647,7 @@ export const noteEntries: NoteEntry[] = [
     slug: "ml/llms/overview",
     title: "LLMs Overview",
     description:
-      "这一章回答「模型怎么读一串 token」：从 RNN 的递推到 attention 的矩阵，再到一层的全部零件、训练目标和生成策略。八页的问题链和阅读顺序。",
+      "这一章回答「模型怎么读一串 token」：从 RNN 的递推到 attention 的矩阵，再到一层的全部零件、训练目标和生成策略，最后把 BERT 微调到自己的任务上。十页的问题链和阅读顺序。",
     categoryId: "ml",
     category: "ML & LLM",
     section: "LLMs",
@@ -791,6 +791,21 @@ export const noteEntries: NoteEntry[] = [
     readingMinutes: 5,
     tags: ["BERT", "MacBERT", "llms", "pre-training", "chinese", "ml-fundamentals", "interactive"],
     series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 9 },
+  },
+  {
+    slug: "ml/llms/bert-finetuning",
+    title: "BERT 微调：用 MacBERT 做三分类",
+    description:
+      "拿预训练好的 MacBERT 把评论分成负面、中性、正面：准备数据、按字切成 batch、接 768 → 3 的分类头、交叉熵与梯度 p − y、warmup 加线性衰减的训练循环、混淆矩阵与 macro-F1、推理上线，外加常见坑。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "LLMs",
+    created: "2026-10-20",
+    updated: "2026-10-20",
+    status: "growing",
+    readingMinutes: 16,
+    tags: ["BERT", "MacBERT", "fine-tuning", "llms", "classification", "interactive"],
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 10 },
   },
   {
     slug: "ml/llm-engineering/overview",

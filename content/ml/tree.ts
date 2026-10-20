@@ -130,6 +130,7 @@ export const chapters: TreeChapter[] = [
       n("ml/llms/decoding-strategies", "Decoding：greedy、sampling、top-k、top-p、beam", "生成时怎么选下一个词？", "greedy 取最高，sampling 按概率抽，top-k / top-p 先截断再抽，beam search 多留几条路选总分最大的；temperature 把分布变尖或变平。", "ready", "Decoding"),
       n("ml/llms/bert", "BERT：双向编码器怎样读懂一句话", "这些零件拼成一个只读不写的模型，怎么训、怎么用？", "只有 encoder 的 Transformer：遮住 15% 的词再猜回来做预训练，再接一个小头全参数微调去做分类；读得懂整句，但不会生成。", "ready", "BERT"),
       n("ml/llms/bert-vs-macbert", "BERT vs MacBERT", "中文 BERT 还能怎么训得更好？", "结构完全一样，都是 12 层 base，差别只在预训练任务：MacBERT 按整词和 n-gram 选，用近义词代替 [MASK] 再让模型纠错回原词，并用 SOP 和更多数据。", "ready", "MacBERT"),
+      n("ml/llms/bert-finetuning", "BERT 微调：用 MacBERT 做三分类", "预训练好的模型怎么用到自己的任务上？", "载入编码器，在 [CLS] 后接一个 768 → 3 的新线性层，用标注数据、2e-5 的学习率、warmup 加线性衰减把全部参数再训 2 到 4 个 epoch，用 macro-F1 挑 checkpoint。", "ready", "BERT 微调"),
     ],
   },
   {

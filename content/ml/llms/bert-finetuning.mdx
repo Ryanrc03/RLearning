@@ -1,0 +1,253 @@
+import FinetunePipelineFigure from "@/components/visualization/ml/llms/finetune/FinetunePipelineFigure";
+import TokenizeBatchFigure from "@/components/visualization/ml/llms/finetune/TokenizeBatchFigure";
+import HeadLossFigure from "@/components/visualization/ml/llms/finetune/HeadLossFigure";
+import TrainingRunFigure from "@/components/visualization/ml/llms/finetune/TrainingRunFigure";
+import ConfusionMatrixFigure from "@/components/visualization/ml/llms/finetune/ConfusionMatrixFigure";
+
+# BERT 微调：用 MacBERT 做三分类
+
+手上有一个预训练好的 MacBERT（`hfl/chinese-macbert-base`），要把用户关于「国补」的评论分成负面、中性、正面三类，具体怎么做？这篇笔记从数据走到上线，七步：准备数据、切成 token、搭模型、前向和 loss、训练循环、评估、推理。每一步配一张图和一个例子，例子始终是同几条评论。模型本身的结构见 [BERT](/notes/ml/llms/bert/)，MacBERT 和 BERT 的区别见 [BERT vs MacBERT](/notes/ml/llms/bert-vs-macbert/)；这里只讲把它用起来。文中的超参默认值来自 BERT 论文附录 A.3 和 google-research/bert 的 `run_classifier.py`，图里标了「示意」的数字是为讲解编的，其余都是按公式算出来的。
+
+## What is it?
+
+一句话：**微调就是把预训练好的编码器整个搬过来，在 `[CLS]` 后面接一个 768 → 3 的线性层，用带标签的数据和很小的学习率把全部参数一起再训几个 epoch。**
+
+<FinetunePipelineFigure />
+
+新东西只有分类头的 2,307 个参数；编码器的一亿多个参数都从 checkpoint 载入，但训练时也跟着更新。这就是「全参数微调」。
+
+## Why fine-tune?
+
+三分类有好几条路，微调不是唯一一条：
+
+| 做法 | 怎么做 | 需要多少标注 | 什么时候选 |
+| --- | --- | --- | --- |
+| 从头训一个小模型 | TextCNN、LSTM 随机初始化 | 几万条以上 | 数据很多、要求极快的推理 |
+| 冻结 BERT，只训头 | 编码器当特征提取器，只更新 2,307 个参数 | 几百到几千条 | 算力很少，或要一个编码器服务多个任务 |
+| **全参数微调** | 编码器和头一起更新 | 几千到几万条 | 有一张 GPU、数据在这个量级，效果通常最好 |
+| 提示一个大模型 | 把定义和几个例子写进 prompt | 0 到几十条 | 没有标注、量小、可以接受慢和贵 |
+
+预训练让编码器已经「读得懂中文」，但它不知道这个任务关心什么：「国补什么时候发」和「国补还没发」字面很像，一个是中性的提问，一个是带情绪的抱怨。微调让编码器的表示朝这个区分的方向挪一点，代价是每个任务存一份 400 MB 的模型副本。
+
+## Step 1: 准备数据
+
+一条样本就是一句话加一个标签。先把标签映射成整数，这张表训练、评估、上线都要用同一份：
+
+| 文本 | 标签 | id |
+| --- | --- | --- |
+| 等了一个月国补还没到账，客服也不回消息 | 负面 | 0 |
+| 国补什么时候发 | 中性 | 1 |
+| 国补到账了，价格很划算 | 正面 | 2 |
+
+然后切成训练集、验证集、测试集（常见 8 : 1 : 1）。验证集用来挑 epoch 和超参，测试集只在最后看一次。三件事要在这一步就检查：
+
+- **类别分布。** 情感数据里中性往往最少、也最难标。按类别分层抽样（stratified split），让三个集合的比例一致。
+- **重复和泄漏。** 同一句话（或只差一个标点）同时出现在训练集和测试集，分数会虚高。先去重再切分。
+- **标注一致性。** 「国补什么时候发啊，都等一周了」算中性还是负面？两个标注员各标一百条算一致率，边界规则写进标注文档。模型学到的上限就是标注的一致程度。
+
+## Step 2: Tokenize
+
+MacBERT 沿用 bert-base-chinese 的词表（21,128 个 token），中文按字切，不需要分词器。下面三条评论一步步变成一个 batch：
+
+<TokenizeBatchFigure />
+
+最后交给模型的是三个同形状的整数矩阵和一个标签向量：
+
+| 张量 | 形状 | 内容 |
+| --- | --- | --- |
+| `input_ids` | `[B, L]` | 每个 token 在词表里的行号；`[CLS]` = 101，`[SEP]` = 102，`[PAD]` = 0 |
+| `attention_mask` | `[B, L]` | 真实 token 为 1，`[PAD]` 为 0；注意力在 0 的位置加 −∞ |
+| `token_type_ids` | `[B, L]` | 单句分类全为 0；句对任务（如判断两句是否同义）第二句为 1 |
+| `labels` | `[B]` | 0、1、2 |
+
+`max_len` 怎么定：把训练集的长度分布画出来，取覆盖 95% 左右的那个长度，评论类数据 128 通常够了。注意力那部分的计算量随 $L^2$ 增长，128 比 512 少 16 倍。超长文本截断时，Sun 等（2019）在 IMDb 上发现「保留开头 128 个 + 结尾 382 个 token」比只留开头好，因为结论常在末尾，上图第三条就是例子。
+
+## Step 3: 模型 = MacBERT + 分类头
+
+```python
+from transformers import BertTokenizer, BertForSequenceClassification
+
+labels = ["负面", "中性", "正面"]
+tok = BertTokenizer.from_pretrained("hfl/chinese-macbert-base")
+model = BertForSequenceClassification.from_pretrained(
+    "hfl/chinese-macbert-base",
+    num_labels=3,
+    id2label=dict(enumerate(labels)),
+    label2id={l: i for i, l in enumerate(labels)},
+)
+# 日志会提示 classifier.weight / classifier.bias 是新初始化的：这是预期的
+```
+
+hfl 的说明里写明要用 `Bert*` 系列的类来加载 MacBERT，没有单独的 MacBERT 类，因为结构和 BERT 完全一样。载入时发生了三件事：
+
+| 部分 | 参数量 | 来源 |
+| --- | --- | --- |
+| 嵌入层 + 12 层编码器 + pooler | 约 102,267,648（按 bert-base-uncased 的 109,482,240 换中文词表换算） | 从 checkpoint 载入 |
+| MLM 头、SOP 头 | — | checkpoint 里有，这里用不上，丢掉 |
+| 分类头 `Linear(768, 3)` | 768 × 3 + 3 = 2,307 | 新建，权重 $\mathcal{N}(0, 0.02^2)$，偏置 0 |
+
+分类头前面有一个 dropout（p = 0.1）。`[CLS]` 位置的输出先过 pooler（一个 768 × 768 的线性层加 tanh），再进分类头。也可以对所有真实 token 的输出取平均再分类，有时更稳，两种取法见 [Sentence Embedding](/notes/ml/representations/sentence-embedding/)。
+
+## Step 4: 前向与 loss
+
+设 $h \in \mathbb{R}^{768}$ 是 pooler 的输出，分类头是 $W \in \mathbb{R}^{3 \times 768}$、$b \in \mathbb{R}^{3}$：
+
+$$
+z = W h + b,\qquad p_k = \frac{e^{z_k}}{\sum_{j=1}^{3} e^{z_j}},\qquad \mathcal{L} = -\log p_y
+$$
+
+一个 batch 的 loss 是各条的平均。反向传播从 logits 开始，梯度的形式非常干净：
+
+$$
+\frac{\partial \mathcal{L}}{\partial z_k} = p_k - \mathbb{1}[k = y]
+$$
+
+正确类的梯度是 $p_y - 1 < 0$，其余是 $p_k > 0$。梯度下降于是抬高正确类、压低其他类，力度正比于「还差多少」。下面选一条评论，看三个训练时刻：
+
+<HeadLossFigure />
+
+两个能当体检用的数：刚开始的 loss 应该在 $\ln 3 \approx 1.10$ 附近，因为随机的头给三类差不多的概率；训练几十步以后 loss 应该明显往下走。开局就远离 1.10（比如 5.0），通常是标签越界或者 `num_labels` 写错了；一直卡在 1.10，通常是学习率太小、标签被打乱，或者 batch 里全是同一类。
+
+这一页的 loss 和预训练的 MLM loss 是同一个交叉熵，只是类别从 21,128 个字变成了 3 类，见 [预训练目标](/notes/ml/llms/pretraining-objectives/)。
+
+## Step 5: 训练循环
+
+每一步：取一个 batch，前向算 loss，反向算梯度，AdamW 更新全部参数，学习率调度器走一步。BERT 论文给的搜索范围和 `run_classifier.py` 的默认值：
+
+| 超参 | 常用值 | 出处 |
+| --- | --- | --- |
+| 学习率 | 5e-5、3e-5、2e-5 里挑 | BERT 论文附录 A.3 |
+| batch size | 16 或 32 | 同上 |
+| epoch | 2、3、4 | 同上 |
+| dropout | 0.1 | 同上 |
+| warmup | 前 10% 的步数 | `run_classifier.py` 的 `warmup_proportion` |
+| 学习率调度 | warmup 后线性衰减到 0 | 同上 |
+| weight decay | 0.01（偏置和 LayerNorm 不加） | BERT 的优化器 |
+| max_len | 128 | `run_classifier.py` 的 `max_seq_length` |
+
+学习率随步数 $t$ 的变化（总步数 $T$，warmup 步数 $T_w$，峰值 $\eta$）：
+
+$$
+\eta_t = \begin{cases} \eta \cdot t / T_w, & t < T_w \\ \eta \cdot (T - t) / (T - T_w), & t \ge T_w \end{cases}
+$$
+
+为什么要 warmup：分类头刚初始化时给出的梯度方向很乱，如果一上来就用峰值学习率，乱的梯度会顺着反向传播把预训练好的编码器推坏。小步起跑等头先稳下来。为什么学习率比预训练小一两个数量级：编码器已经在一个好的位置，微调只该在附近挪动。下面把一次训练按步播放出来，再切到学习率太大的那一档：
+
+<TrainingRunFigure />
+
+用 transformers 的 `Trainer` 写出来：
+
+```python
+import numpy as np
+from datasets import load_dataset
+from sklearn.metrics import accuracy_score, f1_score
+from transformers import DataCollatorWithPadding, Trainer, TrainingArguments
+
+ds = load_dataset("csv", data_files={"train": "train.csv", "validation": "dev.csv"})  # 两列：text, label
+ds = ds.map(lambda b: tok(b["text"], truncation=True, max_length=128), batched=True)
+
+def compute_metrics(pred):
+    y, yhat = pred.label_ids, np.argmax(pred.predictions, axis=-1)
+    return {"accuracy": accuracy_score(y, yhat), "macro_f1": f1_score(y, yhat, average="macro")}
+
+args = TrainingArguments(
+    output_dir="macbert-guobu",
+    learning_rate=2e-5,
+    per_device_train_batch_size=32,
+    num_train_epochs=3,
+    warmup_ratio=0.1,                 # 线性 warmup + 线性衰减是默认调度
+    weight_decay=0.01,
+    eval_strategy="epoch",            # 每个 epoch 末在验证集上评估
+    save_strategy="epoch",
+    load_best_model_at_end=True,
+    metric_for_best_model="macro_f1",
+    fp16=True,                        # 有 GPU 时用混合精度，省一半显存
+    seed=42,
+)
+trainer = Trainer(model=model, args=args, train_dataset=ds["train"], eval_dataset=ds["validation"],
+                  data_collator=DataCollatorWithPadding(tok),   # 按 batch 内最长补齐
+                  compute_metrics=compute_metrics)
+trainer.train()
+```
+
+算一下规模：1 万条训练数据、batch 32，一个 epoch 是 313 步，3 个 epoch 共 939 步，warmup 94 步。base 模型、`max_len` 128、单张消费级 GPU 开混合精度，十几分钟就能跑完。显存不够时先减 batch，再用 `gradient_accumulation_steps` 把等效 batch 补回来。
+
+## Step 6: 评估
+
+每个 epoch 末在验证集上算指标，只看准确率不够，三分类一定要看混淆矩阵：
+
+<ConfusionMatrixFigure />
+
+$$
+\text{macro-F1} = \frac{1}{3}\sum_{k=1}^{3} \mathrm{F1}_k,\qquad \mathrm{F1}_k = \frac{2\,P_k R_k}{P_k + R_k}
+$$
+
+macro-F1 让三类等权，少数类做得差会直接拉低它；准确率和 weighted-F1 会被多数类撑住。所以 `metric_for_best_model` 用 macro-F1。精确率、召回和 F1 的定义见 [Precision、Recall 与 F1](/notes/ml/evaluation/precision-recall-f1/)。
+
+上图里中性最差，接下来怎么办，按成本从低到高：
+
+1. **翻错例。** 把中性被判错的几十条拿出来读，很多时候是标注本身不一致，先修数据。
+2. **加权 loss。** 给少数类更大的权重，$\mathcal{L} = -w_y \log p_y$，$w_k$ 常取类别频率的倒数再归一化。
+3. **补数据。** 针对混淆最多的那一对（中性 ↔ 负面）补标注。
+4. **调阈值。** 不直接 argmax，而是在验证集上为中性挑一个概率阈值，用精确率换召回。
+
+## Step 7: 推理
+
+```python
+import torch
+
+model.eval()
+texts = ["国补到账了，价格很划算", "国补什么时候发", "等了一个月国补还没到账"]
+batch = tok(texts, padding=True, truncation=True, max_length=128, return_tensors="pt")
+with torch.no_grad():
+    probs = model(**batch).logits.softmax(-1)      # [3, 3]
+for t, p in zip(texts, probs):
+    print(t, model.config.id2label[p.argmax().item()], p.max().item())
+```
+
+推理只走前向：没有标签、没有 loss、dropout 关掉（`model.eval()` 做的就是这个）。`trainer.save_model()` 把权重、配置（包括 `id2label`）和 tokenizer 存到一个目录，上线时直接 `from_pretrained` 那个目录。三点要注意：
+
+- **tokenizer 要和训练时一致**，包括 `max_length` 和截断方式。
+- **低置信度要有出口。** `p.max()` 低于某个值（比如 0.6）时转人工或标成「不确定」，比硬给一个标签好。
+- **线上分布会漂移。** 新的说法（「国补」本身就是新词）不断出现，定期抽样标注、看混淆矩阵有没有变坏。
+
+## Common pitfalls
+
+| 症状 | 常见原因 | 处理 |
+| --- | --- | --- |
+| 所有样本都预测成同一类 | 学习率太大把编码器推坏（上面第二档），或者类别极不均衡 | 学习率降到 2e-5 以下，加 warmup，检查类别分布 |
+| loss 一直卡在 1.10 | 学习率太小、标签被打乱、`num_labels` 不对 | 先在 32 条数据上过拟合到 loss ≈ 0，确认管线没问题 |
+| 训练集 99%、验证集 70% | 过拟合，数据太少或 epoch 太多 | 减 epoch，用验证集早停，加数据 |
+| 换个随机种子结果差好几个点 | 小数据集上的微调不稳定 | 多跑几个种子取平均或取最好；Mosbach 等（2021）建议用 Adam 偏差修正、小学习率、多训几个 epoch |
+| 长评论总判错 | 关键信息被截断 | 增大 `max_len`，或保留开头加结尾 |
+| 验证集很好，上线变差 | 数据泄漏，或线上分布和训练集不同 | 去重后重切分，抽样标注线上数据 |
+
+## Trade-offs
+
+- **每个任务一份完整模型。** 三分类、意图识别、实体抽取各微调一份，每份约 400 MB。LoRA 等参数高效方法只训练很小的增量矩阵，多个任务可以共用一个底座。
+- **全参数微调要显存。** AdamW 要为每个参数存两份状态，base 模型训练时显存是推理的好几倍。冻结底下几层，或用 Sun 等（2019）的逐层学习率衰减（越靠下的层学习率越小），能省资源也能减少遗忘。
+- **只能做训练过的那三类。** 想加一个「询价」类就得重新标注、重新微调；大模型用 prompt 改类别定义即可，但每次推理贵得多。
+- **512 的长度上限没有变。** 长文档要切块或换长上下文的编码器（如 ModernBERT）。
+
+## Key ideas to remember
+
+1. 微调 = 载入预训练编码器 + 在 `[CLS]` 后接一个新的 `Linear(768, 3)`，用标注数据把全部参数一起训练；新参数只有 2,307 个。
+2. 中文按字切，一个 batch 是 `input_ids`、`attention_mask`、`token_type_ids` 三个 `[B, L]` 矩阵加 `labels`；补齐的位置被 mask 掉，不影响结果。
+3. loss 是正确类的 $-\log p_y$，对 logits 的梯度是 $p - y$；开局 loss 应在 $\ln 3 \approx 1.10$ 附近。
+4. 学习率 2e-5 量级、warmup 10% 后线性衰减、2 到 4 个 epoch；学习率太大会冲掉预训练学到的特征。
+5. 三分类看混淆矩阵和 macro-F1，用验证集挑 checkpoint；少数类差时先翻错例、修数据，再考虑加权和补数据。
+
+## Related notes
+
+- [BERT：双向编码器怎样读懂一句话](/notes/ml/llms/bert/)：编码器、`[CLS]`、pooler 的结构和预训练。
+- [BERT vs MacBERT](/notes/ml/llms/bert-vs-macbert/)：这里用的底座和 bert-base-chinese 差在哪。
+- [预训练目标：自回归与 Masked LM](/notes/ml/llms/pretraining-objectives/)：同一个交叉熵在预训练时怎么算。
+- [Precision、Recall 与 F1](/notes/ml/evaluation/precision-recall-f1/)：评估一节用到的指标。
+- [Sentence Embedding：CLS 与 Mean Pooling](/notes/ml/representations/sentence-embedding/)：分类时取 `[CLS]` 还是取平均。
+
+## Further reading
+
+- Devlin, J. et al. (2018), [*BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding*](https://arxiv.org/abs/1810.04805)：附录 A.3 是微调超参的搜索范围。
+- Cui, Y. et al. (2020), [*Revisiting Pre-Trained Models for Chinese Natural Language Processing*](https://arxiv.org/abs/2004.13922)：MacBERT。权重见 [hfl/chinese-macbert-base](https://huggingface.co/hfl/chinese-macbert-base)。
+- Sun, C. et al. (2019), [*How to Fine-Tune BERT for Text Classification?*](https://arxiv.org/abs/1905.05583)：截断策略、逐层学习率衰减、继续预训练。
+- Mosbach, M. et al. (2021), [*On the Stability of Fine-tuning BERT*](https://arxiv.org/abs/2006.04884)：为什么小数据集上的微调会不稳定，以及怎么办。
