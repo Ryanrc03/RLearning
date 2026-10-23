@@ -1548,6 +1548,20 @@ export const noteEntries: NoteEntry[] = [
     tags: ["ml-fundamentals", "recommender-systems", "embedding", "overfitting", "KuaiRand", "interactive"],
   },
   {
+    slug: "ml/recsys/din",
+    title: "DIN：用候选视频去读用户行为序列",
+    description:
+      "Deep Interest Network（KDD 2018）在 kuairank 里的实现：target attention 的 activation unit、为什么不做 softmax、和均值池化的区别，以及不物化 (样本 × N) 矩阵的序列存储。KuaiRand 上序列让 GAUC 涨了 0.008–0.010，但 DIN 与均值打平、最近 10 条最好：增益来自用户此刻的状态，不是兴趣匹配。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Recommender Systems",
+    created: "2026-10-23",
+    updated: "2026-10-23",
+    status: "growing",
+    readingMinutes: 15,
+    tags: ["DIN", "recommender-systems", "recsys", "attention", "user sequence", "KuaiRand", "interactive"],
+  },
+  {
     slug: "ml/recsys/sample-feature-join",
     title: "样本与特征拼接：延迟转化与特征快照",
     description:

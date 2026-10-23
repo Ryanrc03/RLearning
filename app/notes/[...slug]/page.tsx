@@ -107,6 +107,7 @@ import PointInTimeSplit from "@/content/ml/recsys/point-in-time-split.mdx";
 import GaucPairedBootstrap from "@/content/ml/recsys/gauc-paired-bootstrap.mdx";
 import ExposureBiasRandomEval from "@/content/ml/recsys/exposure-bias-random-eval.mdx";
 import IdEmbeddingOneEpoch from "@/content/ml/recsys/id-embedding-one-epoch.mdx";
+import Din from "@/content/ml/recsys/din.mdx";
 import TTest from "@/content/ml/evaluation/t-test.mdx";
 import { getNote, getSeriesNeighbors, noteEntries } from "@/content/notes";
 import { getNoteToc } from "@/lib/content";
@@ -220,6 +221,7 @@ const noteComponents = {
   "ml/recsys/gauc-paired-bootstrap": GaucPairedBootstrap,
   "ml/recsys/exposure-bias-random-eval": ExposureBiasRandomEval,
   "ml/recsys/id-embedding-one-epoch": IdEmbeddingOneEpoch,
+  "ml/recsys/din": Din,
   "ml/evaluation/t-test": TTest,
 };
 

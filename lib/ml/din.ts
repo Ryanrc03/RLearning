@@ -171,3 +171,26 @@ export function separationAt(history: readonly HistEvent[], n: number, pool: "me
   const f = pool === "mean" ? meanPool : dinPool;
   return f(a, last).score - f(b, last).score;
 }
+
+// ---------------------------------------------------------------- pointer toy (kurec/seq.sequence_index)
+
+export type ToyEvent = { user: string; time: string };
+
+// Three users' events, already sorted by (user, time). Events with the same time belong to one request.
+export const TOY_EVENTS: ToyEvent[] = [
+  { user: "A", time: "09:00" }, { user: "A", time: "09:00" }, { user: "A", time: "09:05" }, { user: "A", time: "09:05" },
+  { user: "A", time: "09:05" }, { user: "A", time: "09:12" }, { user: "A", time: "09:20" }, { user: "A", time: "09:20" },
+  { user: "A", time: "09:31" },
+  { user: "B", time: "10:00" }, { user: "B", time: "10:00" }, { user: "B", time: "10:07" }, { user: "B", time: "10:07" },
+  { user: "B", time: "10:15" }, { user: "B", time: "10:15" },
+  { user: "C", time: "11:00" }, { user: "C", time: "11:00" }, { user: "C", time: "11:04" }, { user: "C", time: "11:09" },
+  { user: "C", time: "11:09" },
+];
+
+// lo = the user's first event; hi = the first event of the sample's own request (same user, same time).
+export function samplePointers(events: readonly ToyEvent[], sample: number): { lo: number; hi: number } {
+  const s = events[sample];
+  const lo = events.findIndex((e) => e.user === s.user);
+  const hi = events.findIndex((e) => e.user === s.user && e.time === s.time);
+  return { lo, hi };
+}

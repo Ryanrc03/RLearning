@@ -50,3 +50,10 @@ test("a recent burst is diluted by mean pooling as N grows, not by the un-normal
   assert.ok(separationAt(h, 12, "mean") > 4 * separationAt(h, 200, "mean"));
   assert.ok(separationAt(h, 200, "din") >= separationAt(h, 12, "din"));
 });
+
+test("pointers exclude the sample's own request and stop at the user's first event", async () => {
+  const { samplePointers, TOY_EVENTS } = await import("@/lib/ml/din");
+  assert.deepEqual(samplePointers(TOY_EVENTS, 7), { lo: 0, hi: 6 });
+  assert.deepEqual(samplePointers(TOY_EVENTS, 12), { lo: 9, hi: 11 });
+  assert.deepEqual(samplePointers(TOY_EVENTS, 16), { lo: 15, hi: 15 });
+});
