@@ -185,6 +185,7 @@ export const chapters: TreeChapter[] = [
     existing: true,
     nodes: [
       n("ml/recsys/kuairand-input", "一条曝光的 84 维输入", "排序模型看到什么？", "KuaiRand-1K 的曝光日志怎样变成排序模型的输入：数据流、一条真实样本的 84 个特征、只看过去的时间窗统计。", "ready"),
+      n("ml/recsys/point-in-time-split", "时间切分与只用过去的特征", "这些统计只能用过去，评估集又怎么切？", "train / valid / test 按日期切，随机曝光单独当无偏测试集；每个特征只数时间戳严格早于样本的行，同一请求整块排除，含评估期的月均统计不用。", "ready", "时间切分与 point-in-time"),
       n("ml/recsys/lightgbm-explained", "梯度提升树如何给曝光打分", "树怎么给曝光打分？", "以真实训练的 LightGBM click 模型为例：目标函数与梯度、一轮迭代、直方图与 leaf-wise、一条样本的 407 步轨迹。", "ready"),
       n("ml/recsys/boosting-lab", "提升树训练实验台", "一轮一棵树怎么长？", "16 个点、一个特征，按一轮长一棵树：看残差被压小、LogLoss 下降、森林长出；GBDT / XGBoost / LightGBM 的差别做成开关。", "ready"),
       n("ml/recsys/retrieval-precision-at-k", "检索的 P@30、Recall@30 与 group P@1", "检索出来的前 30 个里有几个是对的？", "P@30 是前 30 个结果里相关的比例，Recall@30 是前 30 个找回了全部相关的多少；MeMe 项目里 exact 匹配 0.23，semantic 检索 0.9344。", "ready", "P@30 / Recall@30"),

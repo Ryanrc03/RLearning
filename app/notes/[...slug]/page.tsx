@@ -103,6 +103,7 @@ import EvalHarness from "@/content/ml/llm-engineering/eval-harness.mdx";
 import CtrCvrEsmm from "@/content/ml/recsys/ctr-cvr-esmm.mdx";
 import FeatureCrossing from "@/content/ml/recsys/feature-crossing.mdx";
 import SampleFeatureJoin from "@/content/ml/recsys/sample-feature-join.mdx";
+import PointInTimeSplit from "@/content/ml/recsys/point-in-time-split.mdx";
 import TTest from "@/content/ml/evaluation/t-test.mdx";
 import { getNote, getSeriesNeighbors, noteEntries } from "@/content/notes";
 import { getNoteToc } from "@/lib/content";
@@ -212,6 +213,7 @@ const noteComponents = {
   "ml/recsys/ctr-cvr-esmm": CtrCvrEsmm,
   "ml/recsys/feature-crossing": FeatureCrossing,
   "ml/recsys/sample-feature-join": SampleFeatureJoin,
+  "ml/recsys/point-in-time-split": PointInTimeSplit,
   "ml/evaluation/t-test": TTest,
 };
 

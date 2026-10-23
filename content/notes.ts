@@ -941,6 +941,20 @@ export const noteEntries: NoteEntry[] = [
     tags: ["recommender systems", "feature engineering", "KuaiRand", "LightGBM"],
   },
   {
+    slug: "ml/recsys/point-in-time-split",
+    title: "时间切分与只用过去的特征",
+    description:
+      "KuaiRand-1K 按日期切成 train / valid / test，随机曝光单独当无偏测试集；滚动特征只数严格早于样本的行。拖一条 test 样本，看「≤ t」和整月统计怎样把离线 AUC 骗高。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Recommender Systems",
+    created: "2026-10-23",
+    updated: "2026-10-23",
+    status: "seed",
+    readingMinutes: 6,
+    tags: ["ml-fundamentals", "recommender-systems", "KuaiRand", "leakage", "interactive"],
+  },
+  {
     slug: "ml/recsys/lightgbm-explained",
     title: "梯度提升树如何给曝光打分",
     description:
