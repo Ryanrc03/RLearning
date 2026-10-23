@@ -997,6 +997,20 @@ export const noteEntries: NoteEntry[] = [
     tags: ["ml-fundamentals", "recommender-systems", "evaluation", "GAUC", "bootstrap", "interactive"],
   },
   {
+    slug: "ml/recsys/exposure-bias-random-eval",
+    title: "曝光偏差与随机曝光评估",
+    description:
+      "常规日志的曝光是推荐策略挑过的；KuaiRand 的随机曝光子集点击率只有常规的 46%，LightGBM 在上面掉 0.034 GAUC、校准比 2.70。拖动策略的挑剔程度，看日志上的分数怎样和真实偏好分开。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Recommender Systems",
+    created: "2026-10-23",
+    updated: "2026-10-23",
+    status: "seed",
+    readingMinutes: 6,
+    tags: ["ml-fundamentals", "recommender-systems", "evaluation", "exposure bias", "KuaiRand", "interactive"],
+  },
+  {
     slug: "ml/recsys/retrieval-precision-at-k",
     title: "检索的 P@30、Recall@30 与 group P@1",
     description:

@@ -189,6 +189,7 @@ export const chapters: TreeChapter[] = [
       n("ml/recsys/lightgbm-explained", "梯度提升树如何给曝光打分", "树怎么给曝光打分？", "以真实训练的 LightGBM click 模型为例：目标函数与梯度、一轮迭代、直方图与 leaf-wise、一条样本的 407 步轨迹。", "ready"),
       n("ml/recsys/boosting-lab", "提升树训练实验台", "一轮一棵树怎么长？", "16 个点、一个特征，按一轮长一棵树：看残差被压小、LogLoss 下降、森林长出；GBDT / XGBoost / LightGBM 的差别做成开关。", "ready"),
       n("ml/recsys/gauc-paired-bootstrap", "GAUC 与配对用户 bootstrap", "分数怎么评，两个模型差多少才算数？", "每个用户内部算 AUC 再按曝光数加权，用户和场景之间的差别不再虚高；随机集上两个区间总是重叠，要在同一批重采样用户上看差值的区间。", "ready", "GAUC 与配对 bootstrap"),
+      n("ml/recsys/exposure-bias-random-eval", "曝光偏差与随机曝光评估", "推荐系统自己挑的曝光上评出来的分数，可信吗？", "日志里的曝光是线上策略挑过的；KuaiRand 把少量推荐位换成随机视频，点击率 0.174 对 0.377，LightGBM 的 GAUC 从 0.652 掉到 0.618，随机集才量到真实偏好。", "ready", "曝光偏差与随机评估"),
       n("ml/recsys/retrieval-precision-at-k", "检索的 P@30、Recall@30 与 group P@1", "检索出来的前 30 个里有几个是对的？", "P@30 是前 30 个结果里相关的比例，Recall@30 是前 30 个找回了全部相关的多少；MeMe 项目里 exact 匹配 0.23，semantic 检索 0.9344。", "ready", "P@30 / Recall@30"),
       n("ml/recsys/ctr-cvr-esmm", "CTR、CVR 与 ESMM", "点了之后会不会买，怎么预测？", "CTR = 点击 / 曝光，CVR = 转化 / 点击；CVR 只在点击样本上训练却要对全部曝光打分，ESMM 用 pCTR × pCVR 在曝光空间上一起学。", "ready"),
       n("ml/recsys/feature-crossing", "特征交叉：FM 与 DCN", "两个特征的组合才有信号，模型怎么学到？", "线性模型只能把特征分开加；FM 给每个特征一个向量、用内积学二阶交叉，DCN 用 x₀·(x_lᵀw) + x_l 每层多一阶。", "ready", "特征交叉"),
