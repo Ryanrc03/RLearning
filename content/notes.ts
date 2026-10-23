@@ -1534,6 +1534,20 @@ export const noteEntries: NoteEntry[] = [
     tags: ["ml-fundamentals", "recommender-systems", "interactive"],
   },
   {
+    slug: "ml/recsys/id-embedding-one-epoch",
+    title: "id embedding 的记忆与 one-epoch 现象",
+    description:
+      "id 向量只对训练期见过的 id 有用：KuaiRand test 里 video_id 只覆盖 11.5%。四个真实运行的 valid 曲线：加 author_id / video_id 后第 2 个 epoch 一开始就掉，train loss 0.51 → 0.28。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Recommender Systems",
+    created: "2026-10-23",
+    updated: "2026-10-23",
+    status: "seed",
+    readingMinutes: 6,
+    tags: ["ml-fundamentals", "recommender-systems", "embedding", "overfitting", "KuaiRand", "interactive"],
+  },
+  {
     slug: "ml/recsys/sample-feature-join",
     title: "样本与特征拼接：延迟转化与特征快照",
     description:

@@ -1,0 +1,46 @@
+import OneEpochFigure from "@/components/visualization/ml/recsys/OneEpochFigure";
+
+# id embedding 的记忆与 one-epoch 现象
+
+## 一句话
+
+**给每个 user_id、author_id、video_id 一行可学的向量（id embedding），模型就能记住见过的 id 自己的脾气；但记忆只对见过的 id 有用，而且高基数 id 会在第二遍见到训练样本时把它背下来，valid 从第 2 个 epoch 开始下跌，这叫 one-epoch 现象。**
+
+工业 CTR 模型几乎都带 id embedding，所以几乎都只训 1 个 epoch，或者按验证集挑最好的那份权重。
+
+## 为什么需要它
+
+[特征交叉：FM 与 DCN](/notes/ml/recsys/feature-crossing/) 让深度模型学到特征组合，这是它相对 GBDT 的第一件武器；第二件是 id embedding：树不能把 40 万个作者当成类别直接切，网络可以给每个作者一行向量。问题是这件武器在 KuaiRand 上能不能用。按时间切分以后，test 里大部分视频训练期没见过（见 [时间切分与只用过去的特征](/notes/ml/recsys/point-in-time-split/)），查不到的 id 只能共用一个 OOV 向量。
+
+## 怎么工作
+
+<OneEpochFigure />
+
+$$
+\mathbf e_{\text{id}} = E\big[\operatorname{vocab}(\text{id})\big] \in \mathbb R^{d},\qquad \operatorname{vocab}(\text{id}) = 0\ \ \text{若 id 在 train 里出现少于 2 次}
+$$
+
+词表只从 train 建，出现至少 2 次的 id 才有自己的一行：只出现 1 次的视频占 train 视频的 68%，它们的向量只会被更新一次，和随机初始化差不多。覆盖率决定了记忆能用在多少行上：
+
+| 字段 | train 词表 | valid 覆盖 | test 覆盖 | 随机集覆盖 |
+| --- | --- | --- | --- | --- |
+| video_id（≥1 次） | 2,119,510 | 25.8% | 15.1% | 69.9% |
+| video_id（≥2 次，采用） | 686,346 | 20.1% | 11.5% | 50.9% |
+| author_id（≥2 次，采用） | 402,555 | 75.8% | 68.5% | 97.3% |
+
+kuairank 在同一个 DCN-v2 上逐个加 id（#11–#13，配对差值都对 #9）：加 user_id，随机集 −0.0003 [−0.0041, +0.0034]；再加 author_id，+0.0001；再加 video_id，参数从 116 万涨到 1,878 万，随机集 +0.0014 [−0.0027, +0.0057]，tab 1 −0.0004，都不显著。拆开看才看到记忆：tab 1 上能查到 video_id 的 12% 行 +0.0030（显著），查不到的 88% 行 −0.0008，净值为零。随机集虽然一半的行能查到，那一半反而 −0.0023（不显著）：在推荐日志里记住的「这个视频推给目标用户时表现如何」，换成随机曝光就迁移不过去。user_id 没用另有原因：`onehot_feat3`、`onehot_feat8`（394 个、283 个取值）和用户×tab 统计已经替模型认出了用户。
+
+图里是 one-epoch 现象本身。第 1 个 epoch 四条曲线重合在 0.804 附近；第 2 个 epoch 一开始，带 author_id 的运行掉到 0.781，再加 video_id 掉到 0.764，第 3 个 epoch 只剩 0.714，train loss 从 0.51 跌到 0.28。一个只出现几次的 id，它那一行向量只从这几条样本里学；第一遍学完，这几条样本的 label 已经写进了向量，第二遍再来，最省力的降 loss 方式就是把它们背下来。不加 id 或只加 user_id（每行向量背后有几千条样本）时，3 个 epoch 的 valid 一直平稳在 0.804。这个现象由 Zhang 等人在 [CIKM 2022](https://arxiv.org/abs/2209.06053) 系统地描述过：深度 CTR 模型在第二个 epoch 开始时效果骤降，他们把原因归到模型结构、收敛快的优化器和特征稀疏性上。
+
+## 代价与取舍
+
+- 只训 1 个 epoch，或者每 1/4 epoch 评一次、保留 valid 最好的权重（kuairank 的做法）；不这样做，#13 会被报成 0.71。
+- id embedding 的参数几乎全是 embedding 表：video_id 一项 686,346 × 16 ≈ 1,100 万。加正则（DIN 论文的 mini-batch aware 正则只惩罚本 batch 出现的 id）、提高最小词频或 hash 分桶都能省，代价是记忆变弱。
+- 冷启动为主的流里，泛化特征（作者、tag、滚动统计）比 id 更值钱；id 的增益只落在见过的那一小部分行上。
+- 同一个 id 放进用户行为序列里，作用不同：它是「用户看过什么」的相似度钥匙，不是背某条样本的 label，下一页的 DIN 仍然用它。
+
+## 再往下看
+
+[DIN：用候选视频去读用户行为序列](/notes/ml/recsys/din/) 把这些 id 向量用在历史序列上，并沿用「按 valid 取最好权重」。过拟合本身的一般说法见 [Bias 与 Variance](/notes/ml/training/bias-variance/)。
+
+数据来自个人项目 kuairank 的 `docs/DEEP_CTR.zh-CN.md` §1、§7，`docs/EXPERIMENT_LOG.md`（#9、#11–#13 与 Day 2 结论）和各运行的 `metrics.json`。
