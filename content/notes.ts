@@ -983,6 +983,20 @@ export const noteEntries: NoteEntry[] = [
     tags: ["gradient boosting", "XGBoost", "LightGBM", "interactive"],
   },
   {
+    slug: "ml/recsys/gauc-paired-bootstrap",
+    title: "GAUC 与配对用户 bootstrap",
+    description:
+      "全局 AUC 会把用户之间、tab 之间的差别算成排序能力；GAUC 在每个用户内部算 AUC 再加权。随机集上两个模型的区间总是重叠，配对用户 bootstrap 看差值区间。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Recommender Systems",
+    created: "2026-10-23",
+    updated: "2026-10-23",
+    status: "seed",
+    readingMinutes: 7,
+    tags: ["ml-fundamentals", "recommender-systems", "evaluation", "GAUC", "bootstrap", "interactive"],
+  },
+  {
     slug: "ml/recsys/retrieval-precision-at-k",
     title: "检索的 P@30、Recall@30 与 group P@1",
     description:

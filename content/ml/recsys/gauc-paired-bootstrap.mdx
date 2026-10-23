@@ -1,0 +1,53 @@
+import GaucFigure from "@/components/visualization/ml/recsys/GaucFigure";
+import PairedBootstrapFigure from "@/components/visualization/ml/recsys/PairedBootstrapFigure";
+
+# GAUC 与配对用户 bootstrap
+
+## 一句话
+
+**GAUC 先在每个用户内部算 AUC，再按该用户的曝光数加权平均；比较两个模型时，在同一批重采样的用户上算两者 GAUC 的差，看差值的区间是否跨过 0。**
+
+前者量的是「同一个人面前排得对不对」，后者回答「这个差是不是运气」。kuairank 每个实验都报 test 和随机曝光集两列 GAUC，随机集上一律用配对差值下结论。
+
+## 为什么需要它
+
+[ROC 与 AUC](/notes/ml/evaluation/roc-auc/) 把所有正负样本两两配对，包括不同用户之间的对。KuaiRand 的用户点击率从 0.17（p5）到 0.79（p95）：一个只会说「这个人爱点」的模型就能把爱点用户的曝光排在前面，全局 AUC 很高，对任何一个人的推荐却毫无帮助。场景也一样：tab 0 的点击率 0.12，tab 4 是 0.56。另一头，随机曝光集只有 849 个能算 AUC 的用户、每人中位 22 条，单个模型的 GAUC 区间宽约 ±0.011，两个模型的区间几乎总是重叠。
+
+## 怎么工作
+
+<GaucFigure />
+
+$$
+\text{GAUC} = \frac{\sum_u n_u \cdot \text{AUC}_u}{\sum_u n_u}
+$$
+
+$u$ 只取同时有正例和负例的用户，$n_u$ 是他在评估集里的曝光数（kuairank 默认，也另报按正例数加权的值）。给某个用户的所有分数加同一个常数，他内部的排序不变，$\text{AUC}_u$ 不变，GAUC 也就不变：图里拖 β 时全局 AUC 在动，GAUC 一动不动；切到「只认得是谁」，GAUC 是 0.500，全局 AUC 却很可观。
+
+kuairank 的第一个运行就是这种地板：按 tab 输出训练集点击率的常数模型（#1）。全部 tab 混算，test GAUC 是 0.602、AUC 0.637；只看 tab 1，两者都是 0.500，随机集也是 0.500。一个用户的 test 曝光分散在几个 tab 里，按 tab 给常数就把 tab 4 排在 tab 0 前面，这 0.10 全是场景差异。所以 kuairank 的有偏主列用 test 的 tab 1 子集（随机集 99% 也在 tab 1）。同一个 LightGBM（#5）在三个口径下：
+
+| 口径 | AUC | GAUC |
+| --- | --- | --- |
+| test 全部 tab | 0.803 | 0.711 |
+| test tab 1 | 0.763 | 0.652 |
+| 随机曝光集 | 0.733 | 0.618 |
+
+<PairedBootstrapFigure />
+
+$$
+\Delta^{(b)} = \sum_{u \in S_b} w_u\,\big(\text{AUC}^{B}_u - \text{AUC}^{A}_u\big) \Big/ \sum_{u \in S_b} w_u,\qquad \text{区间} = [\,q_{2.5\%},\ q_{97.5\%}\,]
+$$
+
+bootstrap 每次有放回地抽一批用户 $S_b$，每个用户的 AUC 固定不重算，所以 1,000 次很便宜。各自的区间之所以宽，是因为抽到哪些用户影响很大：有的人本来就好排、有的人难排。配对时两个模型在同一批用户上相减，这部分波动互相抵消，剩下的只有「B 在每个人身上比 A 好多少」的波动。kuairank 的随机集上，配对后区间缩到 ±0.004–0.006：DCN-v2（#9）0.625 [0.614, 0.636] 和 LightGBM（#5）0.618 [0.607, 0.629] 大段重叠，配对差值是 +0.0073 [+0.0012, +0.0131]，显著；同样看起来更高的 MLP（#7）是 +0.0040 [−0.0017, +0.0094]，不显著。
+
+## 代价与取舍
+
+- GAUC 只评用户内的排序，不评校准，也不管用户之间该推给谁；需要概率时另看 LogLoss 和校准比。
+- 只有一类样本的用户被跳过。随机集上 is_click 能算的用户 849 个，long_view 只剩 699 个，覆盖的行会变，要在报告里写明。
+- 加权方式会改数：按曝光数加权偏向重度用户，按正例数或不加权的结果可能排序不同，和论文对照前先对齐口径。
+- 配对 bootstrap 要求两个模型在完全相同的行上打分；评估集一变，差值就没有意义。它也只回答「是不是运气」，0.007 值不值得上线是另一个问题，见 [A/B Test 与 p-value](/notes/ml/evaluation/ab-test-p-value/)。
+
+## 再往下看
+
+随机集上的分数为什么整体比 test 低，又凭什么是「无偏」的，在 [曝光偏差与随机曝光评估](/notes/ml/recsys/exposure-bias-random-eval/)。
+
+数据来自个人项目 kuairank 的 `docs/EXPERIMENT_LOG.md`（#1、#5、#7、#9 与 Day 2 结论）、`docs/BASELINE.zh-CN.md` §1 和 `kurec/metrics.py`。

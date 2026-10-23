@@ -104,6 +104,7 @@ import CtrCvrEsmm from "@/content/ml/recsys/ctr-cvr-esmm.mdx";
 import FeatureCrossing from "@/content/ml/recsys/feature-crossing.mdx";
 import SampleFeatureJoin from "@/content/ml/recsys/sample-feature-join.mdx";
 import PointInTimeSplit from "@/content/ml/recsys/point-in-time-split.mdx";
+import GaucPairedBootstrap from "@/content/ml/recsys/gauc-paired-bootstrap.mdx";
 import TTest from "@/content/ml/evaluation/t-test.mdx";
 import { getNote, getSeriesNeighbors, noteEntries } from "@/content/notes";
 import { getNoteToc } from "@/lib/content";
@@ -214,6 +215,7 @@ const noteComponents = {
   "ml/recsys/feature-crossing": FeatureCrossing,
   "ml/recsys/sample-feature-join": SampleFeatureJoin,
   "ml/recsys/point-in-time-split": PointInTimeSplit,
+  "ml/recsys/gauc-paired-bootstrap": GaucPairedBootstrap,
   "ml/evaluation/t-test": TTest,
 };
 
