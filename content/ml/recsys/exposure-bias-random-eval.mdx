@@ -35,12 +35,12 @@ KuaiRand-1K 在 4/22–5/08 之间把一部分推荐位等概率换成随机视�
 ## 代价与取舍
 
 - 随机集小：43,028 条，like 只有 239 个正例、follow 只有 8 个，只有 is_click 和 long_view 能看；每个结论都要带区间，模型之间用配对差值比。
-- 随机集不等于「把同一批视频随机发」：它的视频池更老（年龄中位数 23 天，常规曝光 2 天），70% 在训练期出现过。test 和随机集的分差里既有策略偏差，也有视频池差异，kuairank 留到 Day 5 拆开。
+- 随机集不等于「把同一批视频随机发」：它的视频池更老（年龄中位数 23 天，常规曝光 2 天），70% 在训练期出现过。test 和随机集的分差里既有策略偏差，也有视频池差异。Day 5 拆开的结果是：排序的落差几乎全来自视频池，校准的落差来自选择，见 [偏差来自哪里：视频池、选择与 IPS](/notes/ml/recsys/bias-decomposition-ips/)。
 - 随机曝光有成本：线上要拿出真实流量给用户推不相关的内容（随机视频被点「不感兴趣」的概率是常规的 2.5 倍），所以只能是很小一部分。
-- 评估之外还能用来训练：IPS 加权、在随机集上微调或蒸馏都是去偏方法。这一页只讲评估，去偏留到 Day 5。
+- 评估之外还能用来训练：IPS 加权、在随机集上微调或蒸馏都是去偏方法。这一页只讲评估；kuairank 试过按视频流行度做 IPS，随机集 GAUC 几乎不动（α = 0.5 +0.0003），原因在下一页。
 
 ## 再往下看
 
-两列一起看，模型的排名可能会变：Day 2 里 DCN-v2 和 LightGBM 在 test tab 1 上几乎打平，在随机集上 DCN-v2 显著更好，click 从 tab 1 到随机集只掉 0.028（LightGBM 0.034）。深度模型那一侧的工具在 [特征交叉：FM 与 DCN](/notes/ml/recsys/feature-crossing/)。
+落差拆成视频池和选择两部分、以及 IPS 为什么无效，在 [偏差来自哪里：视频池、选择与 IPS](/notes/ml/recsys/bias-decomposition-ips/)。两列一起看，模型的排名可能会变：Day 2 里 DCN-v2 和 LightGBM 在 test tab 1 上几乎打平，在随机集上 DCN-v2 显著更好，click 从 tab 1 到随机集只掉 0.028（LightGBM 0.034）。深度模型那一侧的工具在 [特征交叉：FM 与 DCN](/notes/ml/recsys/feature-crossing/)。
 
 数据来自个人项目 kuairank 的 `docs/EDA.zh-CN.md` §2、§5，`docs/EXPERIMENT_LOG.md`（#2–#6 与 Day 1、Day 2 结论）和 `docs/DIN_SEQ.zh-CN.md` §1。

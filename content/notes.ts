@@ -1011,6 +1011,20 @@ export const noteEntries: NoteEntry[] = [
     tags: ["ml-fundamentals", "recommender-systems", "evaluation", "exposure bias", "KuaiRand", "interactive"],
   },
   {
+    slug: "ml/recsys/bias-decomposition-ips",
+    title: "偏差来自哪里：视频池、选择与 IPS",
+    description:
+      "kuairank Day 5：26 个点击模型在有偏集和随机集上的排名（Spearman 0.731）；只换视频不换曝光方式，GAUC 已经落到随机集水平，校准却只有随机曝光才失准；按视频流行度的 IPS 几乎无效。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Recommender Systems",
+    created: "2026-10-23",
+    updated: "2026-10-23",
+    status: "seed",
+    readingMinutes: 7,
+    tags: ["ml-fundamentals", "recommender-systems", "evaluation", "exposure bias", "IPS", "KuaiRand", "interactive"],
+  },
+  {
     slug: "ml/recsys/retrieval-precision-at-k",
     title: "检索的 P@30、Recall@30 与 group P@1",
     description:
