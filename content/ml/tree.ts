@@ -196,6 +196,7 @@ export const chapters: TreeChapter[] = [
       n("ml/recsys/feature-crossing", "特征交叉：FM 与 DCN", "两个特征的组合才有信号，模型怎么学到？", "线性模型只能把特征分开加；FM 给每个特征一个向量、用内积学二阶交叉，DCN 用 x₀·(x_lᵀw) + x_l 每层多一阶。", "ready", "特征交叉"),
       n("ml/recsys/id-embedding-one-epoch", "id embedding 的记忆与 one-epoch 现象", "把几十万个 id 也做成 embedding，有用吗？", "id 向量只对见过的 id 有用：test 里 video_id 只覆盖 11.5%；加 author_id / video_id 后第 2 个 epoch 的 valid AUC 从 0.804 掉到 0.781 / 0.764，所以只训 1 个 epoch 或按 valid 取最好权重。", "ready", "id embedding 与 one-epoch"),
       n("ml/recsys/din", "DIN：用候选视频去读用户行为序列", "用户看过的一万条历史，怎么按候选视频去读？", "小 MLP 从 [q, k, q − k, q ⊙ k, 反馈] 给每条历史打权重，不做 softmax 地加权求和成用户兴趣；序列存成事件数组加两个指针。KuaiRand 上 DIN 与均值打平、N = 10 最好，增益来自用户状态而非兴趣匹配。", "ready", "DIN"),
+      n("ml/recsys/multi-task-ple", "多目标排序：shared-bottom、MMoE、PLE 与跷跷板", "点击、长播、点赞、关注，一个模型怎么一起预测？", "共享底座、每个任务一个头；KuaiRand 上点击和长播共享无损，点赞在三种结构上都显著变差（PLE −0.010 最少）；乘法融合 Σ w log p 用点击 −0.012 换点赞 +0.042。", "ready", "多目标与跷跷板"),
       n("ml/recsys/sample-feature-join", "样本与特征拼接", "label 晚到几小时，训练样本怎么拼？", "转化往往晚于曝光；要把曝光那一刻的特征快照和后到的转化事件在一个时间窗里 join，用转化时刻的特征就是数据穿越。", "ready"),
     ],
   },

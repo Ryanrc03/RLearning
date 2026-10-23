@@ -36,6 +36,15 @@ ESMM 的结构是两个塔：CTR 塔和 CVR 塔共享底层 embedding。两个 l
 
 为什么不先训 pCTCVR、pCTR 再相除？pCTR 很小，一点误差除下来就被放大，结果还可能超过 1；乘积形式让 pCVR 天然留在 [0, 1]。共享 embedding 则让 CVR 塔借用 CTR 任务多几十倍的样本来学 user 和 ad 的表示，这是 ESMM 对 sparsity 的回答。
 
+**在 KuaiRand 上试过一次。** kuairank 的多目标模型里，long_view（长播）几乎完全嵌在 click 里，看起来正好是 ESMM 的形状：p(lv) = p(click) · p(lv | click)。
+
+| | train | valid | test tab 1 | random |
+| --- | --- | --- | --- | --- |
+| P(long_view \| click) | 0.690 | 0.692 | 0.704 | 0.482 |
+| long_view 中没有 click 的比例 | 0.7% | 0.8% | 0.5% | 0.3% |
+
+把 PLE 的 long_view 头换成 pCTR × p(lv | click)（#32），long_view GAUC 对单任务模型 −0.0006 [−0.0010, −0.0003]，随机集 −0.0028 不显著；校准比 0.985（不用 ESMM 的 PLE 是 0.992），ECE 0.0052 vs 0.0048：排序和校准都没有变好。原因是这里不存在 ESMM 要解决的问题。long_view 头本来就在全部曝光上训练，标签里 99% 的正例同时是点击，它不需要乘法结构也会把 p(click) 学进去；样本选择偏差只在「CVR 只用点击样本训练」时出现，而 kuairank 从来没这样训过。ESMM 的价值在于条件标签只在父事件之后才观测得到的场景，比如转化。
+
 ## 代价与取舍
 
 - ESMM 不是严格的因果去偏。图里两个塔的形式设定对、决定点击的特征也都看得见，ESMM 才恰好对上；在同样条件下，带特征、在点击样本上训练的 CVR 模型逐档也是对的，SSB 真正伤人的是点击稀少区域的外推。点击若依赖模型看不到的因素，ESMM 的 pCVR 仍然有偏；ESCM² 指出了这一点，用 IPS、DR 这类反事实正则去修。
@@ -45,4 +54,4 @@ ESMM 的结构是两个塔：CTR 塔和 CVR 塔共享底层 embedding。两个 l
 
 ## 再往下看
 
-两个塔要学「年轻用户 × 游戏广告」这类组合信号，靠的是 [特征交叉：FM 与 DCN](/notes/ml/recsys/feature-crossing/)。转化晚到时训练样本怎么拼，在 [样本与特征拼接](/notes/ml/recsys/sample-feature-join/)。
+两个塔要学「年轻用户 × 游戏广告」这类组合信号，靠的是 [特征交叉：FM 与 DCN](/notes/ml/recsys/feature-crossing/)。两个塔之外再多几个目标、怎么共享参数，见 [多目标排序：shared-bottom、MMoE、PLE 与跷跷板](/notes/ml/recsys/multi-task-ple/)。转化晚到时训练样本怎么拼，在 [样本与特征拼接](/notes/ml/recsys/sample-feature-join/)。

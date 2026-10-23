@@ -1576,6 +1576,20 @@ export const noteEntries: NoteEntry[] = [
     tags: ["DIN", "recommender-systems", "recsys", "attention", "user sequence", "KuaiRand", "interactive"],
   },
   {
+    slug: "ml/recsys/multi-task-ple",
+    title: "多目标排序：shared-bottom、MMoE、PLE 与跷跷板",
+    description:
+      "三种共享方式的门和专家怎么连；KuaiRand 上点击、长播无损，点赞在每种结构上都显著变差（跷跷板），PLE 伤得最少。拖融合权重，看 Σ w log p 怎样拿点击换点赞。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Recommender Systems",
+    created: "2026-10-23",
+    updated: "2026-10-23",
+    status: "seed",
+    readingMinutes: 7,
+    tags: ["ml-fundamentals", "recommender-systems", "multi-task", "MMoE", "PLE", "KuaiRand", "interactive"],
+  },
+  {
     slug: "ml/recsys/sample-feature-join",
     title: "样本与特征拼接：延迟转化与特征快照",
     description:

@@ -109,6 +109,7 @@ import ExposureBiasRandomEval from "@/content/ml/recsys/exposure-bias-random-eva
 import IdEmbeddingOneEpoch from "@/content/ml/recsys/id-embedding-one-epoch.mdx";
 import Din from "@/content/ml/recsys/din.mdx";
 import BiasDecompositionIps from "@/content/ml/recsys/bias-decomposition-ips.mdx";
+import MultiTaskPle from "@/content/ml/recsys/multi-task-ple.mdx";
 import TTest from "@/content/ml/evaluation/t-test.mdx";
 import { getNote, getSeriesNeighbors, noteEntries } from "@/content/notes";
 import { getNoteToc } from "@/lib/content";
@@ -224,6 +225,7 @@ const noteComponents = {
   "ml/recsys/id-embedding-one-epoch": IdEmbeddingOneEpoch,
   "ml/recsys/din": Din,
   "ml/recsys/bias-decomposition-ips": BiasDecompositionIps,
+  "ml/recsys/multi-task-ple": MultiTaskPle,
   "ml/evaluation/t-test": TTest,
 };
 
