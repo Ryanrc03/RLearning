@@ -37,7 +37,9 @@ export const roadmapNodes: RoadmapNode[] = [
   // ML & LLM
   { id: "ml-tree", section: "Knowledge Tree", categoryId: "ml", label: "ML 知识树", row: 0, col: 5 },
   { id: "ml-training", section: "Training", categoryId: "ml", row: 1, col: 4 },
+  { id: "ml-ab-testing", section: "A/B Testing", categoryId: "ml", label: "A/B Testing", row: 0, col: 7 },
   { id: "ml-evaluation", section: "Evaluation", categoryId: "ml", row: 1, col: 6 },
+  { id: "ml-causal-inference", section: "Causal Inference", categoryId: "ml", label: "Causal", row: 1, col: 7 },
   { id: "ml-dl-blocks", section: "Deep Learning Blocks", categoryId: "ml", label: "DL Blocks", row: 2, col: 3 },
   { id: "ml-classifiers", section: "Classifiers", categoryId: "ml", row: 2, col: 4 },
   { id: "ml-trees", section: "Tree Models", categoryId: "ml", row: 2, col: 5 },
