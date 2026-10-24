@@ -105,6 +105,13 @@ import EvalHarness from "@/content/ml/llm-engineering/eval-harness.mdx";
 import CtrCvrEsmm from "@/content/ml/recsys/ctr-cvr-esmm.mdx";
 import FeatureCrossing from "@/content/ml/recsys/feature-crossing.mdx";
 import SampleFeatureJoin from "@/content/ml/recsys/sample-feature-join.mdx";
+import PointInTimeSplit from "@/content/ml/recsys/point-in-time-split.mdx";
+import GaucPairedBootstrap from "@/content/ml/recsys/gauc-paired-bootstrap.mdx";
+import ExposureBiasRandomEval from "@/content/ml/recsys/exposure-bias-random-eval.mdx";
+import IdEmbeddingOneEpoch from "@/content/ml/recsys/id-embedding-one-epoch.mdx";
+import Din from "@/content/ml/recsys/din.mdx";
+import BiasDecompositionIps from "@/content/ml/recsys/bias-decomposition-ips.mdx";
+import MultiTaskPle from "@/content/ml/recsys/multi-task-ple.mdx";
 import TTest from "@/content/ml/evaluation/t-test.mdx";
 import AbTestingOverview from "@/content/ml/ab-testing/overview.mdx";
 import CentralLimitTheorem from "@/content/ml/ab-testing/central-limit-theorem.mdx";
@@ -227,6 +234,13 @@ const noteComponents = {
   "ml/recsys/ctr-cvr-esmm": CtrCvrEsmm,
   "ml/recsys/feature-crossing": FeatureCrossing,
   "ml/recsys/sample-feature-join": SampleFeatureJoin,
+  "ml/recsys/point-in-time-split": PointInTimeSplit,
+  "ml/recsys/gauc-paired-bootstrap": GaucPairedBootstrap,
+  "ml/recsys/exposure-bias-random-eval": ExposureBiasRandomEval,
+  "ml/recsys/id-embedding-one-epoch": IdEmbeddingOneEpoch,
+  "ml/recsys/din": Din,
+  "ml/recsys/bias-decomposition-ips": BiasDecompositionIps,
+  "ml/recsys/multi-task-ple": MultiTaskPle,
   "ml/evaluation/t-test": TTest,
   "ml/ab-testing/overview": AbTestingOverview,
   "ml/ab-testing/central-limit-theorem": CentralLimitTheorem,
