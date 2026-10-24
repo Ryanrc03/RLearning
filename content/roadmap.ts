@@ -44,7 +44,7 @@ export const roadmapNodes: RoadmapNode[] = [
   { id: "ml-classifiers", section: "Classifiers", categoryId: "ml", row: 2, col: 4 },
   { id: "ml-trees", section: "Tree Models", categoryId: "ml", row: 2, col: 5 },
   { id: "ml-llms", section: "LLMs", categoryId: "ml", row: 3, col: 4 },
-  { id: "ml-recsys", section: "Recommender Systems", categoryId: "ml", label: "RecSys", row: 3, col: 6 },
+  { id: "ml-recsys", section: "Recommender Systems", categoryId: "ml", label: "RecSys", row: 4, col: 6 },
   { id: "ml-llm-engineering", section: "LLM Engineering", categoryId: "ml", row: 4, col: 4 },
   { id: "ml-representations", section: "Representations", categoryId: "ml", row: 4, col: 5 },
   { id: "ai-agent", section: "Agent Harness", categoryId: "ai-infra", row: 5, col: 3 },
