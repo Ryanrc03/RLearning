@@ -44,4 +44,4 @@ DCN 在 embedding 拼成的 $\mathbf x_0$ 上叠 cross layer。$\mathbf x_l^\top
 
 ## 再往下看
 
-交叉学到的信号再好，样本拼错了也白费：[样本与特征拼接](/notes/ml/recsys/sample-feature-join/) 讲转化晚到时怎样用曝光那一刻的特征快照和后到的 label 拼出训练样本。回到上一页，[CTR、CVR 与 ESMM](/notes/ml/recsys/ctr-cvr-esmm/) 的两个塔里通常就放着这样一个交叉模块。
+深度模型除了交叉，还能给几十万个 id 各学一个向量；这件事在冷启动为主的数据上有没有用、为什么第二个 epoch 就过拟合，在 [id embedding 的记忆与 one-epoch 现象](/notes/ml/recsys/id-embedding-one-epoch/)。交叉学到的信号再好，样本拼错了也白费：[样本与特征拼接](/notes/ml/recsys/sample-feature-join/) 讲转化晚到时怎样用曝光那一刻的特征快照和后到的 label 拼出训练样本。回到上一页，[CTR、CVR 与 ESMM](/notes/ml/recsys/ctr-cvr-esmm/) 的两个塔里通常就放着这样一个交叉模块。
