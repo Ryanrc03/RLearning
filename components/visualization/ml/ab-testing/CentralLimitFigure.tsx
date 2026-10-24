@@ -110,13 +110,13 @@ export default function CentralLimitFigure() {
   return (
     <VisualizationFrame
       title="中心极限定理：不管总体什么形状，平均值都长成钟形"
-      description={`左图是总体：${POP_DRAWS} 次单独的${pop.label}。右图是把 n 次的结果取平均、重复 ${REPS} 遍得到的直方图，橙线是定理说的 N(μ, σ²/n)。`}
+      description={`左图是总体：${POP_DRAWS} 次单独的${pop.label}。右图：每次抽 n 个取平均得到一个 x̄，重复 ${REPS} 遍，画这 ${REPS} 个 x̄ 的直方图，橙线是定理说的 N(μ, σ²/n)。`}
     >
       <div className="viz-row">
         <Tabs options={POP_OPTIONS} value={key} onChange={setKey} ariaLabel="总体" />
         <button type="button" className="viz-btn" onClick={() => { setKey(DEFAULT_POP); setIdx(DEFAULT_IDX); }}>重置</button>
       </div>
-      <Slider label="每次平均几个 n" value={idx} min={0} max={SIZES.length - 1} step={1} onChange={setIdx} display={String(n)} id="clt-n" />
+      <Slider label="每次抽几个来平均 n" value={idx} min={0} max={SIZES.length - 1} step={1} onChange={setIdx} display={String(n)} id="clt-n" />
 
       <Figure width={720} height={300} label={`${pop.label}，n = ${n}，σ/√n = ${f2(r.se)}，离正态 ${f2(r.gap)}`} minWidth={520}>
         <Plot box={{ x: 0, y: 0, w: 330, h: 300 }} xDomain={pop.domain} yDomain={[0, popYMax]} xTicks={niceTicks(pop.domain[0], pop.domain[1])} yTicks={[]} xLabel={`一次${pop.label}（${pop.unit}）`} title="总体" xFormat={fmtTick}>
@@ -132,7 +132,7 @@ export default function CentralLimitFigure() {
             </>
           )}
         </Plot>
-        <Plot box={{ x: 350, y: 0, w: 370, h: 300 }} xDomain={r.view} yDomain={[0, r.yMax]} xTicks={niceTicks(r.view[0], r.view[1])} yTicks={[]} xLabel={`${n} 次的平均（${pop.unit}）${zoomed ? "，横轴已放大" : ""}`} title={`${REPS} 个样本均值`} xFormat={fmtTick}>
+        <Plot box={{ x: 350, y: 0, w: 370, h: 300 }} xDomain={r.view} yDomain={[0, r.yMax]} xTicks={niceTicks(r.view[0], r.view[1])} yTicks={[]} xLabel={`${n} 个的平均 x̄（${pop.unit}）${zoomed ? "，横轴已放大" : ""}`} title={`${REPS} 个 x̄，每个是 ${n} 个的平均`} xFormat={fmtTick}>
           {(f) => (
             <>
               {r.hist.counts.map((c, i) => {
@@ -152,7 +152,7 @@ export default function CentralLimitFigure() {
       </Figure>
       <div className="viz-legend">
         <span><i style={{ background: C_POP, opacity: 0.6 }} />总体（单次）</span>
-        <span><i style={{ background: C_MEAN, opacity: 0.55 }} />{n} 次的平均，重复 {REPS} 遍</span>
+        <span><i style={{ background: C_MEAN, opacity: 0.55 }} />每 {n} 个取一个平均 x̄，重复 {REPS} 遍</span>
         <span><i style={{ background: C_NORM }} />N(μ, σ²/n)</span>
       </div>
 
