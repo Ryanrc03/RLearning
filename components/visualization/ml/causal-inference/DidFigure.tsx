@@ -72,7 +72,7 @@ export default function DidFigure() {
       <Slider label="共同时间趋势（这个月所有人都发生的事，分钟）" value={idx} min={0} max={TREND_STEPS} step={1} onChange={setIdx} display={signed(trend)} id="did-trend" />
 
       <Figure width={720} height={320} label={`共同趋势 ${signed(trend)}，上海前后 ${signed(est.beforeAfter)}，北京前后 ${signed(est.controlTrend)}，DiD ${signed(est.did)}`} minWidth={520}>
-        <Plot box={{ x: 0, y: 0, w: 430, h: 320 }} xDomain={[-0.25, 1.35]} yDomain={Y_DOMAIN} xTicks={[0, 1]} yTicks={[15, 20, 25, 30, 35, 40]} xFormat={(v) => (v === 0 ? "上线前一个月" : "上线后一个月")} yLabel="人均日使用时长 (分钟)" format={(v) => String(Math.round(v))}>
+        <Plot box={{ x: 0, y: 0, w: 430, h: 320 }} xDomain={[-0.25, 1.65]} yDomain={Y_DOMAIN} xTicks={[0, 1]} yTicks={[15, 20, 25, 30, 35, 40]} xFormat={(v) => (v === 0 ? "上线前一个月" : "上线后一个月")} yLabel="人均日使用时长 (分钟)" format={(v) => String(Math.round(v))}>
           {(f) => {
             const sh0 = f.y(cells.treatBefore);
             const sh1 = f.y(cells.treatAfter);
@@ -86,14 +86,14 @@ export default function DidFigure() {
                 <line x1={f.x(0)} y1={sh0} x2={f.x(1)} y2={cf1} stroke={C_SH} strokeWidth={1.6} strokeDasharray="6 4" opacity={0.7} style={{ transition: "y2 .3s" }} />
                 <line x1={f.x(0)} y1={sh0} x2={f.x(1)} y2={sh1} stroke={C_SH} strokeWidth={2.2} style={{ transition: "y2 .3s" }} />
                 {[
-                  { x: 0, y: sh0, c: C_SH, t: f1(cells.treatBefore) },
-                  { x: 1, y: sh1, c: C_SH, t: f1(cells.treatAfter) },
-                  { x: 0, y: bj0, c: C_BJ, t: f1(cells.ctrlBefore) },
-                  { x: 1, y: bj1, c: C_BJ, t: f1(cells.ctrlAfter) },
+                  { x: 0, y: sh0, c: C_SH, t: f1(cells.treatBefore), dx: -9, dy: 4, anchor: "end" as const },
+                  { x: 1, y: sh1, c: C_SH, t: f1(cells.treatAfter), dx: 0, dy: -10, anchor: "middle" as const },
+                  { x: 0, y: bj0, c: C_BJ, t: f1(cells.ctrlBefore), dx: -9, dy: 4, anchor: "end" as const },
+                  { x: 1, y: bj1, c: C_BJ, t: f1(cells.ctrlAfter), dx: 0, dy: 17, anchor: "middle" as const },
                 ].map((p, i) => (
                   <g key={i} style={{ transition: "transform .3s" }} transform={`translate(${f.x(p.x)} ${p.y})`}>
                     <circle r={5} fill={p.c} stroke="#fff" strokeWidth={1.5} />
-                    <text x={p.x === 0 ? -9 : 9} y={4} fontSize={11.5} fontWeight={600} textAnchor={p.x === 0 ? "end" : "start"} fill={p.c} className="mono">{p.t}</text>
+                    <text x={p.dx} y={p.dy} fontSize={11.5} fontWeight={600} textAnchor={p.anchor} fill={p.c} className="mono">{p.t}</text>
                   </g>
                 ))}
                 <g style={{ transition: "transform .3s" }} transform={`translate(${f.x(1)} ${cf1})`}>
@@ -101,13 +101,14 @@ export default function DidFigure() {
                   <text x={9} y={4} fontSize={11} fill={C_SH} opacity={0.8} className="mono">反事实 {f1(est.counterfactual)}</text>
                 </g>
                 <g style={{ transition: "transform .3s" }}>
-                  <line x1={xb + 42} y1={sh1} x2={xb + 42} y2={cf1} stroke={biased ? C_BAD : C_EFF} strokeWidth={2.5} style={{ transition: "y1 .3s, y2 .3s" }} />
-                  <line x1={xb + 36} y1={sh1} x2={xb + 48} y2={sh1} stroke={biased ? C_BAD : C_EFF} strokeWidth={2} style={{ transition: "y1 .3s, y2 .3s" }} />
-                  <line x1={xb + 36} y1={cf1} x2={xb + 48} y2={cf1} stroke={biased ? C_BAD : C_EFF} strokeWidth={2} style={{ transition: "y1 .3s, y2 .3s" }} />
-                  <text x={xb + 54} y={(sh1 + cf1) / 2 + 4} fontSize={12} fontWeight={700} fill={biased ? C_BAD : C_EFF} className="mono" style={{ transition: "y .3s" }}>DiD {signed(est.did)}</text>
+                  <line x1={xb + 86} y1={sh1} x2={xb + 86} y2={cf1} stroke={biased ? C_BAD : C_EFF} strokeWidth={2.5} style={{ transition: "y1 .3s, y2 .3s" }} />
+                  <line x1={xb + 80} y1={sh1} x2={xb + 92} y2={sh1} stroke={biased ? C_BAD : C_EFF} strokeWidth={2} style={{ transition: "y1 .3s, y2 .3s" }} />
+                  <line x1={xb + 80} y1={cf1} x2={xb + 92} y2={cf1} stroke={biased ? C_BAD : C_EFF} strokeWidth={2} style={{ transition: "y1 .3s, y2 .3s" }} />
+                  <text x={xb + 98} y={(sh1 + cf1) / 2 - 2} fontSize={12} fontWeight={700} fill={biased ? C_BAD : C_EFF} className="mono" style={{ transition: "y .3s" }}>DiD</text>
+                  <text x={xb + 98} y={(sh1 + cf1) / 2 + 12} fontSize={12} fontWeight={700} fill={biased ? C_BAD : C_EFF} className="mono" style={{ transition: "y .3s" }}>{signed(est.did)}</text>
                 </g>
-                <text x={f.x(0) - 9} y={sh0 - 12} fontSize={12} textAnchor="end" fill={C_SH} fontWeight={600}>上海（上线）</text>
-                <text x={f.x(0) - 9} y={bj0 + 18} fontSize={12} textAnchor="end" fill={C_BJ} fontWeight={600}>北京（对照）</text>
+                <text x={f.x(0)} y={sh0 - 14} fontSize={12} textAnchor="middle" fill={C_SH} fontWeight={600} style={{ transition: "y .3s" }}>上海（上线）</text>
+                <text x={f.x(0)} y={bj0 + 22} fontSize={12} textAnchor="middle" fill={C_BJ} fontWeight={600}>北京（对照）</text>
               </>
             );
           }}

@@ -84,14 +84,14 @@ export default function MinimumWageFigure() {
                 {step >= 1 && <line x1={f.x(0)} y1={nj0} x2={f.x(1)} y2={nj1} stroke={C_NJ} strokeWidth={2.2} />}
                 {step >= 3 && <line x1={f.x(0)} y1={nj0} x2={f.x(1)} y2={cf} stroke={C_NJ} strokeWidth={1.6} strokeDasharray="6 4" opacity={0.7} />}
                 {[
-                  { x: 0, y: nj0, c: C_NJ, t: f2(CELLS.treatBefore), dim: step === 2 },
-                  { x: 1, y: nj1, c: C_NJ, t: f2(CELLS.treatAfter), dim: step === 2 },
-                  { x: 0, y: pa0, c: C_PA, t: f2(CELLS.ctrlBefore), dim: step === 1 },
-                  { x: 1, y: pa1, c: C_PA, t: f2(CELLS.ctrlAfter), dim: step === 1 },
+                  { x: 0, y: nj0, c: C_NJ, t: f2(CELLS.treatBefore), dim: step === 2, dx: -9, dy: 4 },
+                  { x: 1, y: nj1, c: C_NJ, t: f2(CELLS.treatAfter), dim: step === 2, dx: 9, dy: 15 },
+                  { x: 0, y: pa0, c: C_PA, t: f2(CELLS.ctrlBefore), dim: step === 1, dx: -9, dy: 4 },
+                  { x: 1, y: pa1, c: C_PA, t: f2(CELLS.ctrlAfter), dim: step === 1, dx: 9, dy: -7 },
                 ].map((p, i) => (
                   <g key={i} transform={`translate(${f.x(p.x)} ${p.y})`} opacity={p.dim ? 0.35 : 1} style={{ transition: "opacity .3s" }}>
                     <circle r={5} fill={p.c} stroke="#fff" strokeWidth={1.5} />
-                    <text x={p.x === 0 ? -9 : 9} y={4} fontSize={11.5} fontWeight={600} textAnchor={p.x === 0 ? "end" : "start"} fill={p.c} className="mono">{p.t}</text>
+                    <text x={p.dx} y={p.dy} fontSize={11.5} fontWeight={600} textAnchor={p.x === 0 ? "end" : "start"} fill={p.c} className="mono">{p.t}</text>
                   </g>
                 ))}
                 {step === 1 && <text x={f.x(0.5)} y={(nj0 + nj1) / 2 - 10} fontSize={12} fontWeight={700} textAnchor="middle" fill={C_NJ} className="mono">{signed(est.beforeAfter)}</text>}
@@ -108,8 +108,8 @@ export default function MinimumWageFigure() {
                     <text x={xb + 82} y={(nj1 + cf) / 2 + 4} fontSize={12} fontWeight={700} fill={C_EFF} className="mono">DiD {signed(est.did)}</text>
                   </>
                 )}
-                <text x={f.x(0) - 9} y={nj0 + 20} fontSize={12} textAnchor="end" fill={C_NJ} fontWeight={600}>新泽西（涨工资）</text>
-                <text x={f.x(0) - 9} y={pa0 - 12} fontSize={12} textAnchor="end" fill={C_PA} fontWeight={600}>宾州（对照）</text>
+                <text x={f.x(0)} y={nj0 + 22} fontSize={12} textAnchor="middle" fill={C_NJ} fontWeight={600}>新泽西（涨工资）</text>
+                <text x={f.x(0)} y={pa0 - 14} fontSize={12} textAnchor="middle" fill={C_PA} fontWeight={600}>宾州（对照）</text>
               </>
             );
           }}
