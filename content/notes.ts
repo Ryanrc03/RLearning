@@ -927,6 +927,20 @@ export const noteEntries: NoteEntry[] = [
     series: { id: "multimodal-path", title: "从 Transformer 到多模态", order: 5 },
   },
   {
+    slug: "ml/recsys/kuairand-data-overview",
+    title: "KuaiRand-1K 数据总览",
+    description:
+      "1,000 个用户、31 天、1,166 万次曝光：8 个 0/1 反馈的正样本率、负正比、有正例的用户数，随机曝光和推荐流的差别，以及五一假期带来的点赞率漂移。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Recommender Systems",
+    created: "2026-10-27",
+    updated: "2026-10-27",
+    status: "seed",
+    readingMinutes: 6,
+    tags: ["ml-fundamentals", "recommender-systems", "KuaiRand", "dataset", "interactive"],
+  },
+  {
     slug: "ml/recsys/kuairand-input",
     title: "一条曝光的 84 维输入",
     description:
@@ -981,6 +995,20 @@ export const noteEntries: NoteEntry[] = [
     status: "growing",
     readingMinutes: 12,
     tags: ["gradient boosting", "XGBoost", "LightGBM", "interactive"],
+  },
+  {
+    slug: "ml/recsys/auc-gauc-computation",
+    title: "AUC 与 GAUC 怎么算",
+    description:
+      "在 15 次曝光上手算一遍：数对、排名公式（平局取平均排名）、按用户切段、跳过单类用户、按曝光数加权；同样的分数按请求切，GAUC 会变。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Recommender Systems",
+    created: "2026-10-27",
+    updated: "2026-10-27",
+    status: "seed",
+    readingMinutes: 6,
+    tags: ["ml-fundamentals", "recommender-systems", "evaluation", "AUC", "GAUC", "interactive"],
   },
   {
     slug: "ml/recsys/gauc-paired-bootstrap",
@@ -1532,6 +1560,20 @@ export const noteEntries: NoteEntry[] = [
     status: "seed",
     readingMinutes: 6,
     tags: ["ml-fundamentals", "recommender-systems", "interactive"],
+  },
+  {
+    slug: "ml/recsys/training-step",
+    title: "一次训练：从一行曝光到一次参数更新",
+    description:
+      "一行真实曝光走完 shared-bottom 四目标模型的一个训练步：编号、查 embedding、拼 x0、前向、交叉熵、反向与 Adam，以及挑 checkpoint 的外层循环。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Recommender Systems",
+    created: "2026-10-27",
+    updated: "2026-10-27",
+    status: "seed",
+    readingMinutes: 7,
+    tags: ["ml-fundamentals", "recommender-systems", "embedding", "training", "interactive"],
   },
   {
     slug: "ml/recsys/feature-crossing",

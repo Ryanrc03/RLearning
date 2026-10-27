@@ -102,6 +102,9 @@ import LlmAsJudge from "@/content/ml/llm-engineering/llm-as-judge.mdx";
 import EvalHarness from "@/content/ml/llm-engineering/eval-harness.mdx";
 import CtrCvrEsmm from "@/content/ml/recsys/ctr-cvr-esmm.mdx";
 import FeatureCrossing from "@/content/ml/recsys/feature-crossing.mdx";
+import KuairandDataOverview from "@/content/ml/recsys/kuairand-data-overview.mdx";
+import TrainingStep from "@/content/ml/recsys/training-step.mdx";
+import AucGaucComputation from "@/content/ml/recsys/auc-gauc-computation.mdx";
 import SampleFeatureJoin from "@/content/ml/recsys/sample-feature-join.mdx";
 import PointInTimeSplit from "@/content/ml/recsys/point-in-time-split.mdx";
 import GaucPairedBootstrap from "@/content/ml/recsys/gauc-paired-bootstrap.mdx";
@@ -218,6 +221,9 @@ const noteComponents = {
   "ml/llm-engineering/eval-harness": EvalHarness,
   "ml/recsys/ctr-cvr-esmm": CtrCvrEsmm,
   "ml/recsys/feature-crossing": FeatureCrossing,
+  "ml/recsys/kuairand-data-overview": KuairandDataOverview,
+  "ml/recsys/training-step": TrainingStep,
+  "ml/recsys/auc-gauc-computation": AucGaucComputation,
   "ml/recsys/sample-feature-join": SampleFeatureJoin,
   "ml/recsys/point-in-time-split": PointInTimeSplit,
   "ml/recsys/gauc-paired-bootstrap": GaucPairedBootstrap,

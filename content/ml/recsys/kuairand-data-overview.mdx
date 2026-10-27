@@ -1,0 +1,45 @@
+import KuairandOverviewFigure from "@/components/visualization/ml/recsys/KuairandOverviewFigure";
+import KuairandDailyFigure from "@/components/visualization/ml/recsys/KuairandDailyFigure";
+
+# KuaiRand-1K 数据总览
+
+## 一句话
+
+**KuaiRand-1K 是快手 1,000 个用户 31 天的曝光日志：1,166 万行，每行一次「把一个视频推给一个人」，带 8 个 0/1 反馈和 3 个时长，外加 4.3 万条随机曝光。**
+
+这一章所有的模型、指标和偏差分析都建立在这份日志上。先把它的形状看清楚，后面每个数字才有参照。
+
+## 为什么需要它
+
+精排模型的训练样本就是曝光：被推了、没点开就是负样本。所以「有多少正例」「正例落在哪些人身上」直接决定了用什么损失、要不要降采样、GAUC 能数到几个用户。几个数量级的差别如果不先看清，就会出现「click 也去降采样」或者「拿 follow 的 GAUC 下结论」这类错误。
+
+## 怎么工作
+
+<KuairandOverviewFigure />
+
+$$
+\text{正样本率} = \frac{n^{+}}{n},\qquad \text{负 : 正} = \frac{n - n^{+}}{n^{+}}
+$$
+
+八个标签分成三档。点开（is_click）和长播放（long_view）在推荐流里有三四成，负 : 正只有 1–3，不需要任何不平衡处理。点赞约 1.5–2%，负 : 正约 50 : 1，是课上讲负样本降采样时的典型场景。关注、评论、转发、不感兴趣都在千分之几，关注约 1,000 : 1。
+
+第三种视角是「有正例的用户」，因为 GAUC 只数既有正例又有负例的人。test 里 988 个用户全都能算 click，点赞只剩 864 人、每人中位 11 个正例，关注只剩 572 人、每人中位 2 个正例。一个人的 AUC 只由两条样本决定，关注的 GAUC 自然噪声很大。
+
+最右一列是随机曝光：同样这 1,000 个人，推荐位被随机换成一个 7,388 个视频的池子。点开率从 44% 掉到 17%，点赞从 2.1% 掉到 0.56%，这就是推荐策略「挑过」的效果，也是它能当无偏测试集的原因。
+
+<KuairandDailyFigure />
+
+时间轴上，train、valid、test 依次是 14、7、10 天。每天 32–44 万次曝光，tab 1 占三分之二。tab 1 的点击率三段几乎不变（44.8% → 44.7% → 44.2%），点赞率却在 test 里抬到 2.12%：4/30–5/04 是五一假期，每天 2.2–2.4%，train 里的周末也一样偏高。模型在 4 月学到的点赞水平，拿到 5 月就会偏低，这就是时间漂移。
+
+## 代价与取舍
+
+- 比较两个集合时口径要一致：test 只看 tab 1，就该和 train 的 tab 1 比（点赞 1.83% 对 2.12%），不能拿全部 tab 的 1.51% 去比。
+- 日志里只有曝光过的视频，没有全库负样本，召回评不了；也没有位置信息，重排训不了。这份数据只适合做精排。
+- 随机集里关注只有 8 个正例、评论 13 个，这几个标签只能在 tab 1 上评估。
+- 437 万个视频里，大部分只被曝光过几次，video_id 做 embedding 学不到东西，见 [id embedding 与 one-epoch](/notes/ml/recsys/id-embedding-one-epoch/)。
+
+## 再往下看
+
+一行曝光被模型看到时长什么样（84 个特征、只用过去的时间窗），在 [一条曝光的 84 维输入](/notes/ml/recsys/kuairand-input/)。
+
+数据来自个人项目 kuairank 的 `data/processed/log.parquet`（官方 CSV 去掉完全重复的行）和 `learn/day1_multitask/NOTES.md`。

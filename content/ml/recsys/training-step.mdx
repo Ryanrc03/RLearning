@@ -1,0 +1,43 @@
+import TrainingSetupFigure from "@/components/visualization/ml/recsys/TrainingSetupFigure";
+
+# 一次训练：从一行曝光到一次参数更新
+
+## 一句话
+
+**深度排序模型的一个训练步：把一行曝光的类别特征编成编号、查表取出 embedding，和数值特征拼成 x0，前向得到每个目标的概率，算交叉熵相加，反向传播，再让 Adam 同时更新 MLP 和被查到的那几行 embedding。**
+
+kuairank 学习线的每个模型都是这个流程，换模型只换中间那段网络。
+
+## 为什么需要它
+
+GBDT 直接吃特征矩阵，不用想「特征怎么进模型」。换成深度模型，最常见的困惑是：embedding 是预训练好的吗？数值特征也要 embedding 吗？多目标时哪些参数被谁更新？这些问题不先理清，后面的特征交叉、DIN、MMoE 都只能记结构图，说不清它们改的是哪一步。
+
+## 怎么工作
+
+<TrainingSetupFigure />
+
+$$
+x_0 = \big[\, E_1[i_1],\ \dots,\ E_{27}[i_{27}],\ z_1,\ \dots,\ z_{61} \,\big],\qquad \mathcal{L} = \sum_{k} w_k \cdot \text{BCE}(y_k, \sigma(f_k(x_0)))
+$$
+
+前两步不学任何东西。类别值按 train 的词表编成编号，编号只是身份证号，0 留给缺失和没见过的值；数值列取 log1p 再按 train 的均值、方差标准化。这两套映射在训练前就定死了。
+
+第三步开始是参数。每个类别域一张表 $E_j$，形状是「取值个数 × 16」，查表就是取出第 $i_j$ 行。27 张表一共 15,536 个数，初始化成 N(0, 0.01²) 的随机小数，没有任何预训练。
+
+前向之后每个塔得到一个概率，各自和自己的标签算交叉熵，加起来是这一行的损失。反向传播时，每个塔只收到自己那一项的梯度；共享 bottom 收到四项之和；embedding 只有被查到的 27 行有梯度。Adam 把这些参数一起挪一步。图里第 7 步对比了同一行 embedding 训练前后：长度从 0.03 变成 0.40，全部 971 行的中位数从 0.04 变成 0.30。embedding 就是这样一个 batch 一个 batch 被推出来的。
+
+外层循环把 502 万行打乱切成 1,226 个 batch，一个 epoch 更新 1,226 次。每 1/4 个 epoch 在 valid 上量一次，记住最好的权重，3 个 epoch 后用它在 test 和随机集上各评一次。
+
+## 代价与取舍
+
+- 数值特征只做固定变换就直接拼进去，模型只能靠后面的 MLP 理解它；先分桶、再给每个桶一个 embedding，数值特征也能变成可学的向量。
+- 出现次数少的取值几乎收不到梯度，它的那一行一直停在初始化附近。id 类特征最严重，见 [id embedding 与 one-epoch](/notes/ml/recsys/id-embedding-one-epoch/)。
+- 多目标时各项损失直接相加：点击的交叉熵约 0.5，点赞约 0.05，共享部分的梯度几乎都来自点击。要么调权重，要么换结构，见 [多目标排序](/notes/ml/recsys/multi-task-ple/)。
+- 挑 checkpoint 用的是一个 valid 数字。多目标模型只按点击挑，其它目标只能接受这份权重。
+- 换随机种子会改变初始化、数据顺序和 dropout，同一配置的 click GAUC 会差约 0.001，比较模型时要跑几个种子。
+
+## 再往下看
+
+x0 进了 MLP 之后，两个特征的组合要怎么学，在 [特征交叉：FM 与 DCN](/notes/ml/recsys/feature-crossing/)。
+
+跨章：Adam 那一步的更新规则在 [梯度下降与优化器](/notes/ml/training/gradient-descent-optimizers/)，每个塔的损失就是 [逻辑回归](/notes/ml/classifiers/logistic-regression/) 的交叉熵。数据和模型来自个人项目 kuairank 的 `learn/`（`L1_shared_4t`，seed 0）。
