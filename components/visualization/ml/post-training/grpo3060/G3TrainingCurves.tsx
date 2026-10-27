@@ -61,7 +61,7 @@ export default function G3TrainingCurves() {
     }
   } else if (step >= 160 && step <= 210) {
     tone = " is-warn";
-    narr = `第 ${step} 步：修正版的低谷。batch 准确率掉到 ${pct(acc)}，回答反而变长到 ${v("len").toFixed(0)} token。两轮按同一个 seed 采题，第一轮在同一段没有这个坑，所以不是题目变难；210 步以后恢复。原因没查，记在交接里。`;
+    narr = `第 ${step} 步：修正版的低谷。batch 准确率掉到 ${pct(acc)}，回答反而变长到 ${v("len").toFixed(0)} token。两轮按同一顺序采题，第一轮在这一段也从 81% 掉到 75%，后来的四组实验也都掉：是这一段的训练题更难、要写得更长，修正版掉得最深；210 步以后恢复。`;
   } else {
     tone = step >= 250 && acc - startAcc >= -0.04 ? " is-good" : "";
     narr = `第 ${step} 步：回答 ${v("len").toFixed(0)} token，batch 准确率 ${pct(acc)}，${vsStart}。格式分减半又门控在 ≥ 30 词的推理上，只涨到 ${v("format").toFixed(2)}；逐 token 的 KL ${v("kl").toFixed(4)}，慢慢涨，被 β 罚着。淡色线是第一轮。`;

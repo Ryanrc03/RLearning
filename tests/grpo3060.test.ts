@@ -116,6 +116,7 @@ test("the 50-step trailing mean starts at the first bin and ends on the last-10%
   for (let i = 4; i < BINS; i++) assert.ok(s[i][1] / 2 > 0.55 && s[i][1] / 2 < 0.86, `bin ${i}: ${s[i][1]}`);
   const dip = Math.min(...s.slice(14, 21).map((p) => p[1] / 2));
   close(dip, 0.593, 0.005);
-  // run 1 at the same steps (same seed, same problems) shows no such dip
-  assert.ok(Math.min(...smoothedSeries("base", "correct").slice(14, 21).map((p) => p[1] / 2)) > 0.72);
+  // run 1 draws the same problems in the same order and also drops in this stretch, from a higher level
+  const baseDip = smoothedSeries("base", "correct").slice(14, 21).map((p) => p[1] / 2);
+  assert.ok(Math.min(...baseDip) > 0.72 && Math.min(...baseDip) < smoothedAt("base", "correct", 14) / 2 + 0.01);
 });
