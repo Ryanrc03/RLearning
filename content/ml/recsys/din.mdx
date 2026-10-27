@@ -1,0 +1,251 @@
+import DinPipelineFigure from "@/components/visualization/ml/recsys/din/DinPipelineFigure";
+import DinGatherFigure from "@/components/visualization/ml/recsys/din/DinGatherFigure";
+import DinAttentionUnitFigure from "@/components/visualization/ml/recsys/din/DinAttentionUnitFigure";
+import DinLossFigure from "@/components/visualization/ml/recsys/din/DinLossFigure";
+import DinShapeStepper from "@/components/visualization/ml/recsys/din/DinShapeStepper";
+import DinVsMeanFigure from "@/components/visualization/ml/recsys/din/DinVsMeanFigure";
+
+# DIN：用候选视频去读用户行为序列
+
+DIN（Deep Interest Network）由阿里巴巴的 Guorui Zhou、Chengru Song、Xiaoqiang Zhu 等人在 KDD 2018 提出（arXiv 1706.06978）：**给用户的每一条历史行为打一个和当前候选相关的权重，再加权求和成用户兴趣向量，权重由一个小 MLP 算出，不做 softmax。** 这一页先看它在 kuairank 里的整条数据流，再按输入、核心、输出拆开结构，然后是 loss、训练、一个 batch 的张量形状、和均值池化的对比。它接在 [id embedding 的记忆与 one-epoch 现象](/notes/ml/recsys/id-embedding-one-epoch/) 之后：上一页的 id 向量在这里不再用来背样本，而是当「用户看过什么」的相似度钥匙；底座沿用 [特征交叉：FM 与 DCN](/notes/ml/recsys/feature-crossing/) 里的 DCN-v2，注意力的读法可以对照 [Attention：Q、K、V](/notes/ml/llms/attention-qkv/)。
+
+kuairank Day 3 的结果和直觉相反，先说在前面：序列让 GAUC 涨了（对 Day 2 的 #9，test tab 1 +0.0078、随机集 +0.0097，都显著），但 DIN 和均值池化打平，最近 10 条比 50、200 条都好，而且增益几乎全部来自「用户此刻的状态」，不是「候选和兴趣的匹配」。细节在「KuaiRand 上的结果」一节。
+
+## What is it?
+
+一句话：DIN 是一个 CTR 模型，它把用户行为序列按候选物品做 target attention 池化，再和其他特征一起送进 MLP 预测点击。
+
+| | 论文（Alibaba 展示广告） | kuairank Day 3 |
+| --- | --- | --- |
+| 行为元素 | 商品 id、店铺 id、类目 id 的 embedding 拼接 | vid、aid、tag 三个 embedding 拼接（48 维）+ 反馈 embedding（16 维）；最好的配置 #24 去掉了 vid |
+| 序列长度 | 用户的全部历史行为 | 最近 N 条曝光，N ∈ {10, 50, 200}，N = 10 最好 |
+| embedding 维度 | 12（16 个特征组） | 16 |
+| attention | activation unit，不做 softmax | 同左，MLP [64, 32] |
+| 激活函数 | Dice | ReLU |
+| 正则 | mini-batch aware，λ = 0.01 | 不做，按 valid 取最好权重 |
+| 上层网络 | MLP 192 × 200 × 80 × 2 | DCN-v2 cross × 3 + MLP 512 · 256 · 128（与 Day 2 #9 相同） |
+| 数据 | 6,000 万用户、6 亿商品、20.14 亿样本 | 1,000 个用户、1,166 万条曝光 |
+
+<DinPipelineFigure />
+
+## Why does it exist?
+
+DIN 之前的做法（论文称为 BaseModel，即 Embedding&MLP）把用户的所有历史行为做 sum 或 average pooling，压成一个固定长度的向量。论文指出这是瓶颈：一个用户同时有很多兴趣，不管候选是什么，他都被压成同一个向量；要装下所有兴趣只能加大维度，参数和过拟合都跟着涨。DIN 的想法是**局部激活**：预测某个候选时，只有和它相关的那部分历史需要被「点亮」，所以用户向量应该随候选变化。
+
+在 KuaiRand 上，这个想法要换一个角度看。F1 里已经有「计数版的 target attention」：用户×作者、用户×tag 的全量历史点击率，就是「历史里和候选同作者 / 同 tag 的有多少、点了多少」，只是全部历史等权。所以序列模型能多出来的东西只有三处：**近期**（最近几小时的兴趣漂移）、**相似而非相同**（embedding 学到的作者 / tag 之间的相似）、**反馈类型的组合**（看完、点了没看完、划走）。实验最后表明，真正起作用的是第一处里更窄的一部分：最近几分钟用户是不是在连续划走。
+
+## Architecture
+
+### 输入：序列元素与两个指针
+
+序列是用户的全部曝光按时间排成的一条，四个 split 都算：test 样本的历史包括 valid 期和 test 期更早的曝光，和 [只用过去的特征](/notes/ml/recsys/point-in-time-split/) 是同一条规则。历史 = 该用户时间戳**严格早于**本次请求的曝光，同一请求内的其他曝光不算。每个历史元素是
+
+$$
+\mathbf e_i = \big[\, \mathbf E_{\text{vid}}[v_i] ;\ \mathbf E_{\text{aid}}[a_i] ;\ \mathbf E_{\text{tag}}[g_i] ;\ \mathbf E_{\text{fb}}[\,1 + \text{click}_i + 2\,\text{long\_view}_i + 4\,\text{like}_i\,] \,\big] \in \mathbb R^{64}
+$$
+
+反馈码 0 留给 padding，1–8 是三个二值反馈的组合。三张 item 表和候选视频共用，所以历史里的某个 vid 和候选的同一个 vid 是同一行向量。
+
+存储不生成 (样本 × N) 的矩阵：5M 条样本 × 200 条历史 × 3 个 int32 就是 12 GB。kuairank 把全部 1,166 万条曝光按 (user_id, time_ms, row_id) 排成一个事件数组，每条存 vid / aid / tag 的词表下标和反馈码，作为模型的 buffer 常驻 GPU（四列 int32，约 190 MB）；每条样本只存 (lo, hi) 指针，lo 是该用户第一条事件，hi 是本次请求第一条事件。训练时只搬指针，在 GPU 上算最近 N 条的下标再 gather：
+
+<DinGatherFigure />
+
+历史从来不短：test 样本的历史长度中位数 11,822 条，99.9% 超过 200 条。所以 N 在这里不是「有多少历史」，而是「看多近」：
+
+| | train | valid | test tab 1 | random |
+| --- | --- | --- | --- | --- |
+| 历史长度中位数（全部曝光 / 点击） | 3,409 / 1,154 | 9,383 / 3,186 | 11,822 / 4,486 | 7,875 / 3,359 |
+| 最近 50 条曝光覆盖的时间（中位） | 0.4 h | 0.4 h | 0.5 h | 0.7 h |
+| 最近 200 条曝光覆盖的时间 | 4.9 h | 5.6 h | 5.7 h | 10.3 h |
+| 最近 50 条里 video_id 在词表里 | 71.5% | 20.9% | 12.3% | 16.8% |
+| 最近 50 条里 author_id 在词表里 | 92.0% | 76.1% | 69.5% | 72.7% |
+| 目标作者出现在最近 200 条里 | 6.1% | 5.7% | 4.5% | 0.3% |
+
+最后几行是一个训练 / 测试偏移：词表只从 train 建，train 样本的历史 72% 能查到 video embedding，test 只有 12%。模型在训练时学会依赖历史视频的 embedding，到 test 时这部分 88% 变成 OOV 向量；author_id 的落差小得多。
+
+### 核心：activation unit
+
+$$
+w_i = \operatorname{MLP}\big([\,\mathbf q,\ \mathbf k_i,\ \mathbf q - \mathbf k_i,\ \mathbf q \odot \mathbf k_i,\ \mathbf e^{\text{fb}}_i\,]\big),\qquad \mathbf v_U(\mathbf q) = \sum_{i=1}^{N} m_i\, w_i\, \mathbf e_i
+$$
+
+$\mathbf q$ 是候选的 48 维 item 向量，$\mathbf k_i$ 是 $\mathbf e_i$ 的 item 部分，$m_i$ 是 mask。和 [Attention：Q、K、V](/notes/ml/llms/attention-qkv/) 比，这里只有一个 query（候选），key 和 value 都来自历史，相关性不是点积而是一个 MLP 打的分，而且**不做 softmax**：论文明确放弃了对 $a(\cdot)$ 输出的 softmax 归一化，让 $\sum_i w_i$ 保留「用户对这个候选的兴趣有多强」。
+
+实现上有两处要分清。论文 Eq. 3 写的是把行为向量、候选向量和它们的 out product 送进网络；作者公开的实现（zhougr1993/DeepInterestNetwork 的 `din/model.py`）拼的是 $[\mathbf q, \mathbf k, \mathbf q - \mathbf k, \mathbf q \odot \mathbf k]$，但它的 `attention` 函数在 mask 和缩放之后又做了 softmax，和论文正文不一致。kuairank 用公开实现的拼接方式、按论文不做 softmax，再拼上反馈 embedding，所以「同 tag 但划走」和「同 tag 且看完」可以得到不同的权重。
+
+<DinAttentionUnitFigure />
+
+### 输出：拼进 DCN-v2
+
+池化得到的 64 维兴趣向量 $\mathbf v_U(\mathbf q)$ 和 F1 的 27 个类别域 embedding（27 × 16 = 432）、61 维稠密特征、48 维候选向量拼成 605 维的 $\mathbf x_0$，后面是和 Day 2 #9 完全相同的 3 层 DCN-v2 cross 与 MLP 512 · 256 · 128，输出一个 logit。上面总图的「打分」一行就是这一段。同一个 `SeqDCN` 类的 `pooling` 参数还有两档对照：`none` 只加候选向量不用历史，`mean` 用有效位置上 $\mathbf e_i$ 的均值。
+
+## Loss functions
+
+$$
+\mathcal L = -\frac{1}{|\mathcal B|} \sum_{(x, y) \in \mathcal B} \Big[\, y \log \sigma\big(f(x)\big) + (1 - y) \log\big(1 - \sigma(f(x))\big) \Big]
+$$
+
+预测的是这条曝光的 is_click（Day 3 最后用最好的配置跑一次 long_view），loss 在每条曝光上算，和 Day 2 一样是 BCE；论文同样用交叉熵，另加 mini-batch aware 正则：只对当前 batch 里出现过的特征的 embedding 做 L2，按出现次数缩放，避免每一步都去更新几亿行 embedding。attention 没有单独的监督信号，$w_i$ 只通过点击 label 的梯度学出来。BCE 本身的推导在 [Logistic Regression](/notes/ml/classifiers/logistic-regression/)。
+
+下面把一条样本拆开：同一段历史，换一个候选，DIN 的权重就换一套；均值池化不管候选是什么都给每条 0.10。
+
+<DinLossFigure />
+
+## How is it trained?
+
+| | 论文 | kuairank Day 3 |
+| --- | --- | --- |
+| 优化器 | Alibaba：Adam，学习率 0.001，衰减率 0.9；Amazon / MovieLens：SGD，学习率 1，衰减率 0.1 | Adam，学习率 1e-3，不衰减 |
+| batch | Alibaba 5,000；Amazon / MovieLens 32 | 4,096（train 一个 epoch 1,226 步） |
+| 轮数与选择 | 论文未披露 | 最多 3 个 epoch，每 1/4 epoch 在 valid 上算 AUC，保留最好的权重，连续 4 次不涨就停 |
+| 硬件与时间 | 论文未披露训练硬件；线上服务用 CPU-GPU 架构 | RTX 3060：N = 50 每 epoch 0.7 分钟，N = 200 1.7 分钟，N = 1,000 22 分钟、显存峰值 9.6 GB，所以 N 上限取 200 |
+
+patience 从 Day 2 的 12 降到 4：带 vid / aid embedding 的模型在 Day 2 已经证实 epoch 1 之后只会下降（one-epoch 现象），跑满 3 个 epoch 只是浪费。
+
+训练好的模型怎么用：
+
+| 用法 | 论文 | kuairank |
+| --- | --- | --- |
+| 线上排序 | 2017 年 5–6 月近一个月的 A/B：CTR 最高 +10.0%、RPM +3.8%；按 CTR^α · bid 排序（α > 1.0） | 不上线 |
+| 服务 | 峰值每秒超过 100 万用户，每个用户 10 ms 内给几百个广告打分；请求合批、GPU 显存优化、并发 kernel，单机 QPS 约翻倍 | 离线给 test、test tab 1、随机集打分，事件数组不进 state_dict，加载时从 `seq_events.npz` 重建 |
+
+## A KuaiRand example
+
+一条训练样本从指针到 loss：
+
+1. 从打乱后的 train 张量里按块读出一个 batch：类别 [4096, 27 + 3]、稠密 [4096, 61]、label、指针 [4096, 2]。
+2. 在 GPU 上算最近 N 条的下标和 mask：[4096, 50]。
+3. 从事件数组 gather：item 下标 [4096, 50, 3]、反馈码 [4096, 50]。
+4. 查表得历史元素 [4096, 50, 64] 和候选 [4096, 48]。
+5. activation unit：[4096, 50, 208] → [4096, 50]。
+6. 加权求和：[4096, 64]；拼成 $\mathbf x_0$：[4096, 605]。
+7. DCN-v2 + MLP → logit [4096] → BCE。
+
+<DinShapeStepper />
+
+核心几行（`kurec/models/din.py`）：
+
+```python
+def pooled_history(self, q, ptr):
+    idx, mask = history_index(ptr[:, 0], ptr[:, 1], self.seq_len)      # [B, N]
+    h = self.item_emb(self.hist_items[idx].long()).flatten(2)          # [B, N, 48]
+    e = torch.cat([h, self.fb_emb(self.hist_fb[idx].long())], dim=-1)  # [B, N, 64]
+    if self.pooling == "mean":
+        return mean_pool(e, mask)
+    qe = q.unsqueeze(1).expand_as(h)
+    w = self.attention(torch.cat([qe, h, qe - h, qe * h, e[..., h.shape[-1]:]], dim=-1)).squeeze(-1)
+    return (w * mask).unsqueeze(-1).mul(e).sum(1)                      # [B, 64], no softmax
+```
+
+论文的结果（Table 3、Table 5；论文的 AUC 是按用户曝光数加权的 AUC，Eq. 10，和本章的 GAUC 同一个定义；RelaImpr 是相对 BaseModel 在 0.5 以上部分的提升）：
+
+| 模型 | MovieLens | Amazon (Electro) | Alibaba |
+| --- | --- | --- | --- |
+| BaseModel（Embedding&MLP） | 0.7300 | 0.8624 | 0.5970 |
+| Wide&Deep | 0.7304 | 0.8637 | 0.5977 |
+| DeepFM | 0.7324 | 0.8683 | 0.5993 |
+| DIN | 0.7337 | 0.8818 | 0.6029 |
+| DIN + Dice | 0.7348 | 0.8871 | 0.6044 |
+| DIN + MBA 正则 + Dice | — | — | 0.6083（RelaImpr +11.65%） |
+
+### KuaiRand 上的结果
+
+全部是 is_click，差值是对 #9（DCN-v2 F1，同一个底座、不用序列）的配对用户 bootstrap 95% 区间；tab 1 是 test 的有偏主列，random 是随机曝光集。
+
+| 运行 | 改动 | click GAUC tab 1 / random | 对 #9：tab 1 | 对 #9：random |
+| --- | --- | --- | --- | --- |
+| #9 | 对照，不用序列 | 0.6536 / 0.6252 | — | — |
+| #16 | 只加候选的 vid + aid + tag，不用历史 | 0.6528 / 0.6282 | −0.0008 [−0.0014, −0.0001] | +0.0030 [−0.0016, +0.0075] |
+| #17 | DIN，N = 50 | 0.6590 / 0.6331 | +0.005 | +0.0079 [+0.0012, +0.0140] |
+| #18 | 均值池化，N = 50 | 0.6605 / 0.6356 | +0.007 | +0.0104 [+0.0045, +0.0164] |
+| #19 | DIN，N = 10 | 0.6613 / 0.6343 | +0.0077 [+0.0068, +0.0088] | +0.0091 [+0.0024, +0.0157] |
+| #20 | DIN，N = 200 | 0.6517 / 0.6324 | −0.002 | +0.0072 [+0.0021, +0.0123] |
+| #22 | DIN，只用点击流，N = 50 | 0.6433 / 0.6119 | −0.010 | −0.0134 [−0.0198, −0.0073] |
+| #23 | DIN，N = 50，元素去掉 vid | 0.6623 / 0.6353 | +0.0087 [+0.0077, +0.0098] | +0.0101 [+0.0042, +0.0160] |
+| **#24** | **DIN，N = 10，元素去掉 vid** | **0.6614 / 0.6350** | **+0.0078 [+0.0069, +0.0088]** | **+0.0097 [+0.0030, +0.0166]** |
+| #26 | #24 的配置训 long_view（对 #10） | lv 0.6845 / 0.6565 | lv +0.0078 [+0.0070, +0.0086] | lv +0.0104 [+0.0022, +0.0183] |
+
+和动手前写下的预期对照（`docs/DIN_SEQ.zh-CN.md` §5、§7）：
+
+| 问题 | 预期 | 结果 |
+| --- | --- | --- |
+| 只加候选 item 向量 | 与 #9 打平 | 对：tab 1 −0.0008，random +0.0030 |
+| 序列对 #9 | tab 1 +0.003 ~ +0.008，random 不小于 tab 1 | 对：tab 1 +0.008，random +0.010，两边显著 |
+| DIN vs 均值 | N = 50 差 ≤ 0.002，N = 200 时 DIN 领先扩大 | 错：N = 50 均值反而略好（DIN − mean tab 1 −0.0015），N = 200 仍是均值略好（−0.0008），N = 10 完全打平（random +0.0004） |
+| N 的收益 | 10 → 50 明显提升，50 → 200 减半 | 反过来：N = 10 最好，N = 50 tab 1 −0.0023，N = 200 比 N = 50 再降 −0.0073（#20 的 valid 在 epoch 0.5 就见顶） |
+| 点击流 vs 全部曝光 | 差距在 ±0.002 内 | 点击流差得多：tab 1 −0.016、random −0.021，比不用序列还差 |
+| 去掉 vid | 不差于带 vid | 对：tab 1 +0.0033（显著），参数 1,900 万 → 790 万 |
+| 按活跃度分桶 | 增益与活跃度关系不大 | 基本对：tab 1 四个四分位 +0.0074 / +0.0054 / +0.0073 / +0.0090，都显著 |
+
+**增益从哪来。** 同一对模型（#9 → #19）换一种分组方式算 GAUC：按用户分组（主指标）时 click +0.0077 [+0.0068, +0.0088]；按请求分组（同一次请求返回的那几条，中位 6 条）时是 −0.0004 [−0.0011, +0.0002]，没有增益。「最近 10 条的点击率」这一个标量，用户内 GAUC 就有 0.580，请求内恰好 0.500（同一请求里它对每条候选都一样）；「最近 10 条里和候选同 tag 的占比」在两种分组下都是 0.534，而这部分信息 F1 的用户×tag 统计已经有了。
+
+按用户分组的 GAUC 横跨四周：同一个用户有时一路点、有时一路划。模型只要知道「这几分钟他是不是在连续划走」，就能把这个用户的整段曝光排得更好，这和候选是什么无关。这一条把其余结果都解释了：
+
+- **N 越短越好**：状态只看最近几分钟，N = 10 正好；更长的历史把状态信号稀释掉，还给 id embedding 更多机会过拟合。
+- **attention 没用**：状态与候选无关，按候选加权和等权平均提取的是同一个东西。
+- **点击流最差**：只留点击就删掉了「连续划走」这个最强的状态信号。
+- **随机集上也涨**：随机曝光插在常规请求之间，它前面的常规曝光同样反映此刻的状态。
+
+对线上意义的判断：精排只在一次请求的候选之间排序，用户状态对所有候选是同一个常数，这部分 GAUC 增益几乎不改变线上的排序；它对跨请求的决策有用（是否插广告、刷新多少条、多目标融合时的校准）。这也是 [GAUC](/notes/ml/recsys/gauc-paired-bootstrap/) 本身的一个盲点，kuairank 之后的序列结论都同时报按请求分组的 GAUC。随机集每个请求只有一条随机视频，算不了按请求的 GAUC。
+
+三条实践上的注意：
+
+- 序列 id 和候选 id 必须共用 embedding 表，否则历史里的 vid 和候选的 vid 是两套向量，相似度无从谈起。
+- 带 vid / aid 的序列模型同样会遇到 one-epoch 现象，评估频率要高于一个 epoch，并保留 valid 最好的权重；N 越长越早见顶（N = 200 在 epoch 0.5）。
+- 序列结论要同时看按用户和按请求分组的 GAUC：前者会把「预测用户什么时候想点」算成排序能力。
+- 预测时 attention 的输入是 [B, N, 208] 个 float，N 一大就很占显存；kuairank 把预测的 batch 上限设成 2²⁰ / N（夹在 1,024 和 65,536 之间）。
+
+## DIN vs 均值池化
+
+| | 均值池化（YouTube DNN 式） | DIN |
+| --- | --- | --- |
+| 结构 | 历史元素在有效位置上取平均 | 小 MLP 按候选给每条历史打分，再加权求和 |
+| 用户向量是否随候选变 | 不变，每个候选看到同一个向量 | 随候选变 |
+| 权重是否归一化 | 是，每条 1/N | 否，Σ w_i 随相关历史的多少变化 |
+| 每条样本的计算 | O(N · 64) | O(N · MLP)，多一个 [N, 208] 的小网络 |
+| 输入 | 相同：同一个事件数组、同一组指针、同一张 item 表 | 相同 |
+| 损失与训练 | 相同：BCE，Adam，按 valid 取最好权重 | 相同 |
+| N 变长时 | 近期的强兴趣被更早的历史稀释 | 只在相关的历史上取值，不被稀释，但尺度随 N 变 |
+| KuaiRand 上的结果 | N = 50 时略好于 DIN（tab 1 +0.0015），N = 10 时打平 | N = 50、200 时略差，N = 10 时打平 |
+
+<DinVsMeanFigure />
+
+图里是方案阶段设想的机制：如果信号是「最近一阵对某类内容的兴趣」，长 N 会稀释均值、不稀释 DIN。KuaiRand 的结果说明这个前提不成立：起作用的信号是和候选无关的用户状态，所以按候选加权没有可加之处，N 越长两者都越差。这张图讲的是 DIN 在什么条件下该赢，不是它在这里赢了。
+
+两条路线分开的原因是同一个问题的两种答案：用户有很多兴趣，一个向量装不下。均值池化的回答是「装不下就平均」，便宜、稳定、和候选无关，所以可以提前算好、在召回阶段和候选做内积；DIN 的回答是「只装和候选有关的那部分」，代价是用户向量依赖候选，每个候选都要重算一遍，只能放在精排。
+
+各自留下来的东西：均值（以及 sum、max）池化留在召回和双塔模型里，因为用户塔必须独立于候选；DIN 的 target attention 成了精排序列建模的默认零件，后来的 DIEN、BST、SIM 都是在它上面改「历史怎么读」，而不是改「按候选读」这件事。
+
+## Trade-offs
+
+- 只看最近 N 条：N = 200 在 KuaiRand 上只覆盖 5–6 小时，长期兴趣只能靠 F1 的聚合统计。SIM（Pi et al. 2020）先按候选的类目从终身历史里检索出相关子序列，再做 target attention。
+- 历史当作无序集合：attention 不看顺序，兴趣的演化被忽略。DIEN（Zhou et al., AAAI 2019）用 GRU 抽兴趣、再用带注意力的 GRU 建模演化；BST 用 Transformer 自注意力加位置信息。
+- 不归一化的权重让输出尺度随 N 和相关历史的多少变化，上层网络要能消化；N 一变，分数分布也跟着变。
+- 每个候选都要对全部 N 条历史跑一次 MLP，计算量是 候选数 × N；论文靠请求合批和 GPU 优化把延迟压在 10 ms 内，N 再大就需要上面的检索式方法。
+- 历史 id 有训练 / 测试偏移：train 的历史 72% 能查到 vid，test 只有 12%（KuaiRand）。去掉 vid、只用 aid 和 tag 后 tab 1 反而 +0.0033（显著），参数从 1,900 万降到 790 万。
+- 当用户状态比兴趣匹配更强时，target attention 退化成均值池化，多出来的 MLP 只是成本；KuaiRand 上 N = 10 的 DIN 和均值完全打平。要让序列改善请求内排序，需要能做相似度匹配的长期兴趣建模（SIM 一类检索式长序列），并用按请求分组的 GAUC 来评。
+
+## Key ideas to remember
+
+1. DIN 的用户向量随候选变化：$\mathbf v_U(\mathbf q) = \sum_i w_i(\mathbf q, \mathbf k_i)\, \mathbf e_i$。
+2. 权重由一个小 MLP 从 $[\mathbf q, \mathbf k_i, \mathbf q - \mathbf k_i, \mathbf q \odot \mathbf k_i]$ 算出，不做 softmax，保留「匹配了多少」。
+3. 历史 id 和候选 id 共用 embedding 表；id 在这里是相似度的钥匙，不是背样本的记忆。
+4. 序列不物化：一个排好序的事件数组 + 每条样本两个指针，最近 N 条在 GPU 上右对齐 gather。
+5. 在 KuaiRand 上，序列的增益（tab 1 +0.008、随机集 +0.010）几乎全部是「用户此刻的状态」：按请求分组时增益为 0，DIN 与均值打平，最近 10 条最好，去掉划走只留点击最差。
+
+## Related notes
+
+- [多目标排序：shared-bottom、MMoE、PLE 与跷跷板](/notes/ml/recsys/multi-task-ple/)：Day 4 在 #24 的编码上同时预测四个目标。
+- [id embedding 的记忆与 one-epoch 现象](/notes/ml/recsys/id-embedding-one-epoch/)：id 向量、词表覆盖率和为什么按 valid 取最好权重。
+- [特征交叉：FM 与 DCN](/notes/ml/recsys/feature-crossing/)：DIN 上面接的 DCN-v2。
+- [Attention：Q、K、V](/notes/ml/llms/attention-qkv/)：softmax 版的注意力，对照这里的不归一化。
+- [时间切分与只用过去的特征](/notes/ml/recsys/point-in-time-split/)：序列里「严格早于、同一请求排除」的规则。
+- [GAUC 与配对用户 bootstrap](/notes/ml/recsys/gauc-paired-bootstrap/)：Day 3 结果会用的指标和显著性口径。
+
+## Further reading
+
+- Zhou, G. et al. (2018), [*Deep Interest Network for Click-Through Rate Prediction*](https://arxiv.org/abs/1706.06978), KDD.（本页的论文数字都来自这里）
+- Zhou, G. et al. (2019), [*Deep Interest Evolution Network for Click-Through Rate Prediction*](https://arxiv.org/abs/1809.03672), AAAI.（把历史当序列，建模兴趣演化）
+- Pi, Q. et al. (2020), [*Search-based User Interest Modeling with Lifelong Sequential Behavior Data for Click-Through Rate Prediction*](https://arxiv.org/abs/2006.05639)。（终身历史上先检索再 attention）
+- Zhang, Z.-Y. et al. (2022), [*Towards Understanding the Overfitting Phenomenon of Deep Click-Through Rate Prediction Models*](https://arxiv.org/abs/2209.06053), CIKM.（one-epoch 现象）
+- 个人项目 kuairank：`docs/DIN_SEQ.zh-CN.md`（数据画像、存储、实验矩阵）、`kurec/seq.py`、`kurec/models/din.py`。

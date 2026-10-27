@@ -1,0 +1,51 @@
+import PointInTimeFigure from "@/components/visualization/ml/recsys/PointInTimeFigure";
+
+# 时间切分与只用过去的特征
+
+## 一句话
+
+**按时间切训练、验证、测试集，并让每条样本的每个特征只用时间戳严格早于它的数据（point-in-time correctness），离线看到的才是上线时拿得到的。**
+
+排序模型的滚动统计、用户序列、平滑先验都要守这一条；[样本与特征拼接](/notes/ml/recsys/sample-feature-join/) 里的特征快照，守的也是同一条。
+
+## 为什么需要它
+
+[一条曝光的 84 维输入](/notes/ml/recsys/kuairand-input/) 里有 45 个滚动统计：这个视频、这位作者、这个用户过去点了多少。上线打分时，系统只知道请求到达之前发生过什么。离线算特征时若多看了一眼，比如把同一请求的点击、或视频后来火没火也算进去，模型会学会依赖这些信息，离线 AUC 很好看，上线就掉下来。切分也一样：随机打乱再切，测试集里的视频在训练集里大多出现过，id 记忆被白白奖励；KuaiRand 是新内容为主的流（49% 的曝光发生在上传后 1 天内），按时间切以后，test 里 85% 的曝光是训练期没见过的视频。
+
+## 怎么工作
+
+<PointInTimeFigure />
+
+$$
+f(x_i) = \operatorname{agg}\{\, y_j : \operatorname{key}_j = \operatorname{key}_i,\; t_j < t_i \,\}, \qquad \widehat{\text{ctr}} = \frac{\text{clicks} + a \cdot p_0}{n + a}
+$$
+
+kuairank 的协议先定死，再做模型：
+
+| 集合 | 时间 | 行数 | 用户 | 视频 |
+| --- | --- | --- | --- | --- |
+| train | 4/08–4/21 常规日志 | 5,055,984 | 983 | 2,119,510 |
+| valid | 4/22–4/28 常规日志 | 2,524,980 | 978 | 1,159,803 |
+| test | 4/29–5/08 常规日志 | 4,132,081 | 997 | 1,779,398 |
+| test-random | 4/22–5/08 随机曝光 | 43,028 | 1,000 | 7,388 |
+
+切分只决定谁当 label、谁用来评估；特征的历史不受切分限制。test 样本的「过去」包括 valid 期和 test 期更早的曝光，因为线上打分时这些都已经发生了。只有用来平滑的先验 $p_0$（训练集点击率 0.38）和 tab 先验从 train 算。
+
+「严格早于」里的「严格」很要紧。日志的 `time_ms` 是请求级时间戳：1,171 万行只有 203 万个 (用户, 时间戳)，平均一个请求 5.8 条曝光，它们是同时返回给用户的。实现上先按 (key, 时间戳) 聚合，再做左闭右开的窗口（polars 的 `closed="left"`）和错位一格的累加，同一时间戳的整块自然被排除，本条样本自己的 label 也在这一块里。图里切到「≤ t」，就是少了这一步：特征往本条 label 的方向挪一点，玩具上单个特征的 AUC 从 0.649 涨到 0.824。
+
+切到「整月统计」是官方 `video_features_statistic` 的做法：每支视频一个月的日均统计，包含评估期。它等于提前知道视频后来的表现，所以 kuairank 主线不用这个文件，只允许在明确标注的消融里出现。
+
+随机曝光日志单独成为无偏测试集，不参与训练；它和常规日志共享 96.5% 的请求时间戳，说明随机视频是插进常规请求里的，评估时只给这些行打分。
+
+## 代价与取舍
+
+- 按时间切以后冷启动是常态：test 里 85% 的曝光是没见过的视频，video id 记忆几乎用不上，泛化特征（作者、tag、时长、滚动统计）才是主力，见 [id embedding 的记忆与 one-epoch 现象](/notes/ml/recsys/id-embedding-one-epoch/)。
+- 严格按时间算特征，实现比 groupby 一把梭贵：要排序、处理同一时间戳的并列，按 (time_ms, user_id, video_id) 稳定排序才能复现。
+- 时间切分会混进分布漂移：test 比 train 晚两周，分数掉一点不全是过拟合。KuaiRand 每日曝光量 33–44 万、各反馈率逐日平稳，漂移不大。
+- 「当月统计」这类方便的现成特征，先问一句它的时间窗口包不包括评估期。
+
+## 再往下看
+
+特征和切分定好以后，第一个模型是 [梯度提升树如何给曝光打分](/notes/ml/recsys/lightgbm-explained/)；它的分数怎么评、为什么全局 AUC 会虚高，在 [GAUC 与配对用户 bootstrap](/notes/ml/recsys/gauc-paired-bootstrap/)。
+
+数据来自个人项目 kuairank（KuaiRand-1K 上的排序实验）的 `docs/PLAN.zh-CN.md` §4、`docs/EDA.zh-CN.md` 与 `kurec/features.py`。
