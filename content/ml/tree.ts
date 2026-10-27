@@ -146,6 +146,8 @@ export const chapters: TreeChapter[] = [
       n("ml/post-training/rlhf", "RLHF：RM、PPO 与 DPO", "好回答很难写出来，但能比出来，怎么用？", "用成对偏好训一个奖励模型（Bradley–Terry），再用 PPO 在和参考模型的 KL 约束下优化；DPO 把这两步合成一个分类式的 loss。", "ready", "RLHF 与 DPO"),
       n("ml/post-training/grpo", "GRPO", "PPO 的 critic 太贵，能去掉吗？", "每个 prompt 采样 G 个回答各自打分，advantage = (r − 组内均值) / 组内标准差；用组内平均当基线，省掉 critic，其余沿用 PPO 的 clip 和 KL。", "ready"),
       n("ml/post-training/reward-hacking", "奖励设计与 Reward Hacking", "奖励一加上去，模型为什么学歪了？", "策略只优化你写下的奖励，不优化你心里的目标；长度奖励会被堆字刷分，要用正确性门控、上限和 KL 拉住它。", "ready", "Reward Hacking"),
+      n("ml/post-training/kl-divergence", "KL 散度：β 拉住的是什么", "说要用 KL 拉住策略，KL 到底量的是什么？", "KL(P‖Q) = Σ P ln(P/Q) 量一个分布离另一个多远；GRPO 罚 β·KL(π_θ‖π_ref)，β = 0 时日志里的 KL 是没算，不是没漂。", "ready", "KL 散度"),
+      n("ml/post-training/grpo-3060-project", "Project：在 3060 上训 GRPO，复盘一次 reward hacking", "真训一次，reward hacking 长什么样，怎么修？", "Qwen2.5-3B 在 GSM8K 上训 500 步：reward 涨了，准确率从 62% 掉到 57%，回答缩到 90 token；加 KL、门控格式分等四处修改后停在 77%。", "ready", "Project：3060 GRPO"),
     ],
   },
   {
@@ -233,6 +235,7 @@ export const edges: TreeEdge[] = [
   { from: "ml/llm-engineering/eval-harness", to: "ml/post-training/sft", why: "飞轮把过关的样本喂回 SFT" },
   { from: "ml/recsys/retrieval-precision-at-k", to: "ml/multimodal/multisticker-project", why: "Exact / Group Recall@K 就是那一页的指标" },
   { from: "ml/post-training/lora", to: "ml/multimodal/multisticker-project", why: "image / text / dual LoRA 用的就是这个低秩增量" },
+  { from: "ml/classifiers/softmax-cross-entropy", to: "ml/post-training/kl-divergence", why: "cross-entropy = 熵 + KL，最小化 CE 就是在最小化 KL" },
 ];
 
 export const nodeBySlug: Record<string, TreeNode & { chapter: TreeChapter }> = Object.fromEntries(

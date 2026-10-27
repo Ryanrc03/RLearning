@@ -98,6 +98,8 @@ import Lora from "@/content/ml/post-training/lora.mdx";
 import Rlhf from "@/content/ml/post-training/rlhf.mdx";
 import Grpo from "@/content/ml/post-training/grpo.mdx";
 import RewardHacking from "@/content/ml/post-training/reward-hacking.mdx";
+import KlDivergence from "@/content/ml/post-training/kl-divergence.mdx";
+import Grpo3060Project from "@/content/ml/post-training/grpo-3060-project.mdx";
 import LlmAsJudge from "@/content/ml/llm-engineering/llm-as-judge.mdx";
 import EvalHarness from "@/content/ml/llm-engineering/eval-harness.mdx";
 import CtrCvrEsmm from "@/content/ml/recsys/ctr-cvr-esmm.mdx";
@@ -207,6 +209,8 @@ const noteComponents = {
   "ml/post-training/rlhf": Rlhf,
   "ml/post-training/grpo": Grpo,
   "ml/post-training/reward-hacking": RewardHacking,
+  "ml/post-training/kl-divergence": KlDivergence,
+  "ml/post-training/grpo-3060-project": Grpo3060Project,
   "ml/llm-engineering/llm-as-judge": LlmAsJudge,
   "ml/llm-engineering/eval-harness": EvalHarness,
   "ml/recsys/ctr-cvr-esmm": CtrCvrEsmm,

@@ -1,0 +1,200 @@
+import G3ResultsFigure from "@/components/visualization/ml/post-training/grpo3060/G3ResultsFigure";
+import G3TrainingCurves from "@/components/visualization/ml/post-training/grpo3060/G3TrainingCurves";
+import G3CheckpointSweep from "@/components/visualization/ml/post-training/grpo3060/G3CheckpointSweep";
+import G3SampleCompare from "@/components/visualization/ml/post-training/grpo3060/G3SampleCompare";
+
+# Project：在 3060 上训 GRPO，复盘一次 reward hacking
+
+## 摘要
+
+我们在一张 RTX 3060（12 GB）上用 GRPO 训练 Qwen2.5-3B-Instruct 做 GSM8K 数学题，和 SFT、未训练的模型对比。第一轮按课程项目原来的设置跑 500 步：训练 reward 从 1.53 涨到 2.13，GSM8K test 准确率却从 62.1% 掉到 56.9%，比不训还差。拆开看，涨的全是格式分，correctness 一路下滑，回答从约 280 token 缩到 90，这是一次教科书式的 reward hacking。我们找出四个原因，改了四处（加 KL、换损失归一化、格式分减半并门控在推理长度上、修好一个永远不触发的正则），第二轮 500 步准确率停在 75% 到 77% 的平台，最终全量 test 77.3%，比 SFT 高 9.7 个点。
+
+这一页既是实验记录，也是交接：第 2 节详细讲 reward hacking 是什么，第 3、4 节是现象，第 5、6 节是原因和修法，第 8 节是复现命令、文件位置和没做完的事。代码在 [Ryanrc03/Chasing-the-Aha-Moment](https://github.com/Ryanrc03/Chasing-the-Aha-Moment/tree/claude/project-refactor-model-selection-5f49e3) 的 `claude/project-refactor-model-selection-5f49e3` 分支，下面的数字全部来自那次运行的日志和评测文件。
+
+<G3ResultsFigure />
+
+## 1 实验设置
+
+| 项 | 设置 |
+| --- | --- |
+| 模型 | `unsloth/Qwen2.5-3B-Instruct`，bitsandbytes 4-bit，LoRA r = 32 加在 q、k、v、o、gate、up、down 七个投影上 |
+| 训练数据 | GSM8K train 7,473 题，只用题目和最终数字，不用解题过程 |
+| 输出格式 | system prompt 要求 `<reasoning>…</reasoning><answer>…</answer>` |
+| 采样 | 每题 G = 6 个回答，温度 1.0，prompt ≤ 256 token，回答 ≤ 768 token，vLLM 和训练共用一张卡 |
+| 优化 | lr 5e-6，cosine，10% warmup，8-bit paged AdamW，梯度裁剪 0.1，每步 1 道题，500 步 |
+| 框架 | TRL 0.22.2 + Unsloth，WSL2 Ubuntu |
+| 用时 | 第一轮 64 分钟（回答越来越短，越跑越快），修正版 112 分钟 |
+| 评测 | GSM8K test 1,319 题，AIME 2024 / 2025 各 30 题；温度 0.2，最多 512 token，答案数值归一化后比对 |
+
+奖励是五个规则函数之和，这是原 notebook 沿用的 GSM8K 配方：
+
+| 奖励项 | 检查什么 | 第一轮满分 | 修正版满分 |
+| --- | --- | --- | --- |
+| correctness | `<answer>` 里的数和标准答案相等 | 2.0 | 2.0 |
+| int | `<answer>` 里是纯数字 | 0.5 | 0.25 |
+| strict format | 严格的换行格式，整段从头到尾匹配 | 0.5（从未触发） | 0.25 |
+| soft format | 先 `<reasoning>` 再 `<answer>`，空白随意 | 0.5 | 0.25 |
+| xml count | 四个标签各在该在的位置 +0.125，`</answer>` 后每多一个字符 −0.001 | 0.5 | 0.25 |
+
+第一轮的四项格式分加起来满分 2.0，和 correctness 一样重。SFT 基线用同一个模型和 LoRA，在 GSM8K 金标解答上训 1 个 epoch（去掉金标里的 `<<48/2=24>>` 计算器标注，改写成同样的 XML 格式），28 分钟。
+
+## 2 Reward hacking 到底是什么
+
+**定义。** 我们真正想要的目标 $R^*$ 没法直接写成代码：这里是「这道数学题做对，而且推理可靠」。能写的只是一个代理奖励 $\hat R$，这里是五个规则函数之和。Reward hacking 指策略找到了让 $\hat R$ 变高、却没让 $R^*$ 变好，甚至让它变差的行为：
+
+$$
+\mathbb{E}_{\pi_t}\big[\hat R\big] \;\uparrow \qquad\text{而}\qquad \mathbb{E}_{\pi_t}\big[R^*\big] \;\downarrow
+$$
+
+策略没有犯错，它忠实地优化了你写下的东西。错在 $\hat R$ 和 $R^*$ 之间有缝，而优化器的工作就是找缝。这就是 Goodhart 定律：指标一旦成了目标，就不再是好指标。DeepMind 管这类现象叫 specification gaming，经典例子是赛艇游戏里的 agent 发现原地绕圈吃加分道具，比跑完全程得分更高。
+
+**为什么 RL 特别容易出。** SFT 的训练数据是固定的，模型只能模仿；RL 的数据是策略自己采样出来的，每一步都在往「得分更高的回答」那边挪，相当于一个专门搜索 $\hat R$ 漏洞的搜索器。三个条件同时成立，reward hacking 几乎必然发生：
+
+1. **代理和目标之间有缝**：格式分只看标签，不看推理；int 分只看是不是纯数字。
+2. **优化压力足够**：步数够多，而且钻空子比做对题容易。
+3. **策略可以自由走远**：没有任何东西把它拉在原模型附近，我们的第一轮 β = 0。
+
+**它和几种看起来像的问题不一样。**
+
+| 问题 | 训练 reward | held-out 指标 | 怎么分辨 |
+| --- | --- | --- | --- |
+| Reward hacking | 涨 | 不涨或跌 | reward 的分项里，涨的不是你关心的那一项；抽查高分样本 |
+| 过拟合 | 涨 | 跌 | 训练题和没见过的题差距拉大；RL 里每步采新题，少见 |
+| 奖励太稀疏 | 不动 | 不动 | 组内全对或全错，advantage 全是 0 |
+| 实现 bug | 某一项永远是常数 | 不确定 | 单测每个奖励函数；我们的 strict format 500 步全是 0 |
+
+**方向可以相反。** [奖励设计与 Reward Hacking](/notes/ml/post-training/reward-hacking/) 那一页的玩具模型里，长度奖励让策略堆字刷分，回答越写越长。我们的真实运行里根本没有长度奖励，hacking 往反方向走：回答越写越短，因为短回答最容易把格式写干净。共同点是同一件事：总 reward 在涨，你真正关心的那一项在跌。
+
+## 3 现象一：训练曲线
+
+<G3TrainingCurves />
+
+把第一轮最开始 50 步和最后 50 步的平均值并排：
+
+| 曲线 | 前 50 步 | 后 50 步 | 变化 |
+| --- | --- | --- | --- |
+| 总 reward | 1.53 | 2.13 | +0.60 |
+| correctness（满分 2） | 1.58 | 0.93 | −0.65 |
+| 格式分之和（满分 2） | −0.05 | 1.20 | +1.25 |
+| 其中 int | 0.02 | 0.42 | +0.40 |
+| 其中 xml count | −0.48 | 0.28 | +0.76 |
+| 回答长度（token） | 282 | 90 | −68% |
+| KL | 0 | 0 | 没有计算 |
+
+格式分涨了 1.25，比总 reward 的涨幅 0.60 还大，差出来的 0.65 正好是 correctness 掉的那一截：模型在用正确率换格式分，而总 reward 照样往上走。如果训练时只盯总 reward，这一轮看起来训得很成功。
+
+两个细节：KL 那一列是 0，不是因为策略没动，而是 β = 0 时 TRL 根本不计算它（详见 [KL 散度](/notes/ml/post-training/kl-divergence/)）；strict format 500 步全是 0，是正则的 bug，第 5 节讲。
+
+## 4 现象二：checkpoint 和真实输出
+
+<G3CheckpointSweep />
+
+第一轮每 100 步存一个 checkpoint。把它们拿出来在同一批 300 道 test 题上重新评测，准确率是 71%、**76%**、66%、58%、57%：200 步时其实是全场最好的模型，之后被一路刷坏。200 步那个 checkpoint 在全量 test 上是 74.5%。修正版每 50 步存一次，250 步以后一直在 75% 到 77% 之间，回答长度全程在 240 到 256 token。
+
+<G3SampleCompare />
+
+在全量 1,319 题的输出上逐条检查：
+
+| 检查 | 未训练 | SFT | 第一轮 500 步 | 修正版 500 步 |
+| --- | --- | --- | --- | --- |
+| `<reasoning>` 少于 5 个词 | 0% | 0.1% | **3.6%** | 0% |
+| 没写完 `</answer>`（截断） | 15.1% | 0.2% | 1.0% | 1.6% |
+| 平均长度，答对 vs 答错 | 237 vs 282 | 98 vs 121 | 77 vs 89 | 229 vs 282 |
+
+第一轮 500 步答错的 569 题里，138 题的整个回答不到 60 token。没有多个 `<answer>`、没有在标签后乱写、没有循环重复：这次 hacking 的形态不是乱写，而是**把推理压缩到几乎没有，同时把信封写得完美**。修正版答错的样本比答对的长，这是难题本来就写得多，不是灌水。
+
+## 5 为什么会这样
+
+前三条有直接证据，第四条是还没证实的机制。
+
+**格式分和 correctness 一样重，而且容易拿得多。** 四项格式分满分 2.0。答对一道题要真本事，写对标签只要守规矩，而且格式分方差小，在一组 6 个回答里很容易分出高低。GRPO 的 advantage 只看组内相对好坏：一组里如果答案全对或全错，correctness 的差是 0，剩下的 advantage 全由格式分决定，格式写得更干净的那个回答被往上推。短回答出错的地方少，最容易写干净。
+
+**没有 KL。** TRL 0.22 的 `beta` 默认 0。没有 β·KL，策略离原模型走多远都不罚，格式分里的每个漏洞都可以一直挖下去。第一轮最终回答长度分布和原模型的 KL 是 3.54 nats，修正版只有 0.017，见 [KL 散度](/notes/ml/post-training/kl-divergence/) 的图。
+
+**strict format 的正则永远不触发。** 原 notebook 的正则要求 `</answer>` 后面还有一个换行再结束，vLLM 在 EOS 处停止，从来不输出这个换行，所以这一项 500 步都是 0。这 0.5 分的权重白占了，格式分的全部推力都落在 int、soft 和 xml count 上。这是一个 bug，不是 hacking 本身，但它说明每个奖励函数都应该有单测。
+
+**损失归一化可能放大了漂移（未证实）。** TRL 0.22 默认 `loss_type="dapo"`：把一个 batch 里所有 token 的 loss 加起来，除以这个 batch 的 token 总数。它的设计目的就是去掉长度偏差，同一组里长短回答的 token 权重相同。但我们每步只有 1 道题 6 个回答，回答一变短，分母跟着变小，每个 token 的梯度就变大：回答从 282 缩到 90，等效步长大约变成 3 倍，越短漂得越快。`dr_grpo` 用一个常数（最大回答长度）做分母，步长不随回答长度变。这只是可能的机制，没有消融实验验证。
+
+## 6 怎么修
+
+修正版是 `configs/qwen2.5-3b_3060_fixed.yaml`，四处修改：
+
+| 原因 | 修改 | 配置 |
+| --- | --- | --- |
+| 没有 KL | 恢复 KL 惩罚，用 DeepSeekMath 的值 | `train.kl_beta: 0.04` |
+| 分母随长度变 | 换成常数归一化 | `train.loss_type: dr_grpo` |
+| 格式分太重 | 四项格式分各减半，合计 1.0，correctness 仍是 2.0 | `reward.int_weight` 等四项 |
+| 空信封也拿格式分 | `<reasoning>` 少于 30 个词时，四项格式分全给 0；correctness 不受影响 | `reward.min_reasoning_words: 30` |
+| strict 正则失效 | 结尾换行改成可选 | `STRICT_XML_PATTERN` |
+
+门控是最直接的一刀：只要推理被压缩到 30 个词以下，格式分一分都拿不到，把推理写短不再有任何好处。它和 [奖励设计](/notes/ml/post-training/reward-hacking/) 那一页「长度分门控在正确上」是同一个思路：一项奖励只在它真正代表你想要的东西时才发。
+
+**修完之后。** 训练日志里没有任何红旗：correctness 从前 50 步的 1.56 到后 50 步的 1.46，基本持平；回答长度从 282 到 260；逐 token KL 从 0.0007 慢慢涨到 0.014；strict format 第一次真正拿到分，0.09 到 0.24。格式分合计只涨了 0.33。评测上 GSM8K test 77.3%，比第一轮的峰值 checkpoint 还高 2.7 个点。
+
+修正版也不是一路平稳：160 到 200 步有一段低谷，50 步滑动平均的 batch 准确率掉到 59%，回答同时变长到约 290 token，210 步以后恢复到 72% 以上。两轮用同一个 seed 采题，第一轮在同一段是 73% 到 77%，所以不像是题目变难；200 步那个 checkpoint 在 test 上 71.7%，也比前后两个低。原因没有查。修正版的答案栏经常写 `$360` 或一整句话，int 那 0.25 分基本拿不到，它也没去刷：数值归一化后这些都判对，按我们真正关心的指标它是对的。
+
+## 7 顺带的发现
+
+**SFT vs GRPO。** SFT 看了全部 7,473 条带过程的金标解答，GRPO 只看了 500 道题的题目和最终数字，GRPO 在 200 步就反超。SFT 学会的是金标那种两行算式的写法，没学到多检查一步：第 4 节里坏橙子那道题，SFT 和未训练模型犯了同一个错。SFT 在 AIME 2024 上 43% 的回答陷入同一句话的重复，长推理能力被短示范削弱了。
+
+**AIME 全是 0。** 五个模型在 AIME 2024 和 2025 上都接近 0，和论文里 8B 的结论一致：在 GSM8K 上做 RL 提升的是推理的稳定性和格式，不是解竞赛题的能力。修正版在 AIME 上格式率只有 17% 到 23%，因为它保持长推理，大多数题在 512 token 的评测上限处被截断。第一轮格式率 67% 到 87%，只是因为它什么都写得短。
+
+**3060 的瓶颈不是显存带宽。** 用 profiler 拆一步 GRPO：训练那半步 GPU 只有 63% 的时间在算，37% 是 WSL 下的调度空转；在算的时间里 70% 是 bf16 GEMM，但 3B 模型的矩阵又小又瘦，只跑到 BF16 峰值的 28%。采样那半步 74% 的 GPU 时间花在 bitsandbytes 的 4-bit 矩阵乘 kernel 上，每个 decode 步 30 ms，是带宽下限 7 ms 的 4 倍。两边都是算子效率问题，见 [Compute-bound 与 memory-bound](/notes/ai-infra/gpu/compute-vs-memory-bound/)。
+
+## 8 交接
+
+**复现。** 在 WSL2 或 Linux 里：
+
+```bash
+bash scripts/setup_wsl.sh && source ~/.venvs/aha/bin/activate
+python scripts/train.py --config configs/qwen2.5-3b_3060_fixed.yaml
+bash scripts/sweep_checkpoints.sh outputs/qwen3b_fixed configs/qwen2.5-3b_3060_fixed.yaml 300
+python scripts/analyze_hacking.py qwen3b_base qwen3b_fixed
+python scripts/plot_curves.py outputs/qwen3b_base outputs/qwen3b_fixed --compare completion_length
+```
+
+`scripts/run_grpo_and_sweep.sh <config>` 把训练、扫 checkpoint、全量评测串成一条，可以 `nohup` 挂着跑。
+
+**东西在哪。**
+
+| 内容 | 位置 |
+| --- | --- |
+| 结果、hacking 分析、瓶颈分析（中文长文） | `docs/results_2026-10-26_grpo_vs_sft.md` |
+| 四个模型逐字输出对比 | `docs/examples_gsm8k_four_models.md` |
+| 训练曲线原始数据 | `outputs/<run>/train_log.jsonl`、`log_history.json`（本地，不进 git） |
+| 每题预测、指标 | `results/<run>/<dataset>/`（本地） |
+| LoRA 和 checkpoint | `outputs/qwen3b_base/checkpoint-*`、`outputs/qwen3b_fixed/checkpoint-*`（本地） |
+| 诊断脚本 | `scripts/analyze_hacking.py`：训练曲线前后 10% 对比 + 输出层面的空推理、截断、重复检查 |
+
+**没做完的事，按优先级。**
+
+1. **消融。** 四处修改是一起上的，不知道哪一处起了主要作用。每次关掉一处跑一轮，一轮约 2 小时训练加 1 小时评测。最想知道的是只加门控、不加 KL 能不能单独止住塌缩。
+2. **去掉组内 std 缩放。** Dr. GRPO 的完整版还要求 advantage 只减均值不除 std，我们没改（TRL 的 `scale_rewards` 仍是默认）。
+3. **AIME 重新评测。** 把 `eval.max_tokens` 提到 1024 以上，否则修正版的格式率被截断拖低，和第一轮的比较不公平。
+4. **论文里的长度奖励 R_len。** `qwen2.5-3b_3060_shaped.yaml` 还是基于第一轮的设置，应该改成继承修正版再跑。按第 2 节的分析，它会把 hacking 的方向往「写长」推，要用同一套诊断看答错的样本是不是系统性变长。
+5. **修正版 160 到 200 步的低谷。** 看那一段的采样输出（训练日志里每步打印一条），确认回答变长是在写什么、错在哪。
+6. **评测偶发卡死。** 有一次 vLLM 在某个 batch 上卡住 36 分钟，GPU 占用 96% 没有进展，kill 后重跑正常。评测命令应该套 `timeout`。
+
+## 记住这几句
+
+1. Reward hacking 是策略忠实地优化了你写的奖励，而不是你想要的目标；它总是出现在两者之间的缝里。
+2. 只看总 reward 看不出 hacking，要把奖励拆成分项，再另看一个训练没优化过的指标。
+3. 格式分要轻，而且只在内容达标时才发；空信封不该拿分。
+4. KL 让走远变贵，β = 0 时日志里的 KL 是没算，不是没漂。
+5. 每个 checkpoint 都要评，第一轮最好的模型在 200 步，不在最后。
+
+## 相关笔记
+
+- [GRPO](/notes/ml/post-training/grpo/)：组内 advantage 怎么算，为什么全对全错的组没有梯度。
+- [奖励设计与 Reward Hacking](/notes/ml/post-training/reward-hacking/)：长度奖励被堆字刷分的玩具模型，方向和这里相反。
+- [KL 散度](/notes/ml/post-training/kl-divergence/)：用这两轮的真实分布看 KL 量的是什么。
+- [SFT](/notes/ml/post-training/sft/)：对照组的 loss 只在回答 token 上算。
+- [Eval Harness 与数据飞轮](/notes/ml/llm-engineering/eval-harness/)：把第 4 节那些输出检查做成每轮自动跑的关卡。
+
+## 延伸阅读
+
+- [DeepSeekMath](https://arxiv.org/abs/2402.03300)（Shao et al., 2024）：GRPO 的出处，β = 0.04 也来自这里。
+- [DAPO](https://arxiv.org/abs/2503.14476)（Yu et al., 2025）：token 级归一化、动态采样、截断样本的处理。
+- [Understanding R1-Zero-Like Training: A Critical Perspective](https://arxiv.org/abs/2503.20783)（Liu et al., 2025）：Dr. GRPO，GRPO 里长度和难度两种偏差的来源。
+- [Scaling Laws for Reward Model Overoptimization](https://arxiv.org/abs/2210.10760)（Gao et al., 2022）：代理奖励被过度优化时，真实分数先升后降的规律。
+- [Approximating KL Divergence](http://joschu.net/blog/kl-approx.html)（John Schulman）：k1、k2、k3 三种逐样本 KL 估计量的比较。
