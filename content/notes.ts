@@ -1595,7 +1595,7 @@ export const noteEntries: NoteEntry[] = [
     slug: "ml/recsys/training-step",
     title: "一次训练：从一行曝光到一次参数更新",
     description:
-      "一行真实曝光走完 shared-bottom 四目标模型的一个训练步：编号、查 embedding、拼 x0、前向、交叉熵、反向与 Adam，以及挑 checkpoint 的外层循环。",
+      "从全景网络图定位 embedding，再用 4×2 小表算清初始化、查表、前向、梯度与 Adam 更新；对照真实曝光走完 shared-bottom 四目标模型和 checkpoint 选择。",
     categoryId: "ml",
     category: "ML & LLM",
     section: "Recommender Systems",

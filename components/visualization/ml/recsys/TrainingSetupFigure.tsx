@@ -4,6 +4,8 @@ import { type ReactNode, useState } from "react";
 import VisualizationFrame from "@/components/visualization/VisualizationFrame";
 import Figure from "@/components/visualization/ml/primitives/Figure";
 import StepPlayer from "@/components/visualization/ml/primitives/StepPlayer";
+import TrainingNetworkOverview from "./TrainingNetworkOverview";
+import EmbeddingUpdateExample from "./EmbeddingUpdateExample";
 import {
   BATCH,
   BOTTOM,
@@ -266,6 +268,7 @@ export default function TrainingSetupFigure({ initialStep = 0 }: { initialStep?:
       description="KuaiRand-1K 里的一行真实曝光，走一遍 shared-bottom 四目标模型的一个训练步，最后一步看外层的循环。"
       footnote="数据和模型：kuairank 学习线的 L1_shared_4t（seed 0，F1 特征，不含 user / video id）。预测值来自训练好的权重；损失、梯度、参数量、步数都是现算的。"
     >
+      <TrainingNetworkOverview step={step} />
       <StepPlayer step={step} total={STAGES.length} onStep={setStep} caption={`第 ${step + 1} 步 / 共 ${STAGES.length} 步`} intervalMs={2600} />
       <div className="viz-stages" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", margin: "12px 0" }}>
         {STAGES.map((s, i) => (
@@ -277,6 +280,7 @@ export default function TrainingSetupFigure({ initialStep = 0 }: { initialStep?:
       </div>
       {body}
       <div className={`viz-narr ${tone}`}>{narr}</div>
+      <EmbeddingUpdateExample step={step} />
     </VisualizationFrame>
   );
 }
