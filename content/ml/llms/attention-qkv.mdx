@@ -1,46 +1,103 @@
 import AttentionQkvFigure from "@/components/visualization/ml/llms/AttentionQkvFigure";
+import TransformerAttentionMap from "@/components/visualization/ml/llms/attention/TransformerAttentionMap";
+import ScaledDotProductDiagram from "@/components/visualization/ml/llms/attention/ScaledDotProductDiagram";
+import SelfVsCrossAttentionFigure from "@/components/visualization/ml/llms/attention/SelfVsCrossAttentionFigure";
 
 # Attention：Q、K、V
 
+这一页跟着 Vaswani 等人 2017 年的论文 [Attention Is All You Need](https://arxiv.org/abs/1706.03762) 讲 attention：先看它在论文的 Transformer 架构里出现在哪三个地方，再把一个头拆成五步，用「Hi I am Ryan」把每一步算出来，最后对比 self-attention 和 cross-attention。
+
 ## 一句话
 
-**self-attention 让每个 token 用自己的 Query 去和所有 token 的 Key 打分，softmax 成权重后按权重把它们的 Value 加起来，再加回自己的 embedding。**
+**attention 用 Query 和每个 Key 打分，softmax 成权重，再按权重把 Value 加起来；Q、K、V 来自同一串向量就是 self-attention，Q 来自一串、K 和 V 来自另一串就是 cross-attention。**
 
-Transformer 的每一层都靠它让 token 互相读；多模态里图片 patch 和文字 token 也是在这一步互相看。
+论文把它写成一行：Attention(Q, K, V) = softmax(QKᵀ / √d_k) V。Transformer 的每一层都靠它让 token 互相读；翻译时译文去读原文、多模态里文字去读图片 patch，用的也是这一行。
 
 ## 为什么需要它
 
-[上一页](/notes/ml/llms/transformer-vs-rnn/) 说 Transformer 一层能同时算完所有位置，因为每个位置只读上一层的值。那一个位置到底怎么「读」其他位置？embedding 层给每个 token 的向量只和这个词本身有关，「Ryan」在哪句话里都是同一个 E₄，它不知道前面的「I am」在介绍它。要让 E₄ 变成「这句话里的 Ryan」，就得从别的 token 那里拿一点信息过来，而且拿多少要看相关不相关。attention 把「看谁、看多少、拿什么」拆成三个矩阵乘法。
+[上一页](/notes/ml/llms/transformer-vs-rnn/) 说 Transformer 一层能同时算完所有位置，因为每个位置只读上一层的值。那一个位置到底怎么「读」其他位置？embedding 层给每个 token 的向量只和这个词本身有关，「Ryan」在哪句话里都是同一个 E₄，它不知道前面的「I am」在介绍它。要让 E₄ 变成「这句话里的 Ryan」，就得从别的 token 那里拿一点信息过来，而且拿多少要看相关不相关。
+
+attention 在 2017 年之前就有了，只是挂在 RNN 上：RNN encoder 一步一步读完原文，decoder 每写一个词用 attention 回头看一眼原文。RNN 本身还是一步等一步。论文的标题就是它的主张：把 RNN 整个拿掉，读原文、读自己写过的词、两边对齐，全用 attention。论文 Table 1 给的账是：self-attention 一层的计算量 O(n²·d)，顺序步数 O(1)，任意两个位置之间的路径长度 O(1)；RNN 是 O(n·d²)、O(n)、O(n)。结果是 base 模型在 8 张 P100 上训 12 小时，WMT 2014 英译德拿到 27.3 BLEU；big 模型训 3.5 天，英译德 28.4、英译法 41.8，都超过了当时的最好结果，训练成本只是它们的一小部分。
 
 ## 怎么工作
+
+### 它在论文架构里的哪里
+
+<TransformerAttentionMap />
+
+| 配置 | 层数 N | d_model | 头数 h | d_k = d_v | d_ff | 参数 |
+| --- | --- | --- | --- | --- | --- | --- |
+| base | 6 + 6 | 512 | 8 | 64 | 2048 | 65M |
+| big | 6 + 6 | 1024 | 16 | 64 | 4096 | 213M |
+
+数字来自论文 Table 3；big 的 d_k 表里没写，按 1024 / 16 换算是 64。
+
+论文的模型是一个翻译器：左边 encoder 有 6 层，每层两个子层，multi-head self-attention 和逐位置的 feed-forward；右边 decoder 也是 6 层，每层三个子层，多出来的那个夹在中间，专门去读 encoder 的输出。每个子层外面都套一条 residual 再做 LayerNorm，写成 LayerNorm(x + Sublayer(x))，所有子层的输出都是 512 维，这样才能一层层叠上去。
+
+蓝色的三个块是同一个函数，论文 3.2.3 节列了它的三种用法，区别只在 Q、K、V 从哪来：encoder 里 Q、K、V 都来自 encoder 上一层，每个位置能看整句原文；decoder 第一个子层的 Q、K、V 都来自 decoder 上一层，但加了 mask，每个位置只能看自己和前面；decoder 第二个子层的 Q 来自 decoder，K 和 V 来自 encoder 最后一层的输出，每个译文位置都能看整句原文。前两种叫 self-attention，第三种论文叫 encoder-decoder attention，现在一般叫 cross-attention。点图上的两个按钮，看两种接线的区别。
+
+### 一个头里的五步：Scaled Dot-Product Attention
+
+<ScaledDotProductDiagram />
+
+$$
+Q = X W_Q,\qquad K = X W_K,\qquad V = X W_V,\qquad W_Q, W_K, W_V \in \mathbb{R}^{512 \times 64}
+$$
+
+$$
+\mathrm{Attention}(Q, K, V) = \mathrm{softmax}\!\left(\frac{Q K^{\top}}{\sqrt{d_k}} + M\right) V
+$$
+
+$$
+q \cdot k = \sum_{i=1}^{d_k} q_i k_i,\qquad \mathrm{Var}(q \cdot k) = d_k \;\;\Rightarrow\;\; \mathrm{Var}\!\left(\frac{q \cdot k}{\sqrt{d_k}}\right) = 1
+$$
+
+图是论文 Figure 2 的左半边，前面补上了产生 Q、K、V 的三个线性层。同一个 X 乘三个不同的矩阵：W_Q 给出每个 token 的 Query（我在找什么），W_K 给出 Key（我是什么），W_V 给出 Value（被找到以后交出什么）。Q Kᵀ 是一张 T × T 的表，第 i 行第 j 列是第 i 个 token 的 Query 和第 j 个 token 的 Key 的点积，也就是「i 想看 j 多少」。
+
+为什么除以 √d_k，论文的脚注给了理由：假设 q 和 k 的每一维都独立、均值 0、方差 1，它们的点积是 d_k 项相加，方差就是 d_k。d_k = 64 时分数的标准差是 8，softmax 会把最大的那一项推到接近 1，其余接近 0，落进梯度极小的区域。除以 √64 = 8 把方差拉回 1。M 是 mask，只在 decoder 的 self-attention 里出现：允许看的位置加 0，未来的位置加 −∞，softmax 之后权重正好是 0。
+
+softmax 按行做，每一行变成和为 1 的权重，再乘 V，就是把 T 个 value 向量按权重平均，输出 (T, 64)。这只是一个头；论文 base 有 8 个头并行，各出 64 维，拼成 512 维再乘一个 W_O，这一步放在 [下一页](/notes/ml/llms/multi-head-attention/)。
+
+### 一步一步算：Hi I am Ryan
 
 <AttentionQkvFigure />
 
 $$
-Q = E\,W_Q,\qquad K = E\,W_K,\qquad V = E\,W_V
+\Delta E_i = \sum_j a_{ij}\,V_j,\qquad a_{ij} = \frac{\exp(s_{ij})}{\sum_k \exp(s_{ik})},\qquad E_i' = E_i + \Delta E_i
 $$
 
-$$
-A = \mathrm{softmax}\!\left(\frac{Q K^{\top}}{\sqrt{d_k}}\right),\qquad a_{ij} = \frac{\exp(s_{ij})}{\sum_k \exp(s_{ik})}
-$$
+把上图缩成玩具尺寸：「Hi I am Ryan」四个 token，d = 4，三个 4 × 4 的投影矩阵固定不变，只有一个头。第 1 步把同一个 E 乘三次，得到 Q、K、V，形状都是 (B, T, d_k)，B 是 batch，T 是序列长度。第 2 步 Q 乘 Kᵀ 再除以 √d_k，得到 4 × 4 的 S。第 3 步每行 softmax：聚焦 Ryan，会看到它的权重大部分落在「I」上，形状是 (B, T, T)。
 
-$$
-\Delta E_i = \sum_j a_{ij}\,V_j,\qquad E_i' = E_i + \Delta E_i
-$$
+第 4 步 ΔE₄ = Σ_j a₄ⱼ V_j，权重大的 token 贡献多，输出回到 (B, T, d)。第 5 步 E₄' = E₄ + ΔE₄，就是论文里 x + Sublayer(x) 的那条 residual：原来的 E₄ 不丢，只是叠上上下文。玩具图省掉了 W_O 和 LayerNorm，完整的子层见 [Transformer Block](/notes/ml/llms/transformer-block/)。
 
-图里是「Hi I am Ryan」四个 token，每个 token 一个 d = 4 的向量，三个 4 × 4 的投影矩阵固定不变。第 1 步把同一个 E 乘三次：W_Q 给出每个 token 的 Query（我在找什么），W_K 给出 Key（我是什么），W_V 给出 Value（我能给出什么）。三份投影都是 (B, T, d_k)，B 是 batch，T 是序列长度。
+常见的 GPT-3 尺度草图里，W_Q、W_K 是 12,288 × 128，W_V 却画成 12,288 × 12,288。这和论文的 W_V 是 512 × 64 不矛盾：草图把 W_V 和 W_O 乘在一起看了，一个头先把 12,288 维压到 128 维，再由 W_O 那一段放回 12,288 维，才能加回 embedding。
 
-第 2 步算相关性：Q 和 Kᵀ 相乘得到 T × T 的 S，s_ij 是第 i 个 token 的 Query 和第 j 个 token 的 Key 的点积，再除以 √d_k 防止维度一大分数就飞。第 3 步对每一行做 softmax，一行变成一组和为 1 的权重：聚焦 Ryan，会看到它的权重大部分落在「I」上。形状仍是 (B, T, T)，这张表就是「每个 token 看每个 token 多少」。
+## Self-attention vs Cross-attention
 
-第 4 步把权重乘回去：ΔE₄ = Σ_j a₄ⱼ V_j，权重大的 token 贡献多，输出回到 (B, T, d)。第 5 步 E₄' = E₄ + ΔE₄，Ryan 的向量被改了一点，改动来自它看过的 token。这就是 residual 的用法：原来的 E₄ 不丢，只是叠上上下文。笔记里 GPT-3 尺度的 W_Q、W_K 是 12,288 × 128，把 12,288 维的 embedding 压到 128 维的 query / key 空间去比相关性；W_V 的草图是 12,288 × 12,288，输出要加回 embedding，所以维度得对上。
+<SelfVsCrossAttentionFigure />
+
+| | Encoder self-attention | Decoder masked self-attention | Cross-attention |
+| --- | --- | --- | --- |
+| Q 来自 | encoder 上一层 | decoder 上一层 | decoder 上一个子层 |
+| K、V 来自 | encoder 上一层 | decoder 上一层 | encoder 最后一层的输出 H |
+| A 的形状 | T_src × T_src | T_tgt × T_tgt | T_tgt × T_src |
+| mask | 只遮 padding | 因果 mask，外加 padding | 只遮原文的 padding |
+| 每一行在问 | 这个词和原文里的谁有关 | 写到这里，前面写过什么 | 下一个词对应原文的哪里 |
+| 现在用在哪 | BERT 的每一层 | GPT 的每一层 | T5、BART、Whisper 的 decoder；Stable Diffusion 里图像 latent 读文本 |
+
+公式、参数形状、softmax 都一样，三者只差接线。判断方法只有一句：Q 和 K、V 是不是从同一串向量投影出来的。是，就是 self-attention，加不加 mask 都算；不是，就是 cross-attention。所以 masked self-attention 仍然是 self，它只是把右上角遮掉了。
+
+cross-attention 的两串可以不一样长：图里 Q 有 3 行（已写出的中文），K、V 有 4 行（英文原文），A 是 3 × 4。输出的行数跟着 Q 走，所以它能原样加回 decoder 的 residual；K 和 V 必须来自同一串，因为 A 的每一列要对上 V 的一行。两串连维度都可以不同，W_K 和 W_V 负责把对方的维度投影到同一个 d_k、d_v 里，多模态模型就是这样让一种维度的文字特征去读另一种维度的图像特征。
+
+推理时两种也不一样。encoder 只跑一遍，H 不再变，每层 cross-attention 的 K、V 算一次就能一直用；masked self-attention 的 K、V 每生成一个词就多一行，这就是 KV cache 越来越长的那一部分。
 
 ## 代价与取舍
 
-- S 和 A 都是 T × T，序列长一倍，这两张表大四倍；长上下文时显存先被它吃掉，FlashAttention、滑动窗口都是在省这一步。
-- 图里 Ryan 可以看到「Hi」和「am」，生成模型不允许看后面的词，要在 softmax 前给未来位置加 −∞ 的 mask，上一页讲过。
-- attention 本身对顺序无感：把四行打乱，输出跟着打乱但数值不变，所以位置信息要另外加（position encoding）。
-- 一组 W_Q、W_K、W_V 只能学一种「看谁」的模式：图里 Ryan 看「I」，但「am」和「Ryan」的动宾关系也值得看，这是下一页的问题。
+- S 和 A 都是 T × T，序列长一倍，这两张表大四倍。论文第 4 节说只有当序列长度 n 小于维度 d 时 self-attention 才比 RNN 便宜，句子级翻译正好满足；长上下文时显存先被这张表吃掉，FlashAttention、滑动窗口都是在省这一步。
+- attention 本身对顺序无感：把四行打乱，输出跟着打乱但数值不变，所以论文要在 embedding 上加 sin / cos 的位置编码，见 [Transformer Block](/notes/ml/llms/transformer-block/)。
+- encoder-decoder 要两套层，decoder 每层多一个 cross-attention 子层。GPT 一类 decoder-only 模型把原文当 prompt 接在前面，用一种 masked self-attention 同时做「读原文」和「读自己写过的」，结构更简单、更好扩展，代价是原文也只能从左往右单向读。
+- 一组 W_Q、W_K、W_V 只能学一种「看谁」的模式：图里 Ryan 看「I」，但「am」和「Ryan」的关系也值得看，这是下一页的问题。
 
 ## 再往下看
 
-一组 Q、K、V 只给每个 token 一种看法，[Multi-head 与参数量](/notes/ml/llms/multi-head-attention/) 把 d 拆成几份，让几个 head 各看各的，再算清参数量。图文对齐也是在 attention 里看别的 token，只是那些 token 来自图片，见 [Vision–Language Alignment](/notes/ml/multimodal/vision-language-alignment/)。
+一组 Q、K、V 只给每个 token 一种看法，[Multi-head 与参数量](/notes/ml/llms/multi-head-attention/) 把 512 维拆成 8 份，让 8 个头各看各的，再算清参数量。cross-attention 在多模态里最常见：图文对齐见 [Vision–Language Alignment](/notes/ml/multimodal/vision-language-alignment/)，用 cross-attention 融合两种图像模态的例子见 [DAE-Fuse](/notes/ml/multimodal/dae-fuse-project/)。

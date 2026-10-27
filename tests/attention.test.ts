@@ -2,6 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   addMatrix,
+  attention,
+  buildCausalMask,
+  DEMO_CROSS,
+  DEMO_DEC,
+  DEMO_TARGET,
   attend,
   attentionWeights,
   DEMO_ATTENTION,
@@ -146,4 +151,38 @@ test("multiHeadAttention: concat is T × (h · d_v) = T × d_model, output T × 
   assert.equal(a.indexOf(Math.max(...a)), 1);
   assert.equal(b.indexOf(Math.max(...b)), 2);
   assert.ok(a[1] > 0.5 && b[2] > 0.5);
+});
+
+test("attention with Xq = Xkv and no mask is exactly selfAttention", () => {
+  const a = attention(DEMO_E, DEMO_E, DEMO_ATTENTION);
+  const b = selfAttention(DEMO_E, DEMO_ATTENTION);
+  assert.deepEqual(a.A, b.A);
+  assert.deepEqual(a.out, b.out);
+});
+
+test("masked self-attention on the decoder: row i puts zero weight on every later token", () => {
+  const n = DEMO_DEC.length;
+  const { A } = attention(DEMO_DEC, DEMO_DEC, DEMO_ATTENTION, buildCausalMask(n));
+  assert.deepEqual(shape(A), [n, n]);
+  A.forEach((row, i) => {
+    close(sum(row), 1);
+    row.forEach((w, j) => (j > i ? assert.equal(w, 0) : assert.ok(w > 0)));
+  });
+  assert.deepEqual(A[0], [1, 0, 0]);
+});
+
+test("cross-attention: Q from 3 decoder tokens, K and V from 4 encoder outputs → A is 3 × 4", () => {
+  const enc = selfAttention(DEMO_E, DEMO_ATTENTION).updated!;
+  const r = attention(DEMO_DEC, enc, DEMO_CROSS);
+  assert.equal(DEMO_TARGET.length, 3);
+  assert.deepEqual(shape(r.Q), [3, 4]);
+  assert.deepEqual(shape(r.K), [4, 4]);
+  assert.deepEqual(shape(r.A), [3, 4]);
+  assert.deepEqual(shape(r.out), [3, 4]);
+  r.A.forEach((row) => close(sum(row), 1));
+  // 你好 → Hi, 我 → I, 是 → Ryan, each above 0.6.
+  [0, 1, 3].forEach((j, i) => {
+    assert.equal(r.A[i].indexOf(Math.max(...r.A[i])), j);
+    assert.ok(r.A[i][j] > 0.6);
+  });
 });

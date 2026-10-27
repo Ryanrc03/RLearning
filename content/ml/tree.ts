@@ -151,7 +151,7 @@ export const chapters: TreeChapter[] = [
     nodes: [
       n("ml/llms/rnn", "RNN：hidden state 一步一步传", "序列怎么被一步步读？", "h_t = tanh(W_hh h_{t−1} + W_xh x_t)：每读一个 token 就把它揉进同一个 hidden state，输出 y_t = softmax(W_hy h_t)。", "ready", "RNN"),
       n("ml/llms/transformer-vs-rnn", "Transformer vs RNN", "怎么并行地读一串 token？", "RNN 每一步都在等上一步；Transformer 同一层的所有位置只依赖上一层，一次矩阵乘法算完一整层。", "ready"),
-      n("ml/llms/attention-qkv", "Attention：Q、K、V", "一个 token 怎么看别的 token？", "每个 token 投影出 query、key、value；用 QKᵀ/√d 算相关性，softmax 成权重，再把 value 加权求和加回自己。", "ready", "Attention Q/K/V"),
+      n("ml/llms/attention-qkv", "Attention：Q、K、V", "一个 token 怎么看别的 token？", "每个 token 投影出 query、key、value；用 QKᵀ/√d 算相关性，softmax 成权重，再把 value 加权求和加回自己。Q、K、V 同源是 self-attention，Q 来自 decoder、K/V 来自 encoder 是 cross-attention。", "ready", "Attention Q/K/V"),
       n("ml/llms/multi-head-attention", "Multi-head 与参数量", "为什么要多个头，参数有多少？", "把 d_model 拆成 h 份，每个头在自己的 d_k 维里做一次 attention 再拼回来；W_Q、W_K、W_V、W_O 共 4 d_model² 个参数，与头数无关。", "ready", "Multi-head"),
       n("ml/llms/transformer-block", "Transformer Block：一层里有什么", "一层里还有什么？", "embedding 加位置编码进来，经过 multi-head attention 和 MLP 两个子层，每个子层外面套 residual 和 LayerNorm，decoder 再加一个因果 mask。", "ready", "Transformer Block"),
       n("ml/llms/pretraining-objectives", "预训练目标：自回归与 Masked LM", "训练时在预测什么？", "GPT 用因果 mask 预测下一个 token，loss 是 −Σ log P(y_t | y_<t)；BERT 遮住 15% 的 token 再猜回来，外加一个句子对的二分类。", "ready", "预训练目标"),
