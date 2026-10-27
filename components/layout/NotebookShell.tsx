@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { navigation } from "@/content/navigation";
 import { noteEntries } from "@/content/notes";
 import { profile } from "@/content/profile";
 import Avatar from "./Avatar";
+import SidebarNav from "./SidebarNav";
 import Icon from "@/components/ui/Icon";
 
 export default function NotebookShell({ children, activity }: { children: React.ReactNode; activity: React.ReactNode }) {
@@ -15,6 +15,9 @@ export default function NotebookShell({ children, activity }: { children: React.
   const [mobileOpen, setMobileOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
   const sidebar = useRef<HTMLElement>(null);
+  const closeMobile = useCallback(() => setMobileOpen(false), []);
+  // The drawer only exists on narrow screens; opening it there is harmless on wide ones.
+  const openForSearch = useCallback(() => { if (window.matchMedia("(max-width: 850px)").matches) setMobileOpen(true); }, []);
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -43,32 +46,15 @@ export default function NotebookShell({ children, activity }: { children: React.
     <div className="notebook-shell">
       <a className="skip-link" href="#main-content">跳到正文</a>
       {mobileOpen && <button className="sidebar-overlay" aria-label="关闭目录" onClick={() => setMobileOpen(false)} />}
+      <div className="sidebar-hotzone" aria-hidden="true" />
       <aside id="notebook-sidebar" ref={sidebar} className={`sidebar ${mobileOpen ? "is-open" : ""}`} aria-label="知识库目录">
         <div className="sidebar-heading">
           <Link href="/" className="brand" onClick={() => setMobileOpen(false)}><span className="brand-mark"><Icon name="book" /></span><span>RLearning<span className="brand-dot">.</span></span></Link>
           <button className="icon-button mobile-close" aria-label="关闭目录" onClick={() => setMobileOpen(false)}><Icon name="close" /></button>
         </div>
         <p className="brand-caption">A little wiser, every day.</p>
-        <nav className="sidebar-nav" aria-label="主导航">
-          <Link href="/" className={`home-link ${pathname === "" ? "is-active" : ""}`} aria-current={pathname === "" ? "page" : undefined} onClick={() => setMobileOpen(false)}><Icon name="home" /><span>知识库首页</span><span className="nav-shortcut">⌂</span></Link>
-          <div className="nav-heading"><span>MY LIBRARY</span><span>{noteEntries.length} notes</span></div>
-          <div className="nav-groups">
-            {navigation.map((group) => group.count ? (
-              <details key={`${group.id}-${currentNote?.categoryId === group.id}`} className="nav-group" open>
-                <summary><Icon name={group.icon} /><span>{group.title}</span><span className="nav-count">{group.count}</span><Icon name="chevron" className="nav-chevron" /></summary>
-                <div className="nav-sections">{group.children.map((section) => <div className="nav-section" key={section.title}>
-                  <p className="nav-section-title">{section.title}</p>
-                  {section.children.map((note) => {
-                    const active = pathname === note.href.replace(/\/$/, "");
-                    return <Link key={note.href} href={note.href} className={`note-link ${active ? "is-active" : ""}`} aria-current={active ? "page" : undefined} onClick={() => setMobileOpen(false)}><span className="note-bullet" /><span>{note.title}</span></Link>;
-                  })}
-                </div>)}</div>
-              </details>
-            ) : <div key={group.id} className="nav-group-empty"><Icon name={group.icon} /><span>{group.title}</span><span className="nav-count">0</span></div>)}
-          </div>
-        </nav>
+        <SidebarNav pathname={pathname} onNavigate={closeMobile} onSearchShortcut={openForSearch} />
         <div className="sidebar-bottom">
-          <div className="garden-note"><Icon name="leaf" /><div><strong>知识在慢慢生长</strong><p>保持好奇，持续记录。</p></div></div>
           <div className="sidebar-signature"><span className="status-dot" /> Learning in public <span>EST. 2026</span></div>
         </div>
       </aside>

@@ -3,12 +3,27 @@ import IdempotentRetryDiagram from "@/components/visualization/systems/Idempoten
 import GangSchedulingDiagram from "@/components/visualization/systems/GangSchedulingDiagram";
 import CheckpointFailoverSim from "@/components/visualization/systems/CheckpointFailoverSim";
 import BackpressureDiagram from "@/components/visualization/systems/BackpressureDiagram";
+import MilkTeaShopViz from "@/components/visualization/systems/MilkTeaShopViz";
 
 # 分布式系统：机器多了，就一定有机器在出事
 
 一台机器上的程序，要么在跑，要么挂了，中间没有别的状态。机器一多，就多出一堆以前不存在的状态：两台机器之间的网线断了但两台都活着；请求发出去对方做了但回复丢了；一千张卡里有一张不响应；下游比上游慢。分布式系统这一章讲的全是怎么和这些状态共处。五节，每节先说遇到的问题，再说加了什么、代价是什么，正文下面配一个小演示。
 
+## 先用奶茶店讲清楚
+
+**一家店，一个人。** 你开了一家奶茶店，接单、做茶、收钱、记账全是你。账本只有一本，就在手边，永远不会记错。这就是一台机器：所有事都在一个地方发生。简单，但你忙不过来，你一生病店就关门。
+
+**一家店，五个人。** 生意好了，招了四个店员，活分开干，快多了。新麻烦是两个人可能同时卖出最后一杯珍珠，库存该减一还是减二？不过大家在一个屋里，喊一声就能对上。这像一台机器上的多线程。
+
+**开成连锁店。** 这一步才是分布式系统：很多台机器分散在不同地方，各干各的，靠打电话、发消息配合，对顾客来说却要像一家店一样。分店之间只能打电话，于是一家店时从来不存在的五个麻烦全冒出来了：电话会断，回话会听漏，大活要几家店凑齐才能干，分店会突然停电，前台会比后厨快。这一章后面的五节，就是这五个麻烦。
+
+<MilkTeaShopViz />
+
+一句话：**分布式系统就是很多台机器分开干活、靠消息配合；难的不是干活，而是消息会丢、机器会坏、彼此看到的情况可能不一样。** 下面每一节开头都会回到奶茶店，再换成机器的说法。
+
 ## 一致性与 CAP
+
+*奶茶店版：总部和上海店电话断了，上海店的顾客要用余额，让不让？*
 
 **遇到的问题。** 为了不怕一台机器挂，同一份数据存两份，放在 A、B 两台机器上。平时写 A 同步到 B，没问题。可是某天 A 和 B 之间的网线断了，两台都活着，只是互相看不见，这叫分区。这时客户端来写，A 该怎么办？
 
@@ -20,6 +35,8 @@ import BackpressureDiagram from "@/components/visualization/systems/Backpressure
 
 ## 幂等与重试
 
+*奶茶店版：北京店扣完钱说“好了”，总部没听见，又打了一次电话。*
+
 **遇到的问题。** 你让服务端扣 100 元，等了 5 秒超时。服务端其实已经扣了，只是回复在路上丢了。你只知道“超时”，无法区分“没执行”和“执行了但没告诉我”。不重试会漏，直接重试会扣两次。
 
 **加上什么。** 让重复执行和执行一次结果一样，这叫幂等。做法是每个请求带一个唯一 ID，服务端记着处理过的 ID，重复的直接返回上次结果；写数据用“有就更新、没有就插入”代替“插入”。有了幂等，重试才是安全的，才能放心重试。
@@ -29,6 +46,8 @@ import BackpressureDiagram from "@/components/visualization/systems/Backpressure
 <IdempotentRetryDiagram />
 
 ## 调度：活怎么分给机器
+
+*奶茶店版：2000 杯的大单要 4 家店一起做，现在只有 3 家空着。*
 
 **遇到的问题。** 几百台机器、几千张卡，几十个团队都要用。谁来决定哪个任务跑在哪张卡上？
 
@@ -42,6 +61,8 @@ import BackpressureDiagram from "@/components/visualization/systems/Backpressure
 
 ## 容错：checkpoint 与 failover
 
+*奶茶店版：深圳店做到第 60 杯停电了，杭州店从第 61 杯接着做。*
+
 **遇到的问题。** 1000 张卡的集群，每张卡每年坏几次，乘起来就是每几小时坏一张。硬件故障是常态，不是意外。一张卡挂了，all-reduce 等不到它，其余 999 张全部卡住。
 
 **Checkpoint。** 定期把模型和优化器状态存到可靠的地方，挂了从最近一次恢复。权衡在频率：存一次几百 GB 要几分钟，存太勤训练一直在等存盘；存太少，挂一次丢几小时。正确做法是按故障率定频率，集群越大故障越频繁，存得越勤。
@@ -51,6 +72,8 @@ import BackpressureDiagram from "@/components/visualization/systems/Backpressure
 <CheckpointFailoverSim />
 
 ## 背压：下游慢了怎么办
+
+*奶茶店版：前台一分钟接 30 单，后厨一分钟只能做 10 杯。*
 
 **遇到的问题。** 感知每秒产出 30 帧，规划每秒只能消化 10 帧。中间的队列如果没有上限，每秒净堆 20 帧，几分钟后内存爆掉；而且规划处理的一直是几十秒前的帧，车在按旧路况开。
 

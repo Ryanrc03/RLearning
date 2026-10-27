@@ -17,7 +17,11 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="zh-CN" className={sketchFont.variable}>
+    <html lang="zh-CN" className={sketchFont.variable} suppressHydrationWarning>
+      <head>
+        {/* A note opened in the split-reading pane drops the site chrome before first paint. */}
+        <script dangerouslySetInnerHTML={{ __html: "if(window.self!==window.top)document.documentElement.classList.add('is-embedded')" }} />
+      </head>
       <body><NotebookShell activity={<LearningActivity />}>{children}</NotebookShell></body>
     </html>
   );

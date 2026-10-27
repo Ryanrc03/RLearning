@@ -1,0 +1,620 @@
+import DfCnnVsVit from "@/components/visualization/ml/multimodal/daefuse/DfCnnVsVit";
+import DfFrequencySplit from "@/components/visualization/ml/multimodal/daefuse/DfFrequencySplit";
+import DfGanGame from "@/components/visualization/ml/multimodal/daefuse/DfGanGame";
+import DfVaeBlur from "@/components/visualization/ml/multimodal/daefuse/DfVaeBlur";
+import DfYoloNms from "@/components/visualization/ml/multimodal/daefuse/DfYoloNms";
+import DfArchitecture from "@/components/visualization/ml/multimodal/daefuse/DfArchitecture";
+import DfCrossAttention from "@/components/visualization/ml/multimodal/daefuse/DfCrossAttention";
+import DfReconLoss from "@/components/visualization/ml/multimodal/daefuse/DfReconLoss";
+import DfFusionLoss from "@/components/visualization/ml/multimodal/daefuse/DfFusionLoss";
+import DfMetricsToy from "@/components/visualization/ml/multimodal/daefuse/DfMetricsToy";
+import DfResults from "@/components/visualization/ml/multimodal/daefuse/DfResults";
+import DfDetection from "@/components/visualization/ml/multimodal/daefuse/DfDetection";
+import DfAblation from "@/components/visualization/ml/multimodal/daefuse/DfAblation";
+import DfCnnArch from "@/components/visualization/ml/multimodal/daefuse/DfCnnArch";
+import DfCnnTrain from "@/components/visualization/ml/multimodal/daefuse/DfCnnTrain";
+import DfCnnExp from "@/components/visualization/ml/multimodal/daefuse/DfCnnExp";
+import DfVitArch from "@/components/visualization/ml/multimodal/daefuse/DfVitArch";
+import DfVitTrain from "@/components/visualization/ml/multimodal/daefuse/DfVitTrain";
+import DfVitExp from "@/components/visualization/ml/multimodal/daefuse/DfVitExp";
+import DfGanArch from "@/components/visualization/ml/multimodal/daefuse/DfGanArch";
+import DfGanTrain from "@/components/visualization/ml/multimodal/daefuse/DfGanTrain";
+import DfGanExp from "@/components/visualization/ml/multimodal/daefuse/DfGanExp";
+import DfAeVaeArch from "@/components/visualization/ml/multimodal/daefuse/DfAeVaeArch";
+import DfAeTrain from "@/components/visualization/ml/multimodal/daefuse/DfAeTrain";
+import DfAeVaeExp from "@/components/visualization/ml/multimodal/daefuse/DfAeVaeExp";
+import DfYoloArch from "@/components/visualization/ml/multimodal/daefuse/DfYoloArch";
+import DfYoloTrain from "@/components/visualization/ml/multimodal/daefuse/DfYoloTrain";
+
+# Project：DAE-Fuse 红外与可见光图像融合
+
+## 摘要
+
+夜里开车，可见光相机看得清车和路灯，却常常看不见路边的行人；红外相机正相反，行人是画面里最亮的热源，车和路灯却几乎和背景混在一起。**图像融合**要做的，是把同一时刻、同一视角的一张红外图和一张可见光图合成**一张**图，让两种模态各自擅长的信息都留下来。
+
+DAE-Fuse（*An Adaptive Discriminative Autoencoder for Multi-Modality Image Fusion*，Guo, Xu, Li, Su，[arXiv 2409.10080](https://arxiv.org/abs/2409.10080)，v3 于 2025 年 5 月更新）把这件事拆成两个阶段。**Phase 1** 让编码器学会抽特征：每种模态先过一个浅层 Transformer 编码器，再分成两支，ResNet18（CNN）抽高频细节，ViT 抽低频结构，解码器把图重建回来，同时两个判别器检查重建图像不像原图。**Phase 2** 用 cross-attention 让两种模态的特征按内容互相查询，解码出一张融合图，同样的两个判别器这次要求融合图既像红外又像可见光。在 TNO、MSRS、RoadScene 三个红外-可见光数据集和 MRI-CT 医学数据集上，DAE-Fuse 在 28 个「数据集 × 指标」格子里拿了 21 个第一、其余 7 个第二；把融合图交给 YOLOv8n 做检测，M3FD 上的 mAP@50 是 0.887，比单用红外（0.779）高 0.108。
+
+这一页按小论文的顺序写：先把用到的零件（CNN、ViT、两者怎么组合、GAN、AE 与 VAE、YOLO）各讲清楚，每个零件都有一张结构图、一个在浏览器里真跑的小训练和一个对比实验；再讲方法和每一项损失，最后逐个讲论文的实验。论文的项目主页在 [eurekaarrow.github.io/daefuse.github.io](https://eurekaarrow.github.io/daefuse.github.io/)；论文没有公开代码，下面所有数字都来自论文正文和表格，示意图里的数字会单独标出。
+
+<figure className="ms-figure-img">
+  <img src="/projects/dae-fuse/mmod_qua.jpg" alt="论文图 3：左边可见光图里检测到右侧的车但漏掉了人；中间红外图里检测到人但漏掉了车；右边 DAE-Fuse 的融合图里人和车都被检测到。" loading="lazy" />
+  <figcaption>论文图 3：可见光（左）检测到车、漏了人；红外（中）检测到人、漏了车；DAE-Fuse 的融合图（右）两者都检测到。</figcaption>
+</figure>
+
+## 1 引言
+
+**任务。** 多模态图像融合（Multi-Modality Image Fusion，MMIF）的输入是一对已经配准的图像 $\alpha$（红外）和 $\beta$（可见光），输出是一张同样大小的融合图 $F$。它和分类、检测最大的不同是**没有标准答案**：世界上不存在一张「正确的融合图」可以拿来算 loss。所以训练只能靠两类间接的信号：融合图要从两张源图里各自继承什么（亮度、梯度、结构），以及融合图「看起来像不像真的图」。
+
+**两种模态各缺什么。**
+
+| | 红外 $\alpha$ | 可见光 $\beta$ |
+| --- | --- | --- |
+| 成像原理 | 物体自己发出的热辐射 | 物体反射的环境光 |
+| 擅长 | 行人、动物、发动机这类热源，夜里、烟雾里都清楚 | 纹理、颜色、文字、路灯、车道线 |
+| 缺点 | 没有纹理，不发热的物体（灯杆、车身）和背景混在一起 | 依赖光照；夜里、逆光、车灯反光时目标会消失 |
+
+**已有方法的两个毛病。** 论文把当时的主流方法分成两类，各有一个毛病：
+
+- **GAN 类**（FusionGAN、DDcGAN、TarDAL）：生成器直接吐出融合图，一个或两个判别器判断它像不像源图。判别器只看「整体分布像不像」，生成器又缺一个好的特征提取器，结果是图**看起来像**，细节却是糊的。
+- **AE 类**（DenseFuse、DIDFuse、CDDFuse）：编码器分别编码两张图，把特征按 channel 拼接或相加，再解码。特征抽得好、细节清楚，但两种模态通常共用同一套编码器和损失，融合只是「拼起来」，结果容易**偏向某一种模态**：DIDFuse 的融合图明显偏红外，天空和草地发黑（论文图 4）。
+
+**这篇论文做的三件事：**
+
+1. **两阶段框架。** Phase 1 只练特征提取和重建，Phase 2 再练融合；两个阶段用同一套编码器、解码器和判别器。
+2. **早融合 + 晚融合。** 解码前用 cross-attention 让两种特征互相查询（早融合）；解码后用两个判别器分别要求融合图像红外、像可见光（晚融合，靠对抗学习实现）。
+3. **实验。** 三个红外-可见光数据集上的融合指标、M3FD 上的检测、MRI-CT 上不重新训练的泛化，以及去掉判别器、去掉 cross-attention 的消融。论文还把方法推广到视频，加了一项时间一致性损失。
+
+## 2 背景：用到的零件
+
+DAE-Fuse 用到五样东西，每一样在后面的方法里都有一个具体位置：
+
+| 零件 | 一句话 | 在 DAE-Fuse 里干什么 |
+| --- | --- | --- |
+| CNN | 一个小卷积核在图上滑动，找局部的边缘和纹理 | 高频分支 DHE（ResNet18） |
+| ViT | 把图切成小块，每块一步就能看到全图 | 低频分支 DLE |
+| GAN | 一个网络造假、一个网络鉴别，互相逼着变强 | 两个判别器 DM1、DM2 |
+| AE / VAE | 先压缩成几个数，再还原回去 | 整个编码器-解码器骨架（用的是 AE） |
+| YOLO | 一次前向把图里所有物体的框都画出来 | 实验里检验融合图有没有用 |
+
+每个零件按同一个顺序讲：**① 结构**（一张能点的图，先看清楚数据怎么流），**② 训练过程**（一个小到能在浏览器里真跑的版本，按播放看它一步步学会），**③ 一个对比实验**（想知道什么、比哪两个、预期、结果、为什么），最后才是**公式和数字例子**。训练和实验都是页面在你的浏览器里现算的，随机种子固定，每次打开结果一样。
+
+### 2.1 CNN：在一个小窗口里找变化
+
+**一句话：** 卷积神经网络用一个很小的权重矩阵（卷积核）在整张图上滑动，每到一个位置就算一次「这块像素和我的形状有多像」，所有位置共用同一个核。
+
+**① 结构**
+
+<DfCnnArch />
+
+一张图进来，经过三步：卷积（每个核在 36 个位置各算一次，得到一张 6 × 6 的特征图）→ 池化（把特征图压成一个数）→ 全连接 + softmax（两个数变成两个类别的概率）。整个网络只有 26 个参数，因为卷积核在所有位置共享。
+
+**② 训练过程**
+
+<DfCnnTrain />
+
+一开始卷积核是随机数，loss 停在 0.69（两类瞎猜）。大约 70 步之后测试准确率到 100%，卷积核 1 长成了一个横向条纹，而卷积核 2 几乎没动。没有人规定它要找什么，这是梯度下降自己找到的、最省事的区分办法。
+
+**③ 实验：权重共享到底有什么用**
+
+**想知道什么。** CNN 的核心设计是「同一个卷积核在所有位置共用」。如果不共享，每个像素一个独立权重，会怎样？
+
+**比哪两个。** CNN（26 个参数，权重在位置间共享）vs MLP（64 → 16 → 2，1,074 个参数，每个像素有自己的权重）。同样 16 张训练图、同样训练 300 步；测试集是 80 张图，覆盖横线和竖线的所有位置。
+
+**预期会看到。** 两者都能把 16 张训练图背下来；但测试时，线出现在训练没见过的位置，MLP 那些像素的权重根本没被训练过，应该认不出来；CNN 在哪都用同一个核，应该不受影响。
+
+<DfCnnExp />
+
+**为什么。** MLP 学的是「第 37 号像素亮了 → 横线」这种和位置绑死的规则；训练集只有 16 张图，8 × 8 里有 22 个像素从没亮过，这些像素的权重从头到尾没收到过梯度。CNN 学的是「横向条纹 → 横线」，这条规则不依赖位置，所以在没见过的位置也成立。这就是卷积的两个假设：**局部性**（判断只需要看一个小窗口）和**平移不变性**（同一个图案出现在哪都是同一个意思）。
+
+**公式与例子。** 一个输出像素就是窗口里 9 个像素和核的 9 个权重逐个相乘再相加：
+
+$$
+y_{i,j} = \sum_{u=0}^{2}\sum_{v=0}^{2} w_{u,v}\, x_{i+u,\,j+v} + b
+$$
+
+**例 1：卷积核在找什么。** 取可见光图里砖墙的一行像素 $[0.70, 0.70, 0.42, 0.70]$（0.42 是砖缝），用一维核 $[-1, 2, -1]$ 卷积。落在平整的砖面上：$-0.70 + 2 \times 0.70 - 0.70 = 0$；落在砖缝上：$-0.70 + 2 \times 0.42 - 0.70 = -0.56$。核在平的地方输出 0，在亮度突变的地方输出大数，所以学出来的卷积核大多是边缘、纹理探测器，也就是**高频**信息的探测器。代价是视野小：一层 3 × 3 卷积只看到 3 × 3，叠 $L$ 层感受野是 $1 + 2L$。
+
+**在 DAE-Fuse 里。** 高频分支 DHE 用的是 **ResNet18**：18 层卷积，每两层外面套一条 $y = x + f(x)$ 的残差捷径，让深层网络也训得动（见 [Residual Connection](/notes/ml/dl-blocks/residual-connection/)）。完整的 torchvision `resnet18` 有 11,689,512 个参数；DAE-Fuse 用了它的哪几层，论文未披露。
+
+### 2.2 ViT：切成小块，每块一步就看全图
+
+**一句话：** Vision Transformer 把图切成小块（patch），每块变成一个向量（token），然后用 attention 让每个 token 直接去看其他所有 token。
+
+**① 结构**
+
+<DfVitArch />
+
+四步：切 patch → 每块乘同一个矩阵、再加上自己位置的向量（位置编码）→ attention（一个 [CLS] query 给 16 个 token 打分、softmax、加权求和）→ 分类头。和 CNN 最大的不同在第 3 步：权重不是固定的窗口，而是**按内容和位置算出来的**，可以落在图上任何地方。
+
+**② 训练过程**
+
+<DfVitTrain />
+
+前 30 步左右 loss 几乎不动，attention 是平的（每块约 6%）；然后突然开始学会，40 到 80 步之间准确率从 50% 跳到 100%，attention 收拢到左上和右下两个角落。这种「平台期 → 突然学会」在 attention 模型里很常见：要先碰巧把权重往对的地方挪一点，梯度才变大。
+
+**③ 实验：要同时看两个远处的地方**
+
+**想知道什么。** 上一节的 CNN 只看 3 × 3 的窗口。如果判断需要把图上两个相隔很远的地方放在一起看，CNN 和 ViT 谁能做到？
+
+**比哪两个。** 同一个任务：只有左上角和右下角两块都亮才是 1，其余 14 块随机亮灭当干扰。CNN（2.1 节的同一个结构：3 × 3 卷积 + 全局平均池化，26 个参数）vs 最小 ViT（130 个参数）。同样 120 张训练图、300 步，另外 120 张测试。
+
+**预期会看到。** CNN 的卷积只看局部，平均池化又把位置信息抹掉了，它应该只能数出「图里有多少亮块」，分不出是哪两块亮；ViT 带位置编码，attention 可以直接挑那两块看。
+
+<DfVitExp />
+
+**为什么。** 左图是关键：CNN 学到的只是「亮块越多越可能是 1」这条捷径（正样本至少有两块亮），能蒙对一部分，但它最后拿到的两个数里，正负样本大面积重叠：「哪两块亮」这个信息在池化那一步已经丢了，后面怎么训都找不回来。要让 CNN 做到，得叠很多层把感受野扩大到整张图，或者不做全局池化。ViT 一层就够，因为 attention 的权重矩阵是全连接的：任意两个 token 之间都有直接的通路。
+
+**公式与例子。**
+
+$$
+\operatorname{Attention}(Q, K, V) = \operatorname{softmax}\!\left(\frac{QK^\top}{\sqrt{d_k}}\right) V
+$$
+
+Q、K、V 的细节见 [Attention：Q、K、V](/notes/ml/llms/attention-qkv/)，切 patch 的过程见 [Visual Tokens](/notes/ml/multimodal/visual-tokens/)。attention 做的本质上是**加权平均**，平均会把细小的起伏抹平，所以它更擅长整体亮度、布局、大块结构这类**低频**信息；Park & Kim（2022）的分析结论正是：self-attention 像低通滤波器，卷积像高通滤波器。
+
+**例 2：为什么要切 patch。** DAE-Fuse 训练时的输入是 128 × 128 的裁剪。如果每个像素是一个 token，attention 矩阵有 $16384^2 \approx 2.7$ 亿个元素；切成 16 × 16 的 patch 之后只有 $8 \times 8 = 64$ 个 token，矩阵是 $64 \times 64 = 4096$ 个元素。
+
+**例 3：浅层编码器 SE 为什么用 Restormer。** SE 要在全分辨率上工作，patch 化会丢掉像素级的细节。Restormer（Zamir et al. 2022）把 attention 换个方向：不在像素之间算相似度，而在**通道之间**算。$C \times H \times W$ 的特征看成 $C$ 个长度为 $HW$ 的向量，attention 矩阵是 $C \times C$，若 $C = 64$（示意值）只有 4,096 个元素，和图像大小无关。DAE-Fuse 的 SE 和解码器 RD 都用这种 channel-Transformer 块。
+
+**在 DAE-Fuse 里。** 低频分支 DLE 是一个 ViT（层数、宽度论文未披露）。
+
+### 2.3 CNN 和 ViT 怎么组合：并行两支，各管一半频率
+
+前两节的结论放在一起：CNN 看得近、擅长高频细节；ViT 看得远、擅长低频结构。下图把两者能「看到」的范围放在同一张图上对比，点任意像素换位置。
+
+<DfCnnVsVit />
+
+把两者放进一个网络，常见有两种接法：
+
+| 接法 | 做法 | 例子 |
+| --- | --- | --- |
+| 串联 | 先用 CNN 抽局部特征、降分辨率，再把特征图当 token 交给 Transformer | ViT 论文里的 hybrid 版本 |
+| 并行 | 同一份输入同时进 CNN 支和 Transformer 支，各抽一种特征，再拼起来 | CDDFuse、DAE-Fuse |
+
+DAE-Fuse 用的是并行：每种模态先过一个共享的浅层编码器 SE，然后同时进 DHE（ResNet18，高频）和 DLE（ViT，低频），两路输出按 channel 拼接（channel 拼接见 [Inception](/notes/ml/dl-blocks/inception-block/)）：
+
+$$
+\Phi(\alpha) = C\big[\phi_{DH}(\phi_S(\alpha)),\ \phi_{DL}(\phi_S(\alpha))\big],\qquad
+\Phi(\beta) = C\big[\phi_{DH}(\phi_S(\beta)),\ \phi_{DL}(\phi_S(\beta))\big]
+$$
+
+光把两支并排放着，并不能保证它们真的分工：两支完全可能学到差不多的东西。所以还要一项损失把分工**逼出来**，这就是 CDDFuse 提出、DAE-Fuse 沿用的**相关性分解损失**（式 10）：
+
+$$
+\mathcal{L}_{\text{corr}} = \frac{\operatorname{CC}\big(\phi_{DH}(\alpha), \phi_{DH}(\beta)\big)^2}{\operatorname{CC}\big(\phi_{DL}(\alpha), \phi_{DL}(\beta)\big) + \epsilon},\qquad \epsilon = 1.01
+$$
+
+$\operatorname{CC}$ 是相关系数。两种模态拍的是**同一个场景**，大块的结构（哪里是墙、哪里是路）应该一致，所以低频特征应该**相关**（分母大）；而各自独有的细节（红外的热源轮廓、可见光的砖缝）不应该相关（分子小）。
+
+**例 4：代入两组数。** 高频相关系数 0.1、低频 0.8：$\mathcal{L} = 0.01 / 1.81 = 0.0055$。如果编码器偷懒，两支都在抽共享信息，高频相关系数变成 0.7：$\mathcal{L} = 0.49 / 1.81 = 0.271$，大了将近 50 倍。$\epsilon = 1.01$ 保证低频相关系数最坏是 $-1$ 时分母也还是正的。
+
+<DfFrequencySplit />
+
+### 2.4 GAN：一个造假，一个鉴别
+
+**一句话：** 生成对抗网络有两个网络：生成器 G 把随机噪声变成样本，判别器 D 判断一个样本是真数据还是 G 造的；两者轮流训练，G 被逼得越来越像真的。
+
+**① 结构**
+
+<DfGanArch />
+
+关键是第二个按钮：训练 G 的时候，梯度要**穿过** D 才能传回 G，但 D 这一步不更新。G 从来没见过真数据，它对「真数据长什么样」的全部了解都来自 D 传回来的梯度。
+
+**② 训练过程**
+
+<DfGanTrain />
+
+这条曲线不是一路平滑下降的：均值先对上（约 200 步），然后标准差塌到接近 0（生成器只会吐同一个数，这是**模式塌缩**），判别器察觉后把中间判成假的，G 又被推着摊开，最后在目标附近来回震荡。GAN 的训练是两个网络的博弈，没有一个单独的 loss 在稳定下降，这也是它难训的原因。
+
+**③ 实验：生成器的损失该怎么写**
+
+**想知道什么。** DAE-Fuse 论文里生成器一侧的对抗损失写成 $\log(1 - D(G(z)))$（原始 GAN 的 minimax 形式）；大多数代码里写的却是 $-\log D(G(z))$（non-saturating 形式）。两种写法的最优点一样，实际训练有区别吗？
+
+**比哪两个。** 两组设置完全相同：判别器先单独训练 300 步，一开始就很确定生成的都是假的；之后生成器用普通 SGD 训练。唯一的变量是生成器的损失。
+
+**预期会看到。** 判别器很确定时 $D(G(z)) \approx 0$，$\log(1 - D)$ 在那里几乎是平的，梯度很小，minimax 版本应该起步很慢。
+
+<DfGanExp />
+
+**为什么。** 把两种损失对 $D$ 求导：$\frac{d}{dD}\log(1-D) = -\frac{1}{1-D}$，在 $D = 0.01$ 时约等于 −1；$\frac{d}{dD}(-\log D) = -\frac{1}{D}$，在同一个位置是 −100。下图可以拖动 $D$ 看两条曲线的坡度。
+
+<DfGanGame />
+
+**公式与例子。** 原始 GAN 的目标：
+
+$$
+\min_G \max_D\ \ \mathbb{E}_{x}\big[\log D(x)\big] + \mathbb{E}_{z}\big[\log\big(1 - D(G(z))\big)\big]
+$$
+
+**例 5：一步的数。** 判别器对真图打 0.9、对生成图打 0.1。判别器损失是 $-\log 0.9 - \log 0.9 = 0.211$；生成器的 minimax 损失是 $\log(1 - 0.1) = -0.105$，梯度 $-1/(1-0.1) = -1.11$；换成 $-\log D(G)$，梯度是 $-1/0.1 = -10$。
+
+**在 DAE-Fuse 里。** FusionGAN 让生成器直接输出融合图，判别器分辨「融合图 vs 可见光图」；DDcGAN 用两个判别器，一个对红外、一个对可见光。问题在于判别器只管分布：融合图「整体像」就能骗过它，具体每一条边对不对它并不直接约束，论文认为这是 GAN 类方法发糊的原因。DAE-Fuse 保留了「两个判别器、各管一种模态」的设计，但把生成器换成一个特征抽得好的 AE，并在 AE 自己的重建阶段就开始对抗。
+
+### 2.5 AE 与 VAE：DAE-Fuse 为什么不用 VAE
+
+**一句话：** 自编码器（AE）先把输入压缩成几个数，再从这几个数还原输入；变分自编码器（VAE）把「几个数」换成「一个分布」，代价是重建变软，换来的是能凭空生成新样本。
+
+**① 结构**
+
+<DfAeVaeArch />
+
+两者的编码器、解码器完全一样，区别只在中间：AE 的瓶颈是一个确定的点 $z$；VAE 的瓶颈输出均值 $\mu$ 和方差 $\sigma^2$，训练时从里面采一个 $z = \mu + \sigma\epsilon$，并多一项 KL 损失把这个分布拉向标准正态。
+
+**② 训练过程**
+
+<DfAeTrain />
+
+切换 AE / VAE 对比两边的潜空间。两个模型都自己发现了「台阶在第几格」是唯一要记住的东西，24 个点按颜色排成一条线。差别在位置：AE 的点散到了 ±9 的范围，原点附近空着；VAE 的点被 KL 拉到原点附近（±2 以内），每个点还带着一圈不确定性，相邻的圈互相重叠，而且第二维整个被 KL 关掉了，只用了一维。
+
+**③ 实验：重建得清楚 vs 能凭空生成**
+
+**想知道什么。** KL 项到底换来了什么、又付出了什么？
+
+**比哪两个。** 训练好的 AE 和 VAE（同样的数据、同样的初始权重、同样 1500 步），做两件事：重建训练数据；从 $\mathcal{N}(0, I)$ 里抽 $z$ 生成新的行。
+
+**预期会看到。** 重建：AE 应该更清楚，因为它不需要在编码之间留重叠。生成：VAE 应该好得多，因为先验常采到的区域它的解码器都见过；AE 在原点附近没见过任何编码。
+
+<DfAeVaeExp />
+
+**为什么。** 重叠的编码让 VAE 的解码器经常拿到「可能来自好几行」的 $z$，MSE 损失下最安全的输出是这几行的平均，台阶就被抹软了。下图把这个机制单独拿出来：两条只差在边缘位置的样本，编码一重叠，解码就开始往平均漂。
+
+<DfVaeBlur />
+
+**公式与例子。** VAE 的损失是负的 ELBO：
+
+$$
+\mathcal{L}_{\text{VAE}} = \underbrace{\mathbb{E}_{q(z\mid x)}\big[\lVert x - \rho(z) \rVert^2\big]}_{\text{重建}} + \beta \cdot \underbrace{\operatorname{KL}\big(\mathcal{N}(\mu, \sigma^2)\ \Vert\ \mathcal{N}(0, I)\big)}_{\text{把编码拉向先验}},\qquad
+\operatorname{KL} = \tfrac12\big(\mu^2 + \sigma^2 - 1 - \ln \sigma^2\big)
+$$
+
+原始 VAE 的 $\beta = 1$；上面的实验用 $\beta = 0.05$，因为 12 个像素的平方误差量级很小，$\beta = 1$ 时 KL 会赢，编码整个塌到原点，解码器干脆不看输入。
+
+**例 6：KL 是多少。** 一维、$\mu = 1$、$\sigma = 0.5$：$\tfrac12(1 + 0.25 - 1 - \ln 0.25) = \tfrac12(0.25 + 1.386) = 0.818$。$\sigma$ 越接近 1、$\mu$ 越接近 0，KL 越小。
+
+**在 DAE-Fuse 里。** 融合不需要从先验里采样新图，要的是清楚的边缘和纹理，所以 DAE-Fuse 用**确定性的 AE**，把「像不像真图」的约束交给判别器，而不是交给 KL。名字里的 D（Discriminative）指的就是这两个判别器。
+
+### 2.6 YOLO：一次前向把框全画出来
+
+**一句话：** YOLO（You Only Look Once）把图切成网格，每个格子自己报告「我这里有没有物体的中心、框有多大」，一次前向就得到所有框。
+
+**① 结构**
+
+<DfYoloArch />
+
+一个小网络在每个格子上各跑一次（共享权重），每格输出 5 个数：有物体的概率 obj，以及框的位置和大小。训练时，只有物体中心所在的那一格被要求画框，其余格子只学「我这里没有」。
+
+**② 训练过程**
+
+<DfYoloTrain />
+
+两件事有先后：先学会的是 objectness（绝大多数格子学会说「没有」，绿色很快变淡，objectness 损失先降），然后框才慢慢套准。600 步后，测试图上约 97% 的框 IoU ≥ 0.5。objectness 损失停在 1 左右下不去：物体中心落在格子边界附近时，相邻几格都说不准中心归谁，这也是真实的 YOLO 后来改成「一个物体可以由多个位置负责」的原因之一。
+
+**③ 实验：同一个检测器，输入换成红外、可见光、融合图**
+
+**想知道什么。** 论文用检测来证明融合图有用。同一个检测器，看三种输入，结果为什么会不同？
+
+**比哪三个。** 同一个场景（一个行人、一辆车）的红外图、可见光图、融合图。这里的检测框和分数是按两种模态的特点设定的示意值，不是训练出来的；真实的结果在第 4.4 节（论文表 III）。
+
+**预期会看到。** 红外里人是最亮的热源，车几乎不发热；可见光里车又亮又有轮廓，人和路面一样暗。所以红外应该漏车、可见光应该漏人，融合图两者都能框到。
+
+<DfYoloNms />
+
+**为什么。** 检测器能找到什么，取决于输入里有没有那个物体的信号。拖动两个阈值还能看到后处理的作用：conf 阈值太高会把可见光里那个低分的人框扔掉；NMS 阈值太高，同一个物体的重复框删不掉，就会变成 FP。
+
+**公式与例子。** 从原始框到论文报的 AP@50 有三步：去掉分数低于 conf 阈值的框；同一类别里做 NMS（和更高分的框重叠超过阈值的删掉）；剩下的框和标注框算 IoU，IoU ≥ 0.5 算对（TP），否则算错（FP），没被配上的标注框算漏检。
+
+**例 7：算一个 IoU。** 标注框是 3 × 9 的行人框，预测框宽 3.5、高 6，交集是 3 × 6 = 18，并集 = 27 + 21 − 18 = 30，IoU = 18 / 30 = 0.6 ≥ 0.5，算对。
+
+按分数从高到低扫一遍得到一条 precision-recall 曲线，曲线下的面积是这一类的 AP@50；6 个类别取平均就是论文表 III 的 mAP（见 [PR 曲线与 Precision@k](/notes/ml/evaluation/pr-curve-precision-at-k/)）。
+
+**在 DAE-Fuse 里。** 实验用的是 YOLOv8n：比上面的玩具版本深得多（backbone 逐步下采样、neck 融合多尺度、head 在步长 8 / 16 / 32 三个尺度上输出框），去掉了 anchor，约 320 万参数、8.7 GFLOPs（Ultralytics 官方文档的数字），但「每个位置自己报框」的思路相同。
+
+## 3 方法
+
+### 3.1 总览
+
+<DfArchitecture />
+
+记号对照：
+
+| 记号 | 是什么 | 实现 |
+| --- | --- | --- |
+| $\alpha,\ \beta$ | 输入的红外图、可见光图 | 128 × 128 随机裁剪 |
+| $\phi_S$ | 浅层编码器 SE | Restormer 风格的 channel-Transformer 块 |
+| $\phi_{DH}$ | 深层高频编码器 DHE | ResNet18 |
+| $\phi_{DL}$ | 深层低频编码器 DLE | ViT |
+| $\Phi(\cdot)$ | 编码结果，DHE 和 DLE 输出按 channel 拼接 | 式 (1) |
+| $\rho_R$ | 重建解码器 RD | 与 SE 同结构 |
+| $D_{M1},\ D_{M2}$ | 红外、可见光各一个判别器 | Conv2D–LeakyReLU–BatchNorm 堆叠 + 全连接层 |
+| $\mathscr{F}(\alpha, \beta)$ | 融合图（下文也写作 $F$ 或 $I_f$） | 式 (5) |
+
+<figure className="ms-figure-img">
+  <img src="/projects/dae-fuse/p1.jpg" alt="论文图 1：Phase 1 的流程。红外 α 和可见光 β 各自经过 SE、DHE、DLE 编码，再由重建解码器还原成 α′ 和 β′，两个判别块分别比较原图和重建图。" loading="lazy" />
+  <figcaption>论文图 1：Phase 1，对抗特征提取。每种模态各自编码、重建，判别块比较原图和重建图。</figcaption>
+</figure>
+
+<figure className="ms-figure-img">
+  <img src="/projects/dae-fuse/p2.jpg" alt="论文图 2：Phase 2 的流程。两种模态的编码各自产生 query、key、value，经过双向 cross-attention 得到 attention guided embeddings，拼接后由解码器生成融合图 F，两个判别块比较 F 与两张源图。" loading="lazy" />
+  <figcaption>论文图 2：Phase 2，attention 引导的跨模态融合。两个方向的 cross-attention，拼接后解码出 F。</figcaption>
+</figure>
+
+### 3.2 Phase 1：对抗特征提取
+
+这一阶段的目标只有一个：**让编码器学会抽好特征。**办法是让每种模态各自重建自己：
+
+$$
+\tilde{\alpha} = \rho_R\big(\Phi(\alpha)\big),\qquad \tilde{\beta} = \rho_R\big(\Phi(\beta)\big)
+$$
+
+如果 $\Phi(\alpha)$ 丢了信息，$\tilde{\alpha}$ 就还原不回来，重建损失会惩罚它。在此之上加一个对抗游戏：$D_{M1}$ 分辨真的红外图 $\alpha$ 和重建的 $\tilde{\alpha}$，$D_{M2}$ 分辨 $\beta$ 和 $\tilde{\beta}$（式 3）：
+
+$$
+\min_{AE}\ \max_{D_{M1}, D_{M2}}\ \ \mathbb{E}\big[\log D_{M1}(\alpha)\big] + \mathbb{E}\big[\log D_{M2}(\beta)\big] + \mathbb{E}\big[\log\big(1 - D_{M1}(\tilde{\alpha})\big)\big] + \mathbb{E}\big[\log\big(1 - D_{M2}(\tilde{\beta})\big)\big]
+$$
+
+像素损失只要求「平均起来差不多」，判别器则会盯着「哪里看起来不像真的红外图」：重建图一糊，判别器很容易认出来。这个阶段 cross-attention 还没用上。
+
+### 3.3 Phase 2：cross-attention 早融合 + 对抗晚融合
+
+**早融合：cross-attention。** 以往的 AE 方法把两种特征逐元素相加或直接拼接，同一个位置只能和同一个位置合并。DAE-Fuse 让一种模态的特征当 query，另一种模态的特征当 key 和 value（式 4）：
+
+$$
+\hat{\Phi}(\beta) = \operatorname{softmax}\!\left(\frac{W_q \Phi(\alpha)\ \big(W_k \Phi(\beta)\big)^\top}{\sqrt{d_k}}\right) W_v \Phi(\beta)
+$$
+
+红外的每个 token 去可见光里「按内容」找它对应的信息：红外里的人这个 token，会把最大的权重分给可见光里同样是人的那个 token，于是借回了红外本来没有的纹理。论文图 2 两个方向都做了，得到 $\hat{\Phi}(\alpha)$ 和 $\hat{\Phi}(\beta)$。
+
+**晚融合：对抗。** 两组 attention 输出拼接后解码成融合图（式 5）：
+
+$$
+F = \mathscr{F}(\alpha, \beta) = \rho_R\big[C\big(\hat{\Phi}(\alpha),\ \hat{\Phi}(\beta)\big)\big]
+$$
+
+还是那两个判别器，但输入变了（式 6）：$D_{M1}$ 比较 $\alpha$ 和 $F$，$D_{M2}$ 比较 $\beta$ 和 $F$。
+
+$$
+\min_{AE}\ \max_{D_{M1}, D_{M2}}\ \ \mathbb{E}\big[\log D_{M1}(\alpha)\big] + \mathbb{E}\big[\log D_{M2}(\beta)\big] + \mathbb{E}\big[\log\big(1 - D_{M1}(F)\big)\big] + \mathbb{E}\big[\log\big(1 - D_{M2}(F)\big)\big]
+$$
+
+这就是「不偏向任何一边」的来源：如果 $F$ 偏向红外，$D_{M2}$ 一眼就能认出它不像可见光，生成器在第四项上吃亏；偏向可见光，第三项吃亏。两边**同时**骗过，$F$ 才必须同时带着两种模态的特征。
+
+<DfCrossAttention />
+
+### 3.4 损失函数：每个阶段训什么、最小化什么
+
+**谁接收梯度。** 两个阶段都分两组参数交替更新：生成器一侧 $\theta_{AE}$（SE、DHE、DLE、RD，Phase 2 再加上 cross-attention 的 $W_q, W_k, W_v$），判别器一侧 $\theta_D$（$D_{M1}, D_{M2}$）。$\theta_{AE}$ 用 Adam 最小化 $\mathcal{L}_{AE}$，$\theta_D$ 用 RMSProp 最小化 $\mathcal{L}_{DM}$。论文没有说 Phase 2 冻结编码器；按「端到端」的描述，所有参数在两个阶段都在训练。
+
+**Phase 1，生成器一侧（式 8）：**
+
+$$
+\mathcal{L}_{AE}^{I} = \lambda\, \mathcal{L}_{AE}^{advI} + \sigma\, \mathcal{L}_{\text{corr}} + (1 - \sigma)\, \mathcal{L}_{Dec}^{content}
+$$
+
+三项分别是：
+
+- 对抗项（式 9）：$\mathcal{L}_{AE}^{advI} = \mathbb{E}\big[\log(1 - D_{M1}(\tilde{\alpha}))\big] + \mathbb{E}\big[\log(1 - D_{M2}(\tilde{\beta}))\big]$，骗过判别器时它变小（变负）。
+- 相关性分解项（式 10）：见 2.3 节，让 DHE 抽各自独有的高频、DLE 抽共享的低频。
+- 重建内容项（式 11）：$\mathcal{L}_{Dec}^{content} = \lVert \alpha - \tilde{\alpha} \rVert_2^2 + \big(1 - \operatorname{SSIM}(\alpha, \tilde{\alpha})\big)$，β 一侧同理。MSE 管逐像素的亮度，SSIM 管局部的均值、方差和协方差，也就是结构和纹理。
+
+**Phase 1，判别器一侧（式 12，以 $D_{M1}$ 为例）：**
+
+$$
+\mathcal{L}_{DM1}^{advI} = \mathbb{E}\big[-\log D_{M1}(\alpha)\big] + \mathbb{E}\big[-\log\big(1 - D_{M1}(\tilde{\alpha})\big)\big]
+$$
+
+这就是二分类的交叉熵：真图标签 1，重建图标签 0。
+
+**例 8：一个像素级的内容损失。** 把可见光示意图模糊一次当作重建图：MSE 只有 0.0126，而 $1 - \operatorname{SSIM} = 0.311$，大了 25 倍。同样模糊一次，几乎没有纹理的红外图内容损失只有 0.118，可见光是 0.324。下图可以把模糊次数、判别器打分和 $\sigma$ 都拖一拖。
+
+<DfReconLoss />
+
+$\lambda$ 和 $\sigma$ 的取值论文未披露，图里的 $\lambda = 0.1$ 是示意值。
+
+**Phase 2，生成器一侧。** 对抗项把 $\tilde{\alpha}, \tilde{\beta}$ 换成 $F$，内容项换成两个「两者取大」的结构损失（沿用 SeAFusion）：
+
+$$
+\mathcal{L}_{int}^{II} = \frac{1}{HW}\big\lVert I_f - \max(\alpha, \beta) \big\rVert_1,\qquad
+\mathcal{L}_{text}^{II} = \frac{1}{HW}\Big\lVert \nabla I_f - \max\big(\lvert\nabla\alpha\rvert, \lvert\nabla\beta\rvert\big) \Big\rVert_1
+$$
+
+$\max$ 是逐像素取大，$\nabla$ 是 Sobel 梯度。论文把 Phase 2 的总损失写成 $\mathcal{L}^{II} = \mathcal{L}_{DM}^{advII} + \mathcal{L}_{AE}^{II}$（式 15），其中 $\mathcal{L}_{AE}^{II}$ 由对抗项、$\mathcal{L}_{int}$ 和 $\mathcal{L}_{text}$ 组成；各项的权重论文未披露。
+
+**例 9：一个像素的 $\mathcal{L}_{int}$。** 行人身上的一个像素，红外 0.95、可见光 0.36，目标是 $\max = 0.95$。如果融合图是两者的平均 0.655，这个像素贡献 $\lvert 0.655 - 0.95 \rvert = 0.295$；如果融合图给 0.90，只贡献 0.05。同一张图上，车身的像素红外 0.40、可见光 0.90，目标变成 0.90，这次是可见光说了算。$\mathcal{L}_{int}$ 让每个像素「谁亮听谁的」，$\mathcal{L}_{text}$ 让每个像素「谁的边更陡听谁的」。
+
+<DfFusionLoss />
+
+**时间一致性损失（式 7）。** 处理视频时，逐帧融合会让画面闪烁：同一块墙这一帧偏红外、下一帧偏可见光。论文在两个阶段都加了一项：
+
+$$
+\mathcal{L}_{temp} = \frac{1}{HW}\big\lVert \mathscr{F}(\alpha_t, \beta_t) - \mathscr{F}(\alpha_{t-1}, \beta_{t-1}) \big\rVert_1
+$$
+
+**例 10：** 128 × 128 的两帧融合结果，如果只有一个行人走动，改变了 1% 的像素，每个变了 0.5，那么 $\mathcal{L}_{temp} = 0.01 \times 0.5 = 0.005$；如果整张图因为闪烁每个像素都变了 0.05，$\mathcal{L}_{temp} = 0.05$，是前者的 10 倍。它惩罚的是「到处都在小幅抖动」。代价是它也会惩罚真实的运动，权重太大会让运动的物体拖影。
+
+### 3.5 训练细节
+
+| 项 | 设置 |
+| --- | --- |
+| Phase 1 | 80 个 epoch，AE 与判别器交替训练 |
+| Phase 2 | 140 个 epoch |
+| 优化器 | AE 用 Adam，判别器用 RMSProp |
+| 学习率 | 初始 1e-4，每 20 个 epoch 乘 0.5 |
+| 输入 | 随机裁剪成 128 × 128 的 patch |
+| batch size | 16 |
+| 硬件 | 一块 NVIDIA A100，PyTorch |
+| 损失权重 $\lambda, \sigma$ 及 Phase 2 各项权重 | 论文未披露 |
+| 训练用的数据集与划分 | 论文未明确写出 |
+
+**例 11：学习率怎么走。** 每 20 个 epoch 减半，Phase 1 的 80 个 epoch 走完 4 次减半：$10^{-4} \times 0.5^4 = 6.25 \times 10^{-6}$。如果 Phase 2 接着同一个调度，到第 220 个 epoch 是 $10^{-4} \times 0.5^{11} \approx 4.9 \times 10^{-8}$，几乎不动了；Phase 2 是否重置学习率，论文没有说。
+
+## 4 实验
+
+### 4.1 设置
+
+**数据集。**
+
+| 数据集 | 任务 | 用在哪 |
+| --- | --- | --- |
+| TNO | 红外-可见光，夜间军事 / 野外场景 | 表 I、图 4、表 IV |
+| MSRS | 红外-可见光，城市道路，白天和夜间 | 表 I |
+| RoadScene | 红外-可见光，道路，含视频序列 | 表 I、视频融合 |
+| M3FD | 红外-可见光 + 检测标注（6 类） | 表 III：4,200 张融合图按 8 : 1 : 1 分成 3,360 / 420 / 420 |
+| MRI-CT | 医学图像，MRI 与 CT | 表 II、图 5，不重新训练 |
+
+**对比方法。** 7 个：AE 类的 DIDFuse、U2Fusion、RFN-Nest、CDDFuse（双分支 + 相关性分解，DAE-Fuse 的直接前身），GAN 类的 DDcGAN、TarDAL，扩散模型 DDFM。
+
+**指标。** 融合没有标准答案，所以全部是**无参考**指标，越大越好：
+
+| 指标 | 看什么 | 只看 F 还是看 F 与源图 |
+| --- | --- | --- |
+| EN（熵） | 灰度分布的信息量 | 只看 F |
+| SD（标准差） | 对比度 | 只看 F |
+| SF（空间频率） | 边缘、纹理有多丰富 | 只看 F |
+| MI（互信息） | F 从 α、β 各带过来多少信息 | F 与源图 |
+| SCD（差异相关和） | F 减去一张源图之后，和另一张源图的相关性 | F 与源图 |
+| VIF（视觉信息保真度） | 按人眼模型，F 保留了多少源图信息 | F 与源图 |
+| $Q^{AB/F}$（Qabf） | 源图的边缘有多少被传到了 F | F 与源图 |
+
+论文正文还列了 SSIM，但表里没有报告。检测实验用 mAP@50。
+
+下面用 3.4 节同一张示意图把 EN、SD、SF、MI 算出来。注意第一行：只看 F 自己的指标是可以「刷」的。
+
+<DfMetricsToy />
+
+### 4.2 实验一：红外-可见光图像融合
+
+**想知道什么。** DAE-Fuse 的融合图是不是同时做到了两件事：细节比 GAN 类清楚，两种模态比 AE 类平衡？
+
+**怎么做。** 8 种方法在 TNO、MSRS、RoadScene 上各生成融合图，算 7 个指标（表 I）；再在 TNO 的一个代表性场景上并排看图（论文图 4）。
+
+**预期会看到。** GAN 类（DDcGAN、TarDAL）的 SF 应该偏低（细节少）；偏向某一模态的方法 SCD、Qabf 应该偏低（另一边的信息没进来）；DAE-Fuse 应该在 SCD、Qabf 这类「两边都要」的指标上领先。
+
+<figure className="ms-figure-img">
+  <img src="/projects/dae-fuse/ivif_quali.jpg" alt="论文图 4：TNO 上的定性比较。从左到右依次是红外、可见光以及 DIDFuse、U2Fusion、RFN-Nest、DDcGAN、TarDAL、CDDFuse、DDFM 和 DAE-Fuse 的融合结果，放大框标出屋顶纹理。" loading="lazy" />
+  <figcaption>论文图 4：TNO 上的定性比较。看屋顶纹理和墙面：GAN 类发糊，DIDFuse 偏红外（天空、草地发黑），CDDFuse 屋顶局部过曝。</figcaption>
+</figure>
+
+<DfResults />
+
+**结果与原因。**
+
+- **GAN 类确实糊。** 四个数据集上，SF 最低的两个永远是 DDcGAN 和 TarDAL（TNO 上 9.12、8.68，DAE-Fuse 13.31）。图 4 里它们的屋顶纹理整片消失。
+- **AE 类确实偏。** DIDFuse 在 TNO 上 SD 不低（45.12），但 MSRS 上 SCD 只有 1.11、VIF 0.31：偏向红外，可见光那边的信息没进来，和图 4 里天空、草地发黑一致。
+- **DAE-Fuse 在「两边都要」的指标上最稳。** SCD 和 Qabf 在四个数据集上全是第一（MRI-CT 上 Qabf 只比 TarDAL、CDDFuse 高 0.01）。这两个指标都要求两张源图的信息同时出现在 F 里，正是 Phase 2 两个判别器在逼的东西。
+- **没赢的格子在哪。** 28 个格子里 7 个是第二：TNO 的 SD、VIF 输给扩散模型 DDFM，TNO 的 SF 输给 RFN-Nest，MSRS 的 VIF 输给 CDDFuse（1.05 vs 0.98）等。没有一个格子掉到第三。
+
+### 4.3 实验二：视频融合
+
+**想知道什么。** 逐帧融合加上时间一致性损失之后，视频会不会闪？
+
+**怎么做。** 在 RoadScene 的视频序列上逐帧融合。
+
+**预期会看到。** 相邻帧之间背景稳定，只有真正运动的物体在变。
+
+<figure className="ms-figure-img">
+  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6 }}>
+    <video src="/projects/dae-fuse/ir1.mp4" autoPlay muted loop playsInline style={{ width: "100%", borderRadius: 4 }} aria-label="红外视频" />
+    <video src="/projects/dae-fuse/vis1.mp4" autoPlay muted loop playsInline style={{ width: "100%", borderRadius: 4 }} aria-label="可见光视频" />
+    <video src="/projects/dae-fuse/fusion1.mp4" autoPlay muted loop playsInline style={{ width: "100%", borderRadius: 4 }} aria-label="DAE-Fuse 融合视频" />
+  </div>
+  <figcaption>项目主页的示例视频：红外（左）、可见光（中）、DAE-Fuse 逐帧融合（右）。</figcaption>
+</figure>
+
+**结果。** 论文只给了定性结果（补充材料和项目主页的视频），没有报告时间一致性的定量指标（比如相邻帧差、光流误差）。这是视频部分最明显的缺口，见第 6 节。
+
+### 4.4 实验三：融合图对检测有没有用
+
+**想知道什么。** 指标高不等于有用。融合图交给下游检测器，能不能比单用一种模态检测得更好？
+
+**怎么做。** 在 M3FD 上，每种方法生成 4,200 张融合图，按 8 : 1 : 1 切分，各训一个 YOLOv8n，报告 6 个类别的 AP@50 和 mAP（表 III）。对照组是只用红外、只用可见光训练的 YOLOv8n。
+
+**预期会看到。** 红外在行人上强、在路灯上弱；可见光反过来。好的融合图应该在两类上都不输给各自擅长的那种模态。
+
+<DfDetection />
+
+**结果与原因。**
+
+- **单模态各有短板。** 行人：红外 0.804，可见光 0.721；路灯：红外 0.712，可见光 0.848。和 2.6 节示意图里的情况一模一样。
+- **所有融合方法都比单模态好**，最差的 DIDFuse 也有 0.830，比可见光高 0.025。
+- **DAE-Fuse 的 mAP 最高（0.887）**，比第二名 CDDFuse 高 0.009，比单用红外高 0.108。6 个类别拿了 4 个第一，行人（0.855）和公交（0.949）领先最多：这两类最依赖红外的热源，又需要可见光的轮廓来把框画准。
+- **输掉的两类。** 汽车输给 TarDAL（0.931 vs 0.947）：TarDAL 的训练本身就和检测网络联合优化（target-aware），在检测上占优不奇怪。卡车以 0.001 输给 CDDFuse，可以视为持平。
+
+### 4.5 实验四：不重新训练，直接融合医学图像
+
+**想知道什么。** 模型学到的是「红外-可见光」这一对模态的特例，还是更一般的「两张互补图怎么融合」？
+
+**怎么做。** 用和红外-可见光实验同一个模型，不做任何调整，直接融合 MRI-CT 图像对（表 II、论文图 5）。
+
+**预期会看到。** 如果学到的是一般规律，CT 的骨骼高亮和 MRI 的软组织细节都应该保住。
+
+<figure className="ms-figure-img">
+  <img src="/projects/dae-fuse/mif.jpg" alt="论文图 5：MRI-CT 上的定性比较。从左到右是 CT、MRI 和各方法的融合结果。" loading="lazy" />
+  <figcaption>论文图 5：MRI-CT 上的定性比较。U2Fusion、RFN-Nest 给 CT 的权重低，轮廓发暗；DIDFuse 又过分突出 CT。</figcaption>
+</figure>
+
+<DfResults initial="MRI-CT" />
+
+**结果与原因。** 7 个指标里 6 个第一（EN 4.83 低于 RFN-Nest 的 4.97），SD 76.19 比第二名 CDDFuse 高 4.83。原因和红外-可见光一样：CT 和 MRI 也是「一边有高亮结构、一边有细节纹理」的互补关系，两个判别器同样逼着融合图两边都像。不过 MRI-CT 数据集的来源和规模论文没有说明。
+
+### 4.6 实验五：消融，去掉一个部件会怎样
+
+**想知道什么。** 判别器和 cross-attention 各自贡献了多少？
+
+**怎么做。** 三组消融，每组只改一处：去掉 Phase 1 的判别器、去掉 Phase 2 的判别器、把 cross-attention 换成直接 channel 拼接（保留判别器）。报告 EN、SD、VIF、Qabf（表 IV）。
+
+**预期会看到。** 去掉 Phase 2 判别器，「两边都要」的 VIF、Qabf 应该掉得最多；去掉 cross-attention，所有指标都应该小幅下降。
+
+<DfAblation />
+
+**结果与原因。**
+
+- **Phase 2 的判别器最关键**：去掉后 VIF 从 0.98 掉到 0.83（−15.3%），Qabf 从 0.68 掉到 0.61，都是三组里最低。没有判别器拉着，融合图就会偏向某一边。
+- **Phase 1 的判别器也有用**：EN、SD、VIF、Qabf 全部下降（VIF −7.1%）。它让编码器在重建阶段就学会保细节。
+- **cross-attention 让四个指标全部提升**（去掉后 VIF −9.2%、Qabf −8.8%）：按内容互相查询，比同一位置直接拼接合并得更好。
+- 唯一的例外是去掉 Phase 2 判别器后 SD 反而升高（45.31 vs 44.05）：融合图偏向某一模态的高对比，SD 跟着升，这也说明 SD 单独看会误导。
+
+## 5 讨论
+
+- **一个 AE 加两个判别器，同时治了两个病。** AE 负责把细节抽出来、还原回去（治 GAN 的糊），两个分别对应一种模态的判别器负责让融合图两边都像（治 AE 的偏）。消融里去掉 Phase 2 判别器时 VIF 掉 15%，是这个设计最直接的证据。
+- **CNN 和 ViT 是分工，不是叠加。** 并行两支加上相关性分解损失，把「高频细节」和「低频结构」显式地分给最擅长它的结构。这一点继承自 CDDFuse；DAE-Fuse 在它上面加了判别器和 cross-attention，表 I 里两者的差距（MSRS 上 Qabf 0.72 vs 0.69，SCD 1.75 vs 1.62）就是这两样东西的增量。
+- **为什么不用 VAE。** 融合要的是确定性的、细节完整的重建，不需要从先验里采样新图；VAE 的 KL 项和像素似然恰好会把细节平均掉。用判别器代替 KL 去约束「像真图」，是 DAE-Fuse 名字里 D 的由来。
+- **检测比指标更有说服力。** 无参考指标可以被刷（4.1 节的示意图里，平均融合的 EN 反而最高），而 mAP@50 是一个有标注、有标准答案的下游任务。融合图让同一个 YOLOv8n 的 mAP 从 0.779 / 0.805 升到 0.887，说明它确实把两种模态的有用信息合在了一起。
+
+## 6 局限与下一步
+
+- **损失权重和代码没有公开。** $\lambda$、$\sigma$ 和 Phase 2 各项的权重论文未披露，也没有放出代码，复现要自己调。
+- **训练数据没写清楚。** 论文没有明确说模型在哪个数据集、哪个划分上训练；如果和测试集来自同一数据集，不同数据集上的泛化能力就需要单独验证。
+- **消融表的数据集可能标错了。** 表 IV 标注为 TNO，但「完整 DAE-Fuse」一行的 EN、SD、VIF（6.86、44.05、0.98）和表 I 里 MSRS 的那一行相同，与 TNO 那一行（7.17、46.63、0.79）不同，Qabf（0.68）又和两者都不一样。相对差距的结论不受影响，但绝对数值没法和表 I 对照。
+- **全是无参考指标。** 它们各自都能被刷：EN 和 SD 奖励噪声，MI 奖励偏向一边。检测实验是很好的补充，加上分割之类的下游任务会更有说服力。
+- **视频只有定性结果。** 时间一致性损失有了，但没有报告相邻帧差、光流 warping 误差之类的指标，也没有和逐帧不加约束的版本对比。
+- **只有一次运行。** 表里很多格子的差距在 0.01 量级（比如卡车 AP 0.890 vs 0.891），没有方差就无法判断是不是噪声。
+- **推理代价没报告。** 两条深层分支（ResNet18 + ViT）加 cross-attention，参数量和每帧耗时都没给，对自动驾驶这种实时场景是关键数字。
+
+## 附录 A：面试怎么讲
+
+**30 秒版本。** 「这是一篇红外和可见光图像融合的论文。已有方法里 GAN 类细节糊，AE 类会偏向一种模态。我们做了一个两阶段的判别式自编码器：Phase 1 让每种模态各自重建，编码器是浅层 Restormer 块后面并行接 ResNet18 抽高频、ViT 抽低频，用相关性分解损失逼它们分工，两个判别器分别判断重建图像不像原图；Phase 2 用双向 cross-attention 让两种特征按内容互相查询，解码出一张融合图，同样两个判别器要求它既像红外又像可见光。四个数据集 28 个指标格子里 21 个第一，YOLOv8n 在 M3FD 上的 mAP@50 从单红外的 0.779 提到 0.887，消融显示 Phase 2 判别器去掉后 VIF 掉 15%。」
+
+可能的追问：
+
+- **为什么 ViT 抽低频、CNN 抽高频？** 卷积核在小窗口里做差分，天生对边缘、纹理敏感；self-attention 对所有 token 做加权平均，行为像低通滤波器（Park & Kim 2022）。并行两支再加相关性分解损失，让分工被损失显式约束。
+- **相关性分解损失在优化什么？** 分子是两种模态高频特征相关系数的平方，越小说明各自抽的是独有细节；分母是低频相关系数加 1.01，越大说明共享结构对得上。比如高频 0.1、低频 0.8 时损失 0.0055，高频变 0.7 时 0.271。
+- **判别器为什么能防止偏向？** 两个判别器各管一种模态，Phase 2 里都拿融合图当假样本。偏向红外，可见光的判别器就能认出来，反之亦然；只有同时像两边，生成器的两个对抗项才都小。
+- **cross-attention 比直接拼接好在哪？** 拼接只能把同一个位置的两种特征放在一起；cross-attention 让红外的每个 token 按内容去可见光里找对应的 token，权重由相似度决定。消融里换成拼接后 VIF 掉 9%。
+- **为什么不用 VAE？** VAE 的 KL 项把编码往先验挤，编码一重叠，MSE 解码器就输出平均，细节被抹掉；融合不需要采样新图，所以用确定性 AE，把「像真图」交给判别器。
+- **GAN 训练稳定吗？** 先单独做 80 个 epoch 的重建对抗，编码器和解码器已经能还原原图了，Phase 2 的融合是在一个好的起点上继续训；判别器用 RMSProp。论文没有讨论模式崩塌之类的问题。
+- **怎么证明融合图「有用」？** 不只看无参考指标（可以被刷），还把融合图交给 YOLOv8n 做检测：mAP@50 0.887，高于两种单模态和所有对比方法。
+- **上线到车上还缺什么？** 推理延迟和参数量、视频的定量时间一致性指标、在没见过的场景和传感器上的泛化，以及两路相机的实时配准。
+
+## 参考与相关页面
+
+- [Attention：Q、K、V](/notes/ml/llms/attention-qkv/)：cross-attention 就是 Q 和 K / V 来自不同来源的 attention。
+- [Visual Tokens](/notes/ml/multimodal/visual-tokens/)：ViT 怎么把图切成 patch。
+- [Residual Connection](/notes/ml/dl-blocks/residual-connection/)：ResNet18 每两层外面那条捷径。
+- [Inception：并行分支按 channel 拼接](/notes/ml/dl-blocks/inception-block/)：并行分支、channel 拼接的形状怎么算。
+- [PR 曲线与 Precision@k](/notes/ml/evaluation/pr-curve-precision-at-k/)：AP 是 PR 曲线下的面积。
+- Guo, Xu, Li, Su (2024), *DAE-Fuse: An Adaptive Discriminative Autoencoder for Multi-Modality Image Fusion*, [arXiv 2409.10080](https://arxiv.org/abs/2409.10080)。本页的所有表格数字来源。
+- Zhao et al. (2023), *CDDFuse: Correlation-Driven Dual-Branch Feature Decomposition for Multi-Modality Image Fusion*, CVPR：双分支与相关性分解损失的出处。
+- Dosovitskiy et al. (2020), *An Image is Worth 16x16 Words*：ViT。He et al. (2016), *Deep Residual Learning*：ResNet。Zamir et al. (2022), *Restormer*：channel attention。
+- Goodfellow et al. (2014), *Generative Adversarial Networks*；Kingma & Welling (2013), *Auto-Encoding Variational Bayes*；Ma et al. (2019), *FusionGAN*；Ma et al. (2020), *DDcGAN*。
+- Redmon et al. (2016), *You Only Look Once*；Jocher et al. (2023), *Ultralytics YOLOv8*。
+- Park & Kim (2022), *How Do Vision Transformers Work?*：MSA 是低通、卷积是高通的分析。

@@ -127,6 +127,7 @@ export const chapters: TreeChapter[] = [
       n("ml/llms/multi-head-attention", "Multi-head 与参数量", "为什么要多个头，参数有多少？", "把 d_model 拆成 h 份，每个头在自己的 d_k 维里做一次 attention 再拼回来；W_Q、W_K、W_V、W_O 共 4 d_model² 个参数，与头数无关。", "ready", "Multi-head"),
       n("ml/llms/transformer-block", "Transformer Block：一层里有什么", "一层里还有什么？", "embedding 加位置编码进来，经过 multi-head attention 和 MLP 两个子层，每个子层外面套 residual 和 LayerNorm，decoder 再加一个因果 mask。", "ready", "Transformer Block"),
       n("ml/llms/pretraining-objectives", "预训练目标：自回归与 Masked LM", "训练时在预测什么？", "GPT 用因果 mask 预测下一个 token，loss 是 −Σ log P(y_t | y_<t)；BERT 遮住 15% 的 token 再猜回来，外加一个句子对的二分类。", "ready", "预训练目标"),
+      n("ml/llms/deepseek-moe", "DeepSeekMoE：让 FFN 按 token 选择专家", "普通 FFN 太贵，能只训和算一部分专家吗？", "共享专家每次都算，router 为每个 token 只选少数细粒度专家；下一词 loss 更新已选专家，辅助均衡损失防止路由塌缩。", "ready", "DeepSeekMoE"),
       n("ml/llms/decoding-strategies", "Decoding：greedy、sampling、top-k、top-p、beam", "生成时怎么选下一个词？", "greedy 取最高，sampling 按概率抽，top-k / top-p 先截断再抽，beam search 多留几条路选总分最大的；temperature 把分布变尖或变平。", "ready", "Decoding"),
       n("ml/llms/bert", "BERT：双向编码器怎样读懂一句话", "这些零件拼成一个只读不写的模型，怎么训、怎么用？", "只有 encoder 的 Transformer：遮住 15% 的词再猜回来做预训练，再接一个小头全参数微调去做分类；读得懂整句，但不会生成。", "ready", "BERT"),
       n("ml/llms/bert-vs-macbert", "BERT vs MacBERT", "中文 BERT 还能怎么训得更好？", "结构完全一样，都是 12 层 base，差别只在预训练任务：MacBERT 按整词和 n-gram 选，用近义词代替 [MASK] 再让模型纠错回原词，并用 SOP 和更多数据。", "ready", "MacBERT"),
@@ -174,6 +175,7 @@ export const chapters: TreeChapter[] = [
       n("ml/multimodal/vision-language-alignment", "Vision–Language Alignment", "视觉和文本怎么对齐？", "对齐不只是把两种 embedding 变成相同维度：projector、生成式 loss、冻结与端到端训练一起建立多模态理解。", "ready", "图文对齐"),
       n("ml/multimodal/clip-contrastive-learning", "CLIP 对比学习", "对比学习怎么训？", "三张图、三句话、一个 3×3 相似度矩阵；调 temperature 看图文匹配概率和双向 contrastive loss 怎么变。", "ready"),
       n("ml/multimodal/multisticker-project", "Project：MultiSticker", "这些拼起来能做什么？", "一个完整项目：对话上下文、检索到的历史记忆和 LLM 意图三路文本过 CLIP 编码，投影进图像空间，从 6,758 张贴纸里排出用户会发的那张；Exact R@30 从 0.28% 到 13.15%。", "ready"),
+      n("ml/multimodal/dae-fuse-project", "Project：DAE-Fuse", "两种相机的图怎么融成一张？", "红外看得见人、可见光看得见车：ResNet18 抽高频、ViT 抽低频，cross-attention 让两种特征互相查询，两个判别器要求融合图两边都像；M3FD 上 YOLOv8n 的 mAP@50 从 0.779 到 0.887。", "ready", "Project：DAE-Fuse"),
     ],
   },
   {
@@ -250,6 +252,9 @@ export const edges: TreeEdge[] = [
   { from: "ml/llm-engineering/eval-harness", to: "ml/post-training/sft", why: "飞轮把过关的样本喂回 SFT" },
   { from: "ml/recsys/retrieval-precision-at-k", to: "ml/multimodal/multisticker-project", why: "Exact / Group Recall@K 就是那一页的指标" },
   { from: "ml/post-training/lora", to: "ml/multimodal/multisticker-project", why: "image / text / dual LoRA 用的就是这个低秩增量" },
+  { from: "ml/llms/attention-qkv", to: "ml/multimodal/dae-fuse-project", why: "cross-attention 就是 Q 和 K / V 来自两种模态的 attention" },
+  { from: "ml/dl-blocks/residual-connection", to: "ml/multimodal/dae-fuse-project", why: "高频分支 DHE 用的是 ResNet18" },
+  { from: "ml/evaluation/pr-curve-precision-at-k", to: "ml/multimodal/dae-fuse-project", why: "检测实验报的是 PR 曲线下的 AP@50" },
 ];
 
 export const nodeBySlug: Record<string, TreeNode & { chapter: TreeChapter }> = Object.fromEntries(

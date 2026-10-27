@@ -6,7 +6,7 @@ import KnowledgeTree from "@/components/visualization/ml/KnowledgeTree";
 
 **这一章回答「模型怎么读一串 token」：先看 RNN 怎么一步一步传 hidden state、Transformer 为什么能并行；再把 attention 拆成 Q、K、V 和多个 head，拼成一层；最后看训练时在预测什么、生成时怎么选下一个词。**
 
-十页是一条问题链，每一页解决上一页留下的问题。除了 Transformer vs RNN、BERT 和最后的 BERT 微调三篇长文，每页都是五段：一句话、为什么需要它、怎么工作、代价与取舍、再往下看。
+十一页是一条问题链，每一页解决上一页留下的问题。Transformer vs RNN、DeepSeekMoE、BERT 和最后的 BERT 微调是长文；其余概念页按五段写：一句话、为什么需要它、怎么工作、代价与取舍、再往下看。
 
 ## 这章的问题链
 
@@ -14,8 +14,8 @@ import KnowledgeTree from "@/components/visualization/ml/KnowledgeTree";
 
 ## 怎么读
 
-按顺序读，每页 5 到 7 分钟，图里的步进器和滑杆从头拖到尾再往下看。
+按顺序读，概念页约 5 到 7 分钟，模型长文可分段读；图里的步进器和滑杆从头拖到尾再往下看。
 
-第 1 页 RNN 用一个 hidden 3 维、输入 2 维的真实递推算出每个 h_t，看清「下一步要等上一步」是什么意思。第 2 页 Transformer vs RNN 是早先写的一篇长文，讲并行从哪来、mask 和 position 是两回事、train / prefill / decode 三个阶段；它比别的页长，可以先读前两节再回头。第 3 页 Attention 用四个 token、d = 4 的玩具 embedding 把 Q、K、V、softmax、加权和一步步算出来；第 4 页 Multi-head 数参数：head 数怎么变，4 d_model² 都不变。第 5 页 Transformer Block 把 attention、MLP、residual、LayerNorm 拼成一层，一个 token 的向量在每个块前后各是什么数。第 6 页预训练目标把 GPT 和 BERT 的 loss 逐项算出来；第 7 页 Decoding 在同一张分布上试五种选词规则和 temperature。第 8 页 BERT 把前面的零件拼成一个只读不写的完整模型，从输入、loss、训练讲到一次情感分类，再和 GPT 逐项比。第 9 页 BERT vs MacBERT 讲中文常用的 MacBERT：结构完全一样，只改了预训练任务。第 10 页 BERT 微调是收尾的长文：拿 MacBERT 做一个三分类，从数据、切词、训练循环一路走到评估和上线。
+第 1 页 RNN 用一个 hidden 3 维、输入 2 维的真实递推算出每个 h_t，看清「下一步要等上一步」是什么意思。第 2 页 Transformer vs RNN 是早先写的一篇长文，讲并行从哪来、mask 和 position 是两回事、train / prefill / decode 三个阶段；它比别的页长，可以先读前两节再回头。第 3 页 Attention 用四个 token、d = 4 的玩具 embedding 把 Q、K、V、softmax、加权和一步步算出来；第 4 页 Multi-head 数参数：head 数怎么变，4 d_model² 都不变。第 5 页 Transformer Block 把 attention、MLP、residual、LayerNorm 拼成一层，一个 token 的向量在每个块前后各是什么数。第 6 页预训练目标把 GPT 和 BERT 的 loss 逐项算出来；第 7 页 DeepSeekMoE 用整机架构、单层放大和两条 token 的训练例子讲清专家路由与梯度；第 8 页 Decoding 在同一张分布上试五种选词规则和 temperature。第 9 页 BERT 把前面的零件拼成一个只读不写的完整模型，从输入、loss、训练讲到一次情感分类，再和 GPT 逐项比。第 10 页 BERT vs MacBERT 讲中文常用的 MacBERT：结构完全一样，只改了预训练任务。第 11 页 BERT 微调是收尾的长文：拿 MacBERT 做一个三分类，从数据、切词、训练循环一路走到评估和上线。
 
 读完应该能用自己的话回答五个问题：Transformer 为什么训练能并行、生成不能；Q、K、V 各是什么；为什么 Transformer 用 LayerNorm 不用 BatchNorm；GPT 和 BERT 的 loss 差在哪；top-p 比 top-k 省心在哪。这一章之后接着去 LLM Engineering，看参数不动时还能改什么。

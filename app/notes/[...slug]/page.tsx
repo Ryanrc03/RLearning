@@ -44,6 +44,7 @@ import VisualTokens from "@/content/ml/multimodal/visual-tokens.mdx";
 import VisionLanguageAlignment from "@/content/ml/multimodal/vision-language-alignment.mdx";
 import ClipContrastiveLearning from "@/content/ml/multimodal/clip-contrastive-learning.mdx";
 import MultistickerProject from "@/content/ml/multimodal/multisticker-project.mdx";
+import DaeFuseProject from "@/content/ml/multimodal/dae-fuse-project.mdx";
 import MlOverview from "@/content/ml/overview.mdx";
 import EvaluationOverview from "@/content/ml/evaluation/overview.mdx";
 import ConfusionMatrix from "@/content/ml/evaluation/confusion-matrix.mdx";
@@ -57,6 +58,7 @@ import AttentionQkv from "@/content/ml/llms/attention-qkv.mdx";
 import MultiHeadAttention from "@/content/ml/llms/multi-head-attention.mdx";
 import TransformerBlock from "@/content/ml/llms/transformer-block.mdx";
 import PretrainingObjectives from "@/content/ml/llms/pretraining-objectives.mdx";
+import DeepSeekMoE from "@/content/ml/llms/deepseek-moe.mdx";
 import DecodingStrategies from "@/content/ml/llms/decoding-strategies.mdx";
 import Bert from "@/content/ml/llms/bert.mdx";
 import BertVsMacbert from "@/content/ml/llms/bert-vs-macbert.mdx";
@@ -117,6 +119,7 @@ import TTest from "@/content/ml/evaluation/t-test.mdx";
 import { getNote, getSeriesNeighbors, noteEntries } from "@/content/notes";
 import { getNoteToc } from "@/lib/content";
 import TableOfContents from "@/components/layout/TableOfContents";
+import SplitReader from "@/components/layout/SplitReader";
 import Icon from "@/components/ui/Icon";
 
 const noteComponents = {
@@ -163,6 +166,7 @@ const noteComponents = {
   "ml/multimodal/vision-language-alignment": VisionLanguageAlignment,
   "ml/multimodal/clip-contrastive-learning": ClipContrastiveLearning,
   "ml/multimodal/multisticker-project": MultistickerProject,
+  "ml/multimodal/dae-fuse-project": DaeFuseProject,
   "ml/overview": MlOverview,
   "ml/evaluation/overview": EvaluationOverview,
   "ml/evaluation/confusion-matrix": ConfusionMatrix,
@@ -176,6 +180,7 @@ const noteComponents = {
   "ml/llms/multi-head-attention": MultiHeadAttention,
   "ml/llms/transformer-block": TransformerBlock,
   "ml/llms/pretraining-objectives": PretrainingObjectives,
+  "ml/llms/deepseek-moe": DeepSeekMoE,
   "ml/llms/decoding-strategies": DecodingStrategies,
   "ml/llms/bert": Bert,
   "ml/llms/bert-vs-macbert": BertVsMacbert,
@@ -276,6 +281,8 @@ export default async function NotePage({ params }: { params: Promise<{ slug: str
         <div className="article-end"><div><Icon name="leaf" /><span>这篇笔记还会继续生长。</span></div><Link href="/">回到知识库 <Icon name="arrow" /></Link></div>
       </div>
       <TableOfContents items={toc} />
+      {/* Keyed by note so moving to another note (e.g. from the sidebar) closes the split. */}
+      <SplitReader key={key} />
     </div>
   );
 }

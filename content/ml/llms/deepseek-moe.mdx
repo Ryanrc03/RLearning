@@ -1,0 +1,133 @@
+import DeepSeekMoEEndToEnd from "@/components/visualization/ml/llms/deepseek-moe/DeepSeekMoEEndToEnd";
+import DeepSeekMoEArchitecture from "@/components/visualization/ml/llms/deepseek-moe/DeepSeekMoEArchitecture";
+import DeepSeekMoEFigure from "@/components/visualization/ml/llms/deepseek-moe/DeepSeekMoEFigure";
+import DeepSeekMoETraining from "@/components/visualization/ml/llms/deepseek-moe/DeepSeekMoETraining";
+
+# DeepSeekMoE：让 FFN 按 token 选择专家
+
+DeepSeekMoE（Dai 等，2024）是在 Transformer 的 FFN 位置使用 **Mixture of Experts** 的语言模型架构：每个 token 都经过共享专家，再由 router 从许多较小的路由专家中选少数几个。这篇笔记先定位它在完整模型的哪一层，再放大一条 token 的路由，最后用两个 token 算完一次训练。它接在 [Transformer Block](/notes/ml/llms/transformer-block/) 和 [预训练目标](/notes/ml/llms/pretraining-objectives/) 后面；论文和后续 DeepSeek-V3 的训练配方会分开说明。
+
+## What is it?
+
+DeepSeekMoE 是**用更多总参数换取较少每 token 激活计算**的 Transformer FFN 替代层。它并未把整个 Transformer 都换成专家：attention、残差连接和语言模型预测头仍在。论文的 16B 实验配置如下；这些是[论文中的真实数字](https://aclanthology.org/2024.acl-long.70.pdf)，后文图里的四专家小例子只是教学示意。
+
+| DeepSeekMoE 16B | 论文配置 |
+| --- | --- |
+| Transformer 层数 / hidden size | 28 层 / 2048 |
+| FFN 安排 | 第 1 层为 dense FFN；第 2–28 层为 MoE |
+| 每个 MoE 层 | 2 个共享专家 + 64 个路由专家；每 token 选 6 个路由专家 |
+| 单个专家大小 | 普通 FFN 中间维度的 1/4 |
+| 参数量 | 总计约 16.4B；每 token 激活约 2.8B |
+
+## Why does it exist?
+
+普通 FFN 在每个 token 上运行同一组权重。想增加容量，直接加宽 FFN 会让每个 token 的计算也增长。一般的稀疏 MoE 虽然只激活少数专家，但少数大专家容易混合多种知识，不同专家也可能反复学习同样的通用模式。DeepSeekMoE 于是把专家切得更小、让一次路由能组合更多小专家，并把通用部分留给始终启用的共享专家。共享与专门化是架构希望形成的分工，不是事先给专家贴好的领域标签。
+
+## Architecture
+
+### 整机：Transformer 和 MoE 怎样一起训练
+
+<DeepSeekMoEEndToEnd />
+
+输入 token 先变成 hidden state，再逐层经过 self-attention 和 FFN 位置。论文的 16B 模型首层仍用普通 dense FFN，因为作者观察到首层的专家负载收敛尤其慢；其余 27 层才在 FFN 位置放 MoE。每层的 attention 继续负责 token 间的信息交互，MoE 处理每个 token 自己的向量，随后与残差相加，输出形状仍是 `[T, 2048]`，可以送入下一层。整机训练时，词表交叉熵与专家均衡项合成总损失，再反传更新参数；右图放大的是每个 MoE 层内部，而不是一个脱离 Transformer 单独训练的模型。
+
+### 专家结构：从常规 MoE 到 DeepSeekMoE
+
+先在 Transformer 中找到 FFN 位置，再沿图从左到右看专家如何从“大而少”变成“小而多”，最后单独留出始终执行的共享专家。图中 4→8 个专家用于解释结构，**不是** 16B 模型的专家数量。
+
+<DeepSeekMoEArchitecture />
+
+三栏图对比的是 FFN 位置的专家组织方式。最右侧的共享与路由结构，会重复出现在整机图的第 2–28 层里；这些层的 attention 也各自有权重，一起由最终 loss 训练。
+
+### 放大一个 MoE 层：共享与路由
+
+<DeepSeekMoEFigure />
+
+$$
+s_i(h)=\frac{\exp(h^\top e_i)}{\sum_r\exp(h^\top e_r)},\qquad
+\mathrm{MoE}(h)=\sum_{j=1}^{K_s}S_j(h)+\sum_{i\in\operatorname{TopK}(s(h))}s_i(h)E_i(h)
+$$
+
+普通 FFN 对所有 token 调用同一个 `FFN(h)`。这里每个专家仍是一个小 FFN：router 对所有路由专家算分，softmax 成 $s_i$，只保留 top-k 的门值；共享专家不参加 top-k，始终执行。被选中的专家输出按门值加权，和共享输出相加。**一个 token 不执行未选中的路由 FFN**，但它们可能服务于 batch 里的别的 token。图里的 A、B 正是下一节训练例子的两条样本。
+
+“细粒度”指把原专家的 FFN 中间维度切到 $1/m$，于是同样的专家参数预算可容纳 $m$ 倍数量的小专家；在相近激活计算预算下，也能选择更多小专家。隔离出 $K_s$ 个共享专家后，路由激活名额相应减少 $K_s$。论文 16B 版本用每个专家为普通 FFN 的 1/4 大小、2 个共享加 6 个路由专家，并没有让每个 token 执行全部 66 个专家。
+
+### 输出与语言模型头
+
+一层 MoE 的输出是 hidden vector，不直接是“猫”的概率。它经过后续 Transformer 层和词表预测头，才得到每个候选 token 的 logits，再做 softmax。图把专家输出缩成一个标量，是为了把路由加权和算清楚；真实的专家 FFN 输出是 2048 维向量。
+
+## Loss functions
+
+DeepSeekMoE 16B 做自回归预训练：在每个位置预测下一个 token，正确词概率越低，交叉熵越大。只用这个主损失时，router 可能一直偏向少数专家，所以 2024 年论文还加了**专家级均衡损失**：
+
+$$
+L_{\mathrm{total}}=L_{\mathrm{LM}}+\alpha\sum_{i=1}^{N_r}f_iP_i,\quad
+f_i=\frac{N_r}{K_rT}\sum_{t=1}^{T}\mathbf1[i\in\operatorname{TopK}(t)],\quad
+P_i=\frac1T\sum_{t=1}^{T}s_{i,t}
+$$
+
+$N_r$ 是路由专家数，$K_r$ 是每 token 选中的路由专家数；$f_i$ 统计一批 token 的实际选中频率，$P_i$ 是平均门前 softmax 分数。辅助项对 router 产生额外训练信号，帮助避免负载集中；它不要求每个 token 走所有专家，也不会直接让未被选中的专家 FFN 收到该 token 的主损失梯度。后续 DeepSeek-V3 的动态路由偏置不是这篇 2024 年论文的做法。
+
+## How is it trained?
+
+一次训练迭代是：读入一批文本并移位形成下一词标签 → 每个 token 在每个 MoE 层单独路由 → 只执行共享和被选中的专家 → 汇总输出、经过后续层与词表头 → 算 LM 与均衡两项 loss → 反向传播并更新参数。top-k 的**选择**是离散的，但选中路径上的门值连续可导；被选中的专家 FFN、共享专家和 router 都能从主损失学习。未选中的专家对这条 token 没有 FFN 主损失梯度；在整个 batch 中它仍可能被别的 token 选中。均衡项主要训练 router，不能把它和专家 FFN 的梯度混为一谈。
+
+**训练的是整个 Transformer，不只是 MoE。**下一词损失从词表预测头向前反传，更新词表头、embedding、各层 attention、首层 dense FFN、归一化层，以及每个 MoE 层中本 batch 用到的专家和 router。MoE 只是把部分层原来的 FFN 改成条件执行：对某个 token，未选中的路由专家没有这条 token 的 FFN 主损失梯度，但梯度仍会沿选中路径传回前面的 attention 等模块。残差相加本身没有权重可更新。
+
+| 16B 预训练项目 | 论文报告值 |
+| --- | --- |
+| 数据 / tokenizer | 中英文语料抽取 2T token；BPE 词表 100K |
+| batch / 最大长度 | 约 4.5K 条序列 × 4K token，约 18M token / step |
+| 步数 | 106,449 |
+| 优化器 | AdamW：β₁ = 0.9，β₂ = 0.95，weight decay = 0.1；梯度裁剪范数 1.0 |
+| 学习率 | 峰值 4.2 × 10⁻⁴；前 2K 步 warmup；到总步数 80% 和 90% 时各乘 0.316 |
+| 专家均衡系数 | α = 0.001 |
+
+作者采用 pipeline parallelism 分配模型层；在报告的 16B 训练设置中，同一层的专家放在同一设备上。论文没有把这种通信安排当成 MoE 的必然属性，跨设备专家并行仍可能带来额外通信。上述配置来自[论文第 5 节与附录 A.2](https://aclanthology.org/2024.acl-long.70.pdf)。
+
+## A training example
+
+下面把真实模型缩成**一个共享专家 + 四个路由专家、每 token 选两个**，词表也缩成“猫 / 狗 / 鱼”。A 的正确下一词是“猫”，B 的是“狗”；两条样本共用专家参数。算例只展开 MoE 子层，省略了仍会一起训练的 attention、embedding 等参数。依次点到最后一步，看每个数从哪里来。
+
+<DeepSeekMoETraining />
+
+先看 A：router 的未归一化权重是 4、2、1、1，所以 softmax 后是 0.5、0.25、0.125、0.125；选专家 1、2，得到 $1+0.5\times2+0.25\times4=3$。教学用词表头根据 A 的 hidden state 给“猫”这个候选词加 3，另两个 logit 为 0；真实标签也恰好是“猫”，因此正确词概率为 $e^3/(e^3+2)$，交叉熵约 0.0949。B 用同样的参数，但选专家 3、4，词表头给“狗”加分。一个 batch 内四个路由专家各被选一次，均衡项也可直接算出。
+
+反传时，A 的主损失只沿共享专家与专家 1、2 的 FFN 前向路径回流；B 则沿共享专家与专家 3、4 回流。图的最后一步用一次 **SGD 示意更新**显示梯度方向，方便手算；真实 16B 训练用的是 AdamW，参数是矩阵，不是图中这几个标量。图里每条样本的玩具词表头只改一个候选词 logit；这个选择来自模型输入，不来自标签。真实词表头会为所有候选词产生 logits。
+
+## DeepSeekMoE vs dense FFN
+
+| 观察角度 | 普通 dense FFN | DeepSeekMoE |
+| --- | --- | --- |
+| 一层里的 FFN 参数 | 一套权重，每个 token 都执行 | 多套小 FFN；共享专家必经，路由专家按 token 稀疏执行 |
+| 下一个 token 的训练目标 | 逐 token 交叉熵 | 相同的交叉熵，另加专家级均衡项 |
+| 一条 token 的专家梯度 | 整套 FFN 收到主损失梯度 | 共享与已选路由 FFN 收到；未选路由 FFN 无该 token 的主损失梯度 |
+| 容量与开销 | 加参数通常也加每 token 计算 | 总参数可远大于激活参数；需处理路由、负载和可能的通信 |
+
+论文报告 DeepSeekMoE 16B 用约 40% 的计算量达到与 DeepSeek 7B、LLaMA 2 7B 接近的整体效果；这说的是论文比较中的**计算量**，不是“总参数更少”，也不保证任意硬件上的实际延迟同样按比例下降。
+
+## Trade-offs
+
+- 路由可能塌到少数专家；均衡约束太强又会干扰语言建模。DeepSeek-V3 后来主要用[动态路由偏置](https://arxiv.org/abs/2412.19437)调负载，同时保留序列级均衡项，不能倒写成 2024 年 DeepSeekMoE 的方法。
+- 专家越小、组合越灵活，矩阵运算也可能越不高效。论文 16B 版本选择了 1/4 大小的专家，没有无限细切。
+- 稀疏激活省的是每 token 的专家计算；模型所有专家仍需存储，训练时还要做分组调度，跨设备部署可能付出通信成本。
+
+## Key ideas to remember
+
+1. MoE 替换的是 Transformer 中的部分 FFN 位置；训练时 attention 等模块仍与 MoE 端到端一起更新。
+2. 共享专家每个 token 都执行，路由专家按 token 的 top-k 执行。
+3. 下一词 loss 仍是主训练目标；均衡项防止所有 token 挤到少数专家。
+4. 一条 token 只给被选中的路由 FFN 传主损失梯度，整个 batch 可覆盖更多专家。
+5. 总参数、激活参数、FLOPs 和真实吞吐要分别看。
+
+## Related notes
+
+- [Transformer Block](/notes/ml/llms/transformer-block/)：先找到原来 FFN 在一层里的位置。
+- [预训练目标](/notes/ml/llms/pretraining-objectives/)：逐位置的下一词交叉熵从哪里来。
+- [Softmax 与 Cross-Entropy](/notes/ml/classifiers/softmax-cross-entropy/)：算例中的概率和 loss。
+- [Decoding 策略](/notes/ml/llms/decoding-strategies/)：参数训好后怎样选下一个词。
+
+## Further reading
+
+- [DeepSeekMoE（ACL 2024）](https://aclanthology.org/2024.acl-long.70/)：本页架构、负载均衡与 16B 训练数字的来源。
+- [DeepSeek-V3 Technical Report](https://arxiv.org/abs/2412.19437)：后续模型的路由与训练配方怎样改变。
