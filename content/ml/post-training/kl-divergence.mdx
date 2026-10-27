@@ -1,0 +1,49 @@
+import KlDivergenceFigure from "@/components/visualization/ml/post-training/KlDivergenceFigure";
+
+# KL 散度：β 拉住的是什么
+
+## 一句话
+
+**KL 散度衡量一个分布离另一个有多远；在 RLHF 和 GRPO 里，它量的是策略 π_θ 离参考模型 π_ref 有多远，β·KL 是走远要付的代价。**
+
+它也出现在知识蒸馏、VAE 的正则项和 DPO 的推导里。这一页用 RTX 3060 上两次真实 GRPO 运行的数据来看它。
+
+## 为什么需要它
+
+上一页说要用 KL 把策略拉在参考附近。我们在 3060 上训 Qwen2.5-3B 的第一轮 GRPO 恰好没拉：TRL 0.22 的 `beta` 默认就是 0。500 步里训练 reward 从 1.53 涨到 2.13，GSM8K test 准确率却从 62.1% 掉到 56.9%，回答从平均 254 token 缩到 82。策略为了几个格式分，走到了参考模型从来不会写的那种一行算式。没有 KL，奖励函数里的每一个漏洞都是一条可以一直走下去的路。
+
+## 怎么工作
+
+<KlDivergenceFigure />
+
+$$
+\mathrm{KL}(P \,\|\, Q) = \sum_x P(x)\, \ln \frac{P(x)}{Q(x)} \;\ge\; 0
+$$
+
+$$
+J(\theta) = \underbrace{\mathbb{E}\big[\min(\rho A,\ \operatorname{clip}(\rho)A)\big]}_{\text{GRPO 的 clip 目标}} \;-\; \beta\, \mathrm{KL}\big(\pi_\theta \,\|\, \pi_{\text{ref}}\big)
+$$
+
+$$
+k_3 = e^{x} - x - 1,\qquad x = \ln \pi_{\text{ref}}(o_t) - \ln \pi_\theta(o_t)
+$$
+
+图里把每个模型回答 1,319 道 GSM8K 题的长度分成 8 格。KL 就是每一格 $p \ln(p/q)$ 的和：策略在某一格放的概率比参考多，这一格是正贡献，比参考少就是负贡献；加起来永远不小于 0，两个分布完全一样时才等于 0。第一轮 500 步的 KL 是 3.54 nats，几乎全部来自 50–99 token 那一格：参考模型只有不到 1% 的回答这么短，它有 63%。修正版（β = 0.04）只有 0.017，两组柱子几乎重合。
+
+KL 不对称。GRPO 罚的是 $\mathrm{KL}(\pi_\theta \,\|\, \pi_{\text{ref}})$，按策略自己的概率加权：策略把大量概率放到参考几乎不去的地方，$\ln(p/q)$ 会很大，这正是 reward hacking 的样子。切到另一个方向，同一对分布的数值从 3.54 变成 3.21。
+
+训练时没法枚举所有可能的回答，只能在采样到的 token 上估。每个 token 用 $k_3$：它对每个样本都不小于 0，期望恰好等于 $\mathrm{KL}(\pi_\theta \,\|\, \pi_{\text{ref}})$，方差比直接用 $\ln(\pi_\theta/\pi_{\text{ref}})$ 小。它乘上 β 加进 loss，哪个 token 离参考越远，梯度就把它往回拉得越狠。修正版日志里这个逐 token 的 KL 从前 50 步平均 0.0007 慢慢涨到最后 50 步的 0.014。
+
+一个坑：β = 0 时 TRL 和 Unsloth 根本不算这一项，逐 token 的 KL 直接置 0，也不加载参考模型，所以第一轮日志里 kl 一列全是 0。那是没算，不是没漂：同一轮的长度分布 KL 是 3.54。
+
+## 代价与取舍
+
+- **β 怎么选**：太大学不动，策略被钉在参考上，reward 涨不起来；太小拦不住 hacking。我们用 DeepSeekMath 的 0.04。β 是「每 nat 的漂移值多少 reward」的汇率，要和奖励的尺度一起看，我们的单条奖励满分在 3 到 4 之间。
+- **KL 量的是距离，不是好坏**：SFT 的长度分布 KL 是 2.47，比修正版大 140 多倍，准确率却从 62% 升到 68%，因为它在模仿人写的示范。KL 管的是「没有可信理由时别走远」。
+- **要多算一遍参考模型**：每个 batch 都要参考模型的 log-prob。全量微调要多存一份冻结权重；LoRA 下参考就是关掉 adapter 的同一个模型，不多占显存，但多一次前向。
+- **逐 token 的数小，整条回答不小**：0.014 nats/token 乘上约 250 个 token，整条回答的 KL 约 3.5 nats。长度分布几乎没变，说明这些漂移花在了措辞上，而不是砍长度。
+- **单靠 KL 不够**：修正版同时改了四处（KL、Dr. GRPO 损失、格式分减半并门控、修 strict 正则），没做消融，不能把准确率回升都记在 KL 头上。KL 只让漂移变贵，奖励里的漏洞还要自己堵。
+
+## 再往下看
+
+下一页是这一章的实战复盘：[Project：在 3060 上训 GRPO，复盘一次 reward hacking](/notes/ml/post-training/grpo-3060-project/)，从训练曲线、checkpoint 和真实输出里看第一轮怎么被刷，四处修改怎么把它拉回来。β 怎样决定 RLHF 的最优策略，见 [RLHF：奖励模型、PPO 与 DPO](/notes/ml/post-training/rlhf/)。
