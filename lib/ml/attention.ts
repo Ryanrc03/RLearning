@@ -144,6 +144,60 @@ export const DEMO_WV: Matrix = [
 
 export const DEMO_ATTENTION: AttentionParams = { wq: DEMO_WQ, wk: DEMO_WK, wv: DEMO_WV };
 
+// ---- Self vs cross attention (LLMs page 3) --------------------------------
+// The paper uses one attention function in three places (§3.2.3). They differ
+// only in where Q and where K, V come from, and whether a causal mask is added:
+//   encoder self-attention          Q, K, V ← encoder            (T_src, T_src)
+//   decoder masked self-attention   Q, K, V ← decoder + causal   (T_tgt, T_tgt)
+//   encoder–decoder (cross)         Q ← decoder, K, V ← encoder  (T_tgt, T_src)
+
+export type AttentionResult = Omit<SelfAttentionResult, "X" | "updated"> & {
+  Xq: Matrix;
+  Xkv: Matrix;
+};
+
+// softmax(Xq W_Q (Xkv W_K)ᵀ / √d_k + M) · Xkv W_V. M is additive: 0 keeps a
+// key, −∞ hides it. Self-attention is the special case Xq = Xkv.
+export function attention(Xq: Matrix, Xkv: Matrix, params: AttentionParams, mask?: Matrix): AttentionResult {
+  const Q = project(Xq, params.wq);
+  const K = project(Xkv, params.wk);
+  const V = project(Xkv, params.wv);
+  const raw = scaledScores(Q, K);
+  const S = mask ? raw.map((row, i) => row.map((x, j) => x + mask[i][j])) : raw;
+  const A = attentionWeights(S);
+  return { Xq, Xkv, Q, K, V, S, A, out: attend(A, V), dK: Q[0].length };
+}
+
+// Three target tokens the decoder has produced so far while translating
+// "Hi I am Ryan"; hand-made d = 4 states standing in for the decoder's
+// previous sub-layer, not outputs of a real model.
+export const DEMO_TARGET = ["你好", "我", "是"] as const;
+
+export const DEMO_DEC: Matrix = [
+  [0.9, 0.1, -0.2, 0.4],
+  [0.2, 0.9, 0.3, -0.1],
+  [-0.3, 0.4, 0.8, 0.3],
+];
+
+// The cross-attention sub-layer has its own W_Q, W_K (W_V reuses DEMO_WV).
+// Picked by a small search so that 你好 → Hi, 我 → I and 是 → Ryan (the word
+// the decoder must produce next) each get the largest weight.
+export const DEMO_CROSS: AttentionParams = {
+  wq: [
+    [0.5, 1.5, -0.5, -1.2],
+    [1.5, 1.0, 1.5, 0.3],
+    [1.5, 0.0, 1.5, 1.1],
+    [-1.5, -1.1, -1.5, 1.5],
+  ],
+  wk: [
+    [-1.5, 0.9, -1.5, -0.1],
+    [1.5, -1.1, 1.5, 1.5],
+    [-1.1, -0.1, -1.0, -1.3],
+    [-0.9, -1.5, -0.1, 0.9],
+  ],
+  wv: DEMO_WV,
+};
+
 // ---- Multi-head attention (LLMs page 4) ------------------------------------
 
 export type MultiHeadParams = {

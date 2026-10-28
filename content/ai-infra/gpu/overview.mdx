@@ -2,6 +2,11 @@ import SectionMapViz from "@/components/visualization/SectionMapViz";
 import TrainingStepFigure from "@/components/visualization/gpu/TrainingStepFigure";
 import TrainingBottleneckMap from "@/components/visualization/gpu/TrainingBottleneckMap";
 import MethodCards from "@/components/visualization/gpu/MethodCards";
+import MeasuredBars from "@/components/visualization/gpu/MeasuredBars";
+import GrpoStepProfile from "@/components/visualization/gpu/grpo/GrpoStepProfile";
+import Nf4KernelWalkthrough from "@/components/visualization/gpu/grpo/Nf4KernelWalkthrough";
+import Nf4RoutingExplorer from "@/components/visualization/gpu/grpo/Nf4RoutingExplorer";
+import AccumulateCeiling from "@/components/visualization/gpu/grpo/AccumulateCeiling";
 
 # GPU Kernels Overview
 
@@ -46,3 +51,121 @@ import MethodCards from "@/components/visualization/gpu/MethodCards";
 <SectionMapViz section="gpu" />
 
 按顺序读。前两页是诊断的框架：第 1 页讲 GPU 为什么要喂饱才快，第 2 页讲怎样判断一个 kernel 卡在算还是卡在搬。第 3 到 6 页是四种减少访存的办法，第 7 页讲算力用满之后还能换什么。每页看完，用自己的话说一遍那句定义，再说一遍它的实验比的是什么。
+
+## 实战：在 RTX 3060 上给 GRPO 做 kernel 级优化
+
+前面七页的例子来自课程实验。这一节把同一套方法用在一个真实项目上：在一张 12 GB 的 RTX 3060 上，用 GRPO 训练 Qwen2.5-3B（4-bit NF4 底座 + LoRA，vLLM 和训练同进程），训练过程见 [GRPO 3060 项目复盘](/notes/ml/post-training/grpo-3060-project/)。目标只有一个：在不改训练配方的前提下，把每一步变快，而且每一项收益都要有独立测出来的数字。
+
+### 第 1 步：先测，不要先改
+
+GRPO 的一步分两半：先用 vLLM 为每道题采样 6 个回答（decode），再对这 6 条序列做一次前向加反向（训练）。两半分别用 profiler 抓下来，按 kernel 名字归类：
+
+<GrpoStepProfile />
+
+这张图直接给出了两个方向，也纠正了两个之前的错误判断：
+
+| 之前的判断 | 实测之后 | 怎么发现的 |
+| --- | --- | --- |
+| 训练半步 GPU 有 37% 在空转，是 WSL 的启动延迟 | kernel 之间的空隙只占 4%，训练半步是 kernel-bound | 直接在 trace 里算相邻 kernel 之间的间隔，而不是用「kernel 总时长 ÷ 墙钟」 |
+| GEMM 只跑到 bf16 峰值的 28%，算子效率低 | 3060 用 fp32 累加的真实上限是 25.6 TFLOPS，不是 51；cuBLAS 已经跑到 87%–102% | 单独测 cuBLAS，看见它比「峰值」低一半却怎么调都不涨 |
+
+结论很清楚：采样半步的大头是 bitsandbytes 的 4-bit 矩阵乘，它只用到 12%–22% 的显存带宽，有很大空间（下面的 P1）；训练半步的 GEMM 已经顶到上限，想再快只能换累加精度（下面的 P3）。
+
+### 第 2 步：先搭 microbenchmark，再写 kernel
+
+端到端的步时噪声太大，看不出一个 kernel 改好了多少。所以先写一个只测单个 kernel 的框架，后面所有结论都从它出：
+
+| 做法 | 为什么 |
+| --- | --- |
+| CUDA event 包住单次调用，预热 20 次，取 100 次的中位数 | 中位数不受偶发的长尾影响 |
+| 每次调用前写一遍 64 MB 的缓冲区，冲掉 3 MB 的 L2 | decode 时权重每步只读一次，不能让它住在 L2 里 |
+| 同一个权重准备多份副本，轮流使用 | 防止连续两次读到同一块地址 |
+| 启动前查 `nvidia-smi`，显存 > 2.5 GB 或利用率 > 20% 就拒绝运行 | 这台机器上有别的进程会抢 GPU，抢到时 bnb 的时间会从 0.15 ms 变成 0.25 ms |
+| 每个结果都和 fp32 参考比误差，阈值固定写进测试 | 快但算错的 kernel 没有意义 |
+| 输出带宽利用率和算力利用率，而不是只给毫秒 | 毫秒说不出「离上限还有多远」 |
+
+所有实验都在单独的 git worktree 和单独复制的 Python 环境里跑，新装的包（比如 liger-kernel）不会碰到正在用的训练环境。
+
+### 第 3 步（P1）：给 decode 写一个小 M 的 NF4 矩阵乘
+
+**为什么 bitsandbytes 慢。** decode 时每一步只为 6 条序列各生成一个 token，所以矩阵乘的形状是 x（6 × 2048）乘以 Wᵀ（2048 × 11008）。M 只有 6，每个权重只用一次，这是典型的 memory-bound：理想情况下时间应该等于「把 4-bit 权重从显存搬一遍」的时间。bitsandbytes 实测只跑到这个理想值的 12%–22%。
+
+**kernel 怎么设计。** 核心原则是权重一直保持打包状态，直到进了寄存器才解开：
+
+<Nf4KernelWalkthrough />
+
+**最贵的一步是查码表。** 第 ③ 步试了五种写法，每种都和同一轮里 bitsandbytes 的耗时比（这台机器的 GPU 时快时慢，绝对时间不可比，比值可比）：
+
+<MeasuredBars
+  title="查码表的五种写法：耗时相对 bitsandbytes"
+  description="gate/up_proj（N = 11008，K = 2048），M = 6。1.00 表示和 bitsandbytes 一样快；越短越好。最后一根是把查表整个删掉（结果是错的），用来量出「除了查表以外」的上限。"
+  series={[{ name: "相对 bitsandbytes 的耗时", color: "#eb6834" }]}
+  unit="倍"
+  decimals={2}
+  better="lower"
+  showRatio={false}
+  groups={[
+    { label: "两次 fp32 gather", values: [1.5] },
+    { label: "15 路 where 树", values: [1.06] },
+    { label: "一次 int32 gather", values: [0.97] },
+    { label: "PTX prmt 置换树", values: [0.95] },
+    { label: "不查表（只计时）", values: [0.34] },
+  ]}
+  footnote="数据：三轮设计空间扫描（块大小、split-K、warp 数、流水级数各取 2 到 3 个值），每种写法取它最好的配置。"
+/>
+
+这张图说明了两件事。第一，瓶颈确实在反量化的计算上，而不在搬数据：只要不查表，同一个 kernel 能快 3 倍，到 40% 带宽。第二，在 Triton 里怎么换查表写法都只是在 bitsandbytes 上下 6% 之内打转。要真正突破，得换成 CUDA 手写：码表放 shared memory、用 `cp.async` 做多级流水、用 `ldmatrix` 把数据直接排成 tensor core 要的格式。
+
+**不是每一层都该用新 kernel。** 按层、按 M 测完，新 kernel 只在一部分情况下赢：
+
+<Nf4RoutingExplorer />
+
+**端到端结果。** 把新 kernel 挂到 bitsandbytes 的入口上（vLLM 每次调用时才去取这个函数，所以替换包里的属性就能生效），然后测真实的 vLLM decode：
+
+| 同时生成的序列数 | bitsandbytes | Triton NF4 | 快多少 |
+| --- | --- | --- | --- |
+| 6 | 29.8 ms / 步 | 24.8 ms / 步 | 1.20 倍 |
+| 24 | 61.4 ms / 步 | 53.5 ms / 步 | 1.15 倍 |
+
+24 条时收益小，是因为 M = 24 被路由回了 bitsandbytes。
+
+**会不会改坏模型？** 贪心解码 20 道题，只有 6 道的 token 完全一样，但分叉都出现在第 15 个 token 之后：这是 split-K 原子加的顺序不固定、末位舍入不同造成的，不是算错。真正的检验是在 GSM8K 全部 1,319 道题上配对评测训练好的模型：
+
+| | bitsandbytes | Triton NF4 |
+| --- | --- | --- |
+| GSM8K 准确率 | 77.3% | 76.4% |
+| 只有这一边做对的题 | 50 道 | 38 道 |
+| 评测总耗时 | 1,970 s | 1,878 s |
+
+McNemar 检验 p = 0.24，差异不显著。评测总耗时只少 4.7%，因为评测里的 prefill、LoRA 和提前结束的序列都不走新 kernel。还差一项没做：bitsandbytes 自己跑两次的噪声有多大。在测出这个噪声底之前，只能说「没有显著变差」，不能说「完全无损」。
+
+### 第 4 步（P3）：训练半步只剩一条路，换累加精度
+
+训练半步 70% 的时间是 GEMM，而 cuBLAS 已经顶到 25.6 TFLOPS 的上限。GeForce 系列的 Ampere 卡有一个容易忽略的限制：tensor core 用 fp32 累加时速率减半，用 fp16 累加才是满速。cuBLAS 经由 PyTorch 调用时永远用 fp32 累加（实测 fp16 输入和 bf16 一样快），所以要验证这一点，只能自己写一个 fp16 累加的 GEMM：
+
+<AccumulateCeiling />
+
+Triton 版本把每 32 个 K 的部分和用 fp16 累加，然后马上加进一个 fp32 的总和。这样既拿到了 fp16 累加的速度，误差又只多了 25%（0.0004 → 0.0005）。下一步是按形状调块大小（尤其是 K = 11008 的 down_proj），再把前向的四个底座 GEMM 接上，配合 fp16 权重和 loss scaling 跑一次短训练，对比 loss 和 reward 曲线。
+
+### 第 5 步：两个「看起来是瓶颈」的假象
+
+计划里还有两项，测完都关掉了。它们的教训比结果更有用：
+
+| 计划 | 为什么觉得有用 | 实测 | 教训 |
+| --- | --- | --- | --- |
+| P2：打开 TRL 的 `use_liger_loss`，把 lm_head 和 loss 融成一个 kernel | profile 里 memcpy 和 softmax 占了 16% | 开和关的步时、峰值显存（7.67 GB）完全一样 | Unsloth 用自己的 `compute_loss` 替换了 TRL 的，Liger 分支从来没被调用；它本来就分块算 logprob |
+| P4：把 fill / copy 这类逐元素 kernel 归到代码行，逐个消掉 | 训练半步里有 3,360 次逐元素 launch | 最大的两项各只有 4 次 launch，正好是 [6 × 400 × 151936] 的 fp32 logits；真实训练代码里的部分不到 3% | 那两项来自 profile 脚本自己写的朴素 `log_softmax`，真实训练不会产生 |
+
+两项其实是同一个错误：profile 测的程序和真正要优化的程序不完全一样。先确认测量工具没有引入自己的开销，再相信它给出的瓶颈。
+
+### 这次的完整账
+
+| 工作项 | 结果 | 状态 |
+| --- | --- | --- |
+| P0 microbenchmark 框架 | 更正了峰值（25.6 不是 51）和空转（4% 不是 37%） | 完成 |
+| P1 Triton NF4 GEMM | decode 快 1.20 倍，准确率无显著变化 | 完成，默认关闭，`AHA_TRITON_NF4=1` 打开 |
+| P2 Liger 融合 loss | 在 Unsloth 下无效 | 关闭 |
+| P3 fp16 累加 GEMM | q/o 1.54 倍、gate/up 1.30 倍、down 1.00 倍，误差几乎不变 | 有条件可行，下一步接入训练 |
+| P4 逐元素 kernel 归因 | 没有值得优化的目标 | 关闭 |
+
+回到本章的方法清单，这次用到的是三张卡片：先测出时间花在哪（第 1 步），用算术强度判断 decode 的 4-bit GEMM 是 memory-bound、训练的 GEMM 是 compute-bound（第 3、4 步），然后分别用「少搬数据」和「换算力」两条路去改。

@@ -1,0 +1,57 @@
+import MultiTaskStructureFigure from "@/components/visualization/ml/recsys/MultiTaskStructureFigure";
+import FusionTradeoffFigure from "@/components/visualization/ml/recsys/FusionTradeoffFigure";
+
+# 多目标排序：shared-bottom、MMoE、PLE 与跷跷板
+
+## 一句话
+
+**一个模型同时预测点击、长播、点赞、关注，底层表示共享、每个目标一个头；共享的方式从一层共享 MLP（shared-bottom）到按任务加门控的专家（MMoE、PLE），排序时再把几个概率融合成一个分。**
+
+短视频和广告的精排几乎都是多目标的。共享省算力、让稀疏目标借到密集目标的表示，代价是任务之间互相拖累：一个涨、一个跌，叫跷跷板（seesaw）。
+
+## 为什么需要它
+
+[DIN](/notes/ml/recsys/din/) 只预测点击。可线上要的不只是点击：KuaiRand 的 is_click 是「点进去看」，单列流里不点也能直接点赞，31% 的点赞没有点击。四个目标各训一个模型，线上要跑四个网络；点赞（1.5%）和关注（0.11%）样本又少，单独训 embedding 学不好。多任务想同时解决这两件事，问题是共享会不会伤到谁。
+
+## 怎么工作
+
+<MultiTaskStructureFigure />
+
+$$
+\mathbf h_t = \sum_{e \in \mathcal E_t} g_{t,e}(\mathbf x)\, f_e(\mathbf x),\quad \mathbf g_t = \operatorname{softmax}(W_t \mathbf x),\qquad \mathcal L = \sum_{t=1}^{4} \operatorname{BCE}\big(y_t,\ \sigma(\text{tower}_t(\mathbf h_t))\big)
+$$
+
+$\mathcal E_t$ 是任务 $t$ 能看到的专家：shared-bottom 只有一个、没有门；MMoE 是全部 4 个共享专家；PLE（这里是单层 CGC）是 1 个自己的专家加 2 个共享专家。kuairank 在 Day 3 最好模型的编码上接这三种结构，四个 BCE 等权相加，按 valid 上四个任务 AUC 的平均取最好的权重。
+
+先看标签。点击和长播的相关系数 0.76，长播 99% 以上嵌在点击里；点击和点赞只有 0.08。train 里点赞正例 75,819 条，关注只有 5,673 条。对同一输入的单任务模型做配对比较（test tab 1，GAUC 差；没给区间的不显著）：
+
+| 结构 | click | long_view | like | follow |
+| --- | --- | --- | --- | --- |
+| 单任务 GAUC | 0.6614 | 0.6845 | 0.6606 | 0.6344 |
+| shared-bottom #30 | −0.0003 | −0.0013 [−0.0016, −0.0009] | −0.0128 [−0.0226, −0.0023] | +0.0006 |
+| MMoE #27 | +0.0008 [+0.0004, +0.0012] | −0.0003 | −0.0163 [−0.0258, −0.0069] | −0.0007 |
+| PLE #31 | +0.0002 | +0.0001 | −0.0104 [−0.0200, −0.0010] | +0.0182 [−0.0077, +0.0448] |
+
+密集的一对完全无损（±0.0013 内），点赞在每种结构上都显著变差：跷跷板落在稀疏、和点击无关的目标上。四个 BCE 等权相加时，正例率 38% 和 26% 的两个任务贡献了大部分梯度，共享表示按它们的需要长；单任务点赞模型整张网络只为点赞服务，反而更好。PLE 给点赞留了一个只属于它的专家，所以伤得最少，关注的点估计也只在 PLE 上为正，但 572 个用户的区间太宽。
+
+<FusionTradeoffFigure />
+
+$$
+\text{score} = \sum_t w_t \log p_t = \log \prod_t p_t^{\,w_t}
+$$
+
+线上只有一个排序分。乘法融合里每个头乘一个常数都不改变排序，只有权重之比有意义（`kurec/fusion.py`）。kuairank 固定 $w_\text{click} = 1$，在 valid 上网格搜索 long_view 和 like 的权重，目标是三个 GAUC 的均值。只用点击头时，点赞的用户内 GAUC 是 0.493，比随机还低一点：会点进去和会点赞几乎无关，这是单一 CTR 分不够用的直接证据。选出的 (1, 0.5, 0.25) 让点赞 +0.042，代价是点击 −0.012、长播 −0.004。
+
+## 代价与取舍
+
+- 跷跷板发生在弱相关的稀疏目标上：密集目标共享无损，点赞被拖累 0.010–0.016。可以按任务调损失权重（如 GradNorm），或者点赞单独建模。
+- 专家结构不一定比 shared-bottom 好：点赞上 MMoE（−0.016）比 shared-bottom（−0.013）还差，只有带任务专属专家的 PLE 缓解了一些。
+- 一个 PLE 代替四个单任务模型，训练成本约 1.8 个单任务模型，点击、长播无损，点赞损失 0.010；值不值看点赞在业务里的权重。
+- 融合权重要和业务一起定：在随机集上重选得到 (1, 0, 0.25)，但随机集上点赞只有 86 个用户，这点差别在噪声里，说不出「有偏数据选的权重不适用」。
+- 长播嵌在点击里，看起来适合 ESMM 的条件分解，但在 kuairank 上它没有改变任何东西，原因见 [CTR、CVR 与 ESMM](/notes/ml/recsys/ctr-cvr-esmm/)。
+
+## 再往下看
+
+这些模型在随机曝光集上为什么分数更低、能不能用 IPS 修回来，见 [偏差来自哪里：视频池、选择与 IPS](/notes/ml/recsys/bias-decomposition-ips/)。PLE 的门和大模型里 MoE 的路由是同一个想法：按输入给专家打 softmax 权重，只是这里每个任务一个门，所有专家都算，而不是每个 token 只挑少数几个。
+
+数据来自个人项目 kuairank 的 `docs/MTL.zh-CN.md` §1、§3、§7，`docs/EXPERIMENT_LOG.md` #27–#32 与 Day 4 结论，`kurec/models/mtl.py` 和 `kurec/fusion.py`。

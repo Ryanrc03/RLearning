@@ -1,0 +1,41 @@
+import AucComputeFigure from "@/components/visualization/ml/recsys/AucComputeFigure";
+
+# AUC 与 GAUC 怎么算
+
+## 一句话
+
+**AUC 按分数排一次序，用正例的排名和减去它的最小可能值，再除以正负对数；GAUC 先按用户把行切成段，每段这样算一个 AUC，跳过只有一类的段，再按曝光数加权平均。**
+
+kuairank 的 `kurec/metrics.py` 就是这三步：平均排名、按组切段、加权。
+
+## 为什么需要它
+
+[ROC 与 AUC](/notes/ml/evaluation/roc-auc/) 给的定义是「正负两两配对，数排对了几对」。test 里一个用户有上千条曝光，两两比较是百万次；test 的 tab 1 一共 276 万行。另一方面，[GAUC](/notes/ml/recsys/gauc-paired-bootstrap/) 只说了「每个用户算一个 AUC 再加权」，没说并列的分数怎么记、只有一类的用户怎么办、按什么加权。这几个细节都会改变数字。
+
+## 怎么工作
+
+<AucComputeFigure />
+
+$$
+\text{AUC} = \frac{R^{+} - n^{+}(n^{+}+1)/2}{n^{+}\, n^{-}},\qquad \text{GAUC} = \frac{\sum_{u} w_u \cdot \text{AUC}_u}{\sum_{u} w_u}
+$$
+
+$R^{+}$ 是正例在升序排名里的排名之和。如果所有正例都排在最底下，它们占据排名 1 到 $n^{+}$，和就是 $n^{+}(n^{+}+1)/2$；每多赢一个负例，这个正例的排名就高一位，$R^{+}$ 就加 1。所以减掉最小值，剩下的恰好是排对的正负对数，除以总对数就是 AUC。分数相同的样本取平均排名，等价于「平局算半对」。
+
+GAUC 先把行按 user_id 排序，找出每个用户的起止位置，在每一段内调用上面的 AUC。只有正例或只有负例的段没有可比的对，直接跳过，所以 GAUC 实际覆盖的行会少于全部。权重默认是该用户的曝光数 $n_u$；也可以按正例数，或者每人一样。
+
+把分组从用户换成「一次请求」，同一个函数就算出按请求的 GAUC：组的键从 user_id 换成 (user_id, 请求时间)。图的最后一步里，同样的 15 个分数，按用户是 0.639，按请求是 0.583。
+
+## 代价与取舍
+
+- 平局要算半对。直接用「正例分数 > 负例分数」计数，会让输出大量相同分数的模型（比如按 tab 的常数）显得更差。
+- 跳过单类用户会改变分母：test 上 click 能算 988 人，点赞 864 人，关注 572 人，随机集的点赞只有 86 人。报 GAUC 时要写明覆盖了多少。
+- 加权方式要和对比对象一致：按曝光数加权偏向重度用户，按正例数加权偏向爱互动的用户。
+- 按请求分组时，一次请求里通常只有 6 条左右，大部分请求没有正例或全是正例，能算的请求更少，数字更抖。
+- GAUC 和 AUC 都只看排序，不看概率准不准；校准要另看 LogLoss 和校准比。
+
+## 再往下看
+
+有了算法，下一个问题是两个模型的 GAUC 差 0.003 算不算数，在 [GAUC 与配对用户 bootstrap](/notes/ml/recsys/gauc-paired-bootstrap/)。
+
+算法与 kuairank 的 `kurec/metrics.py`（`auc`、`per_group_auc`、`gauc`、`evaluate` 的 `request` 参数）一致；覆盖人数来自 `log.parquet`。

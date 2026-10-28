@@ -105,12 +105,34 @@ import Rlhf from "@/content/ml/post-training/rlhf.mdx";
 import Ppo from "@/content/ml/post-training/ppo.mdx";
 import Grpo from "@/content/ml/post-training/grpo.mdx";
 import RewardHacking from "@/content/ml/post-training/reward-hacking.mdx";
+import KlDivergence from "@/content/ml/post-training/kl-divergence.mdx";
+import Grpo3060Project from "@/content/ml/post-training/grpo-3060-project.mdx";
 import LlmAsJudge from "@/content/ml/llm-engineering/llm-as-judge.mdx";
 import EvalHarness from "@/content/ml/llm-engineering/eval-harness.mdx";
 import CtrCvrEsmm from "@/content/ml/recsys/ctr-cvr-esmm.mdx";
 import FeatureCrossing from "@/content/ml/recsys/feature-crossing.mdx";
+import KuairandDataOverview from "@/content/ml/recsys/kuairand-data-overview.mdx";
+import TrainingStep from "@/content/ml/recsys/training-step.mdx";
+import AucGaucComputation from "@/content/ml/recsys/auc-gauc-computation.mdx";
 import SampleFeatureJoin from "@/content/ml/recsys/sample-feature-join.mdx";
+import PointInTimeSplit from "@/content/ml/recsys/point-in-time-split.mdx";
+import GaucPairedBootstrap from "@/content/ml/recsys/gauc-paired-bootstrap.mdx";
+import ExposureBiasRandomEval from "@/content/ml/recsys/exposure-bias-random-eval.mdx";
+import IdEmbeddingOneEpoch from "@/content/ml/recsys/id-embedding-one-epoch.mdx";
+import Din from "@/content/ml/recsys/din.mdx";
+import BiasDecompositionIps from "@/content/ml/recsys/bias-decomposition-ips.mdx";
+import MultiTaskPle from "@/content/ml/recsys/multi-task-ple.mdx";
 import TTest from "@/content/ml/evaluation/t-test.mdx";
+import AbTestingOverview from "@/content/ml/ab-testing/overview.mdx";
+import CentralLimitTheorem from "@/content/ml/ab-testing/central-limit-theorem.mdx";
+import HypothesisTesting from "@/content/ml/ab-testing/hypothesis-testing.mdx";
+import RejectionRegion from "@/content/ml/ab-testing/rejection-region.mdx";
+import GachaExample from "@/content/ml/ab-testing/gacha-example.mdx";
+import CausalInferenceOverview from "@/content/ml/causal-inference/overview.mdx";
+import Correlation from "@/content/ml/causal-inference/correlation.mdx";
+import LinearRegression from "@/content/ml/causal-inference/linear-regression.mdx";
+import DifferenceInDifferences from "@/content/ml/causal-inference/difference-in-differences.mdx";
+import MinimumWageExample from "@/content/ml/causal-inference/minimum-wage-example.mdx";
 import { getNote, getSeriesNeighbors, noteEntries } from "@/content/notes";
 import { getNoteToc } from "@/lib/content";
 import TableOfContents from "@/components/layout/TableOfContents";
@@ -222,12 +244,34 @@ const noteComponents = {
   "ml/post-training/ppo": Ppo,
   "ml/post-training/grpo": Grpo,
   "ml/post-training/reward-hacking": RewardHacking,
+  "ml/post-training/kl-divergence": KlDivergence,
+  "ml/post-training/grpo-3060-project": Grpo3060Project,
   "ml/llm-engineering/llm-as-judge": LlmAsJudge,
   "ml/llm-engineering/eval-harness": EvalHarness,
   "ml/recsys/ctr-cvr-esmm": CtrCvrEsmm,
   "ml/recsys/feature-crossing": FeatureCrossing,
+  "ml/recsys/kuairand-data-overview": KuairandDataOverview,
+  "ml/recsys/training-step": TrainingStep,
+  "ml/recsys/auc-gauc-computation": AucGaucComputation,
   "ml/recsys/sample-feature-join": SampleFeatureJoin,
+  "ml/recsys/point-in-time-split": PointInTimeSplit,
+  "ml/recsys/gauc-paired-bootstrap": GaucPairedBootstrap,
+  "ml/recsys/exposure-bias-random-eval": ExposureBiasRandomEval,
+  "ml/recsys/id-embedding-one-epoch": IdEmbeddingOneEpoch,
+  "ml/recsys/din": Din,
+  "ml/recsys/bias-decomposition-ips": BiasDecompositionIps,
+  "ml/recsys/multi-task-ple": MultiTaskPle,
   "ml/evaluation/t-test": TTest,
+  "ml/ab-testing/overview": AbTestingOverview,
+  "ml/ab-testing/central-limit-theorem": CentralLimitTheorem,
+  "ml/ab-testing/hypothesis-testing": HypothesisTesting,
+  "ml/ab-testing/rejection-region": RejectionRegion,
+  "ml/ab-testing/gacha-example": GachaExample,
+  "ml/causal-inference/overview": CausalInferenceOverview,
+  "ml/causal-inference/correlation": Correlation,
+  "ml/causal-inference/linear-regression": LinearRegression,
+  "ml/causal-inference/difference-in-differences": DifferenceInDifferences,
+  "ml/causal-inference/minimum-wage-example": MinimumWageExample,
 };
 
 export const dynamicParams = false;
