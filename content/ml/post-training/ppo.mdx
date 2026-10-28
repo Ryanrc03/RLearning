@@ -1,0 +1,600 @@
+import CodeBlock from "@/components/visualization/sketch/CodeBlock";
+import RoleArchitectureFigure from "@/components/visualization/ml/post-training/ppo/RoleArchitectureFigure";
+import AdvantageFigure from "@/components/visualization/ml/post-training/ppo/AdvantageFigure";
+import GaeFigure from "@/components/visualization/ml/post-training/ppo/GaeFigure";
+import ClippingFigure from "@/components/visualization/ml/post-training/ppo/ClippingFigure";
+import PipelineFigure from "@/components/visualization/ml/post-training/ppo/PipelineFigure";
+import PpoVsGrpoFigure from "@/components/visualization/ml/post-training/ppo/PpoVsGrpoFigure";
+
+# PPO：从 Actor–Critic 到 LLM 强化学习
+
+**PPO（Proximal Policy Optimization，近端策略优化）是一种让模型利用自己采样的结果学习、并用 clipped objective 抑制过大更新激励的 policy optimization 方法。** Schulman 等人在 2017 年提出它；本篇主要讲 PPO-Clip，以及它在 LLM 强化学习中的常见 Actor–Critic 用法。
+
+这篇从 [SFT](/notes/ml/post-training/sft/) 的局限出发，依次拆开四种模型角色、Value、Advantage、GAE、Clipping、Reference KL，再把它们接成完整训练循环，最后说明 [GRPO](/notes/ml/post-training/grpo/) 为什么拿掉 Critic。它承接 [RLHF](/notes/ml/post-training/rlhf/) 的流程概览，补上其中 PPO 如何实际更新参数的细节。
+
+全文统一使用 `What is 12 × 13?`，正确答案为 `156`。为了手算，把一次回答抽象成**三个生成决策**，不声称 `156` 在任何真实 tokenizer 中恰好对应三个 token。文中的 Value、Reward、概率、超参数和组内回答都是**教学示例，不是论文实验结果或推荐默认值**。算法定义参考 [PPO 原论文](https://arxiv.org/abs/1707.06347)、[GAE 原论文](https://arxiv.org/abs/1506.02438) 和 [DeepSeekMath](https://arxiv.org/abs/2402.03300)。
+
+## 1. 为什么 LLM 需要 PPO？
+
+[SFT](/notes/ml/post-training/sft/) 通过最小化参考答案的负对数似然，让模型模仿示范。给定 prompt $x$ 和答案 $y=(y_1,\ldots,y_T)$：
+
+$$
+L_{\mathrm{SFT}}(\theta)
+=-\log\pi_\theta(y\mid x)
+=-\sum_{t=1}^{T}\log\pi_\theta(y_t\mid x,y_{<t}).
+$$
+
+它提供了清晰的逐 token 监督，但训练信号依赖参考文本。数学题可能有多个正确解法，代码也可能有不同实现：我们还希望模型自己尝试，再根据答案正确性、单元测试或人类偏好调整生成分布。强化学习把“生成的结果有多好”直接接到优化目标上。
+
+这不意味着 SFT 无法学推理，也不意味着 RL 一定胜过 SFT。两者给出的监督形式不同：SFT 告诉模型“示范怎么写”，RL 根据模型采样结果提供评价。PPO 是实现后者的一种优化方法，不是奖励来源，也不是唯一选择。
+
+### 从 RL 概念映射到一次回答
+
+| RL 概念 | LLM 中的含义 | 本文例子 |
+| --- | --- | --- |
+| State $s_t$ | prompt 加已生成的 token prefix | 题目，以及当前已经写出的解答 |
+| Action $a_t$ | 采样的下一个 token | 三个简化生成决策中的一步 |
+| Policy $\pi_\theta$ | 给定 prefix 的下一 token 概率分布 | Actor 的 softmax 分布 |
+| Episode | 从开始生成到回答结束的一条轨迹 | 一次完整回答 |
+| Reward $r_t$ | 这一步得到的即时奖励 | 仅最后一步得到正确性奖励 1 |
+| Return $G_t$ | 从当前动作起的折扣累计奖励 | 三步例子中各位置都是 1 |
+| Value $V^\pi(s_t)$ | 当前策略从此状态出发的预期 Return | Critic 估计 0.4、0.6、0.8 |
+
+对长度为 $T$ 的有限回答，定义：
+
+$$
+G_t=\sum_{k=t}^{T}\gamma^{k-t}r_k,
+\qquad 0\leq\gamma\leq1.
+$$
+
+$\gamma$ 是 discount factor；越接近 1，越保留远处奖励的影响。这里的 $r_t$ 可以是任务奖励，也可以是后面加入 KL 后的 shaped reward，要先明确用的是哪一种。
+
+传统人类偏好 RLHF 常见顺序是 **Pre-training → SFT → Reward Modeling → PPO**：先得到能回答问题的策略，用偏好数据训练评分器，再让策略对自己生成的回答做强化学习。数学、代码任务也可以直接用规则验证答案、执行测试，省去神经网络 Reward Model 的训练；[RLHF 笔记](/notes/ml/post-training/rlhf/) 解释奖励模型与偏好数据的关系。
+
+## 2. PPO 为什么需要四种模型角色？
+
+<RoleArchitectureFigure />
+
+$$
+\underbrace{\pi_\theta(a_t\mid s_t)}_{\text{Actor：动作分布}},\quad
+\underbrace{V_\phi(s_t)}_{\text{Critic：预期回报}},\quad
+\underbrace{R_\psi(x,y)}_{\text{Reward Model：结果评分}},\quad
+\underbrace{\pi_{\mathrm{ref}}(a_t\mid s_t)}_{\text{Reference：参考分布}}.
+$$
+
+先点击图里的模型，查看各自输入、输出与训练状态。它们回答的是不同的问题：Actor 决定“下一步写什么”，Critic 预测“从这里继续写，通常能拿多少回报”，Reward Model 评价“这份完成的答案质量如何”，Reference 给出“初始策略如何分配概率”。
+
+| 模型角色 | 输入 → 输出 | 常见初始化 | PPO 阶段是否训练 |
+| --- | --- | --- | --- |
+| Actor / Policy | prefix → 下一 token 分布 | SFT Model | 是 |
+| Critic / Value | prefix → 一个标量 Value | 预训练或 SFT Backbone + Value Head | 是 |
+| Reward Model | prompt + 完整回答 → 质量分 | 偏好数据训练的评分模型 | 通常冻结；也可替换为规则 |
+| Reference Model | prefix → token 概率 | 冻结的初始 Actor，例如 SFT 策略 | 通常冻结 |
+
+**Actor 是最终需要提升生成能力的模型。** 它并不直接输出 Reward，而是输出词表 logits，形成下一 token 分布；从分布采样得到回答，然后才得到训练反馈。
+
+**Reward Model 是评分器。** 它可能给一段回答输出一个标量偏好分数；规则评分器则可能检查最终答案是否为 `156`，正确给 1，错误给 0。Reward 的尺度由评分机制决定，并不天然是概率。
+
+**Critic 是预测器。** 它在动作发生之前读取当前 prefix，估计遵循采样策略继续生成的预期未来回报。即便最后答对，早期 prefix 也可能只有中等成功率。Critic 训练时拟合的是 Return target；它不是另一个只负责检查最终答案对错的 Reward Model。加入 KL shaping 后，它还需要估计包含 KL 成本的回报。
+
+**Reference 是长期锚点。** 它保留初始策略的语言行为，给 RL 目标提供偏离成本。它并不能彻底阻止 reward hacking；奖励本身的漏洞仍要通过 [奖励设计](/notes/ml/post-training/reward-hacking/) 处理。
+
+### Old Policy 是第五种用途，但不等于第五套完整模型
+
+$\pi_{\mathrm{old}}$ 是**生成当前这批 rollout 时的行为策略**。优化时需要它对已经采样动作的概率，通常在 rollout 中保存 `old_logps`，随后保持不变；不一定再常驻一份独立模型。分布式采样或异步系统也可能保留明确的策略快照来保证版本一致。
+
+Reference 与 Old 的更新时间不同：Reference 通常跨许多轮保持冻结；Old 随新一轮 rollout 刷新。当初始轮开始时两者可以相同，训练一段时间后通常不同。第 5 节的 ratio 分母是 **Old**，第 6 节的偏离成本才用 **Reference**。
+
+“四个模型”描述四种典型**逻辑角色**，不要求四套完整 Backbone。Actor 与 Critic 可以共享 Transformer，再分别接 LM Head 和 Value Head，也可以分开部署。共享能省一部分参数和计算，但两个训练目标会共同改变表示；分开则便于独立优化，成本通常更高。PPO 本身也不要求神经网络 Reward Model 或 Reference，后两者属于常见 LLM RLHF 设计。
+
+[LoRA](/notes/ml/post-training/lora/) 可以只更新 Actor 或 Critic 的部分参数。它改变可训练参数集合，不改变下面的 PPO objective 或 Value regression 目标。
+
+## 3. Value Function 和 Advantage 到底是什么？
+
+<AdvantageFigure />
+
+$$
+V^\pi(s_t)=\mathbb E_\pi[G_t\mid s_t],
+\qquad
+Q^\pi(s_t,a_t)=\mathbb E_\pi[G_t\mid s_t,a_t],
+$$
+
+$$
+\boxed{A^\pi(s_t,a_t)=Q^\pi(s_t,a_t)-V^\pi(s_t).}
+$$
+
+$V$ 对“从这个状态出发可能采取的动作”取平均；$Q$ 则固定当前动作，再对未来轨迹取平均。Advantage 问的是：**在同一个状态下，这个动作的预期结果比策略通常的表现好多少？** 真实的 $V^\pi$、$Q^\pi$ 一般未知，Critic 和采样回报用来估计它们。
+
+Reward、Value、Advantage 要分清时间与含义：Reward 是环境对这次行为给出的即时反馈；Value 是行为发生前对未来 Return 的预测；Advantage 是相对于基线的好坏。因此 Advantage 不等于 Reward，也不是正确性的另一种名称。
+
+在图里修改 Return 和 Critic Prediction：$G>V$ 时 Advantage 为正，优化倾向于提高采样动作的概率；$G<V$ 时为负，倾向于降低；两者相等时，这个样本不给 policy 提供该项方向信号。这里说的是样本的优化方向；共享参数和其他样本会同时影响最终概率。
+
+### 用 `12 × 13 = 156` 手算一次
+
+假设正确回答得到终局奖励 1，暂时不加入 KL，取 $\gamma=1$：
+
+$$
+r=[0,0,1],\qquad V_\phi(s_1)=0.4,\quad
+V_\phi(s_2)=0.6,\quad V_\phi(s_3)=0.8.
+$$
+
+三个状态之后最终都获得这一个奖励，所以：
+
+$$
+G_1=G_2=G_3=1,\qquad
+\hat A_t^{\mathrm{MC}}=G_t-V_\phi(s_t).
+$$
+
+| 简化决策 | Critic Prediction | 实际 Return | Monte Carlo Advantage |
+| --- | --- | --- | --- |
+| $t=1$ | 0.4 | 1 | $1-0.4=0.6$ |
+| $t=2$ | 0.6 | 1 | $1-0.6=0.4$ |
+| $t=3$ | 0.8 | 1 | $1-0.8=0.2$ |
+
+第一步的预测基线较低，实际成功比原先预期高出更多；第三步原本已经很有希望成功，成功带来的“超预期”较少。**这不证明第一步对正确答案有三倍的因果贡献。** 它只是给定当前估计器的一次相对回报估计。
+
+这里用一次实际 Return 代替 $Q$ 的期望，属于 Monte Carlo Advantage 估计。它直观，但必须等到结尾，长回答的采样波动也可能很大。真实 PPO 常用 GAE，把实际奖励与 Critic 的中间预测结合起来。
+
+## 4. GAE：PPO 如何计算每个 Token 的 Advantage？
+
+<GaeFigure />
+
+$$
+\delta_t=r_t+\gamma V_{\mathrm{old}}(s_{t+1})-V_{\mathrm{old}}(s_t),
+$$
+
+$$
+\boxed{
+\hat A_t^{\mathrm{GAE}(\gamma,\lambda)}
+=\sum_{l=0}^{T-t}(\gamma\lambda)^l\delta_{t+l}
+=\delta_t+\gamma\lambda\hat A_{t+1},
+\qquad \hat A_{T+1}=0.
+}
+$$
+
+这里 $T$ 是本段轨迹最后一个动作的索引，所以求和从 $l=0$ 到 $T-t$，**包含最后的 TD residual**。$V_{\mathrm{old}}$ 是在本轮优化前保存的 Critic 预测，而不是每个 minibatch 更新后重新变化的目标。
+
+TD Error $\delta_t$ 比较两种对当前回报的估计：原预测 $V(s_t)$，以及“已经拿到的 $r_t$ + 下一状态的折扣预测”。正 TD residual 表示这一步的新信息比原预测更好。GAE 再把当前及之后的 residual 按 $(\gamma\lambda)^l$ 加权，形成每个位置的 Advantage。[GAE 原论文](https://arxiv.org/abs/1506.02438) 给出这种估计器及其偏差、方差取舍。
+
+- $\gamma$ 控制未来奖励的折扣；改变它也会改变所评估的折扣回报。
+- $\lambda$ 控制沿轨迹向后看多远。$\lambda=0$ 只用当前的一步 TD Error；接近 1 时保留更多后续 residual。
+- 较小的 $\lambda$ 往往降低长轨迹采样方差，但更依赖不准确的 Value；较大的 $\lambda$ 减少这部分 bootstrap 依赖，却可能增加方差。实际效果仍取决于奖励与 Critic 质量。
+
+### 三步反向递推
+
+继续使用 $V=[0.4,0.6,0.8]$、$r=[0,0,1]$。回答真正结束，后续不再有奖励，因此 $V(s_4)=0$；取 $\gamma=\lambda=1$：
+
+$$
+\begin{aligned}
+\delta_1&=0+0.6-0.4=0.2,\\
+\delta_2&=0+0.8-0.6=0.2,\\
+\delta_3&=1+0-0.8=0.2.
+\end{aligned}
+$$
+
+$$
+\begin{aligned}
+\hat A_3&=0.2,\\
+\hat A_2&=0.2+1\cdot1\cdot0.2=0.4,\\
+\hat A_1&=0.2+1\cdot1\cdot0.4=0.6.
+\end{aligned}
+$$
+
+这恰好等于上一节的 Monte Carlo 结果。原因是 $\lambda=1$ 时 residual 中相邻的 Value 项望远镜式相消，真正 terminal 的末端 Value 又是 0，最终得到 $G_t-V(s_t)$。这只是这个边界条件下的等价，不是说所有 GAE 都等于最终 Reward 减 Value。
+
+在图中把 $\lambda$ 改成 0.5，得到 $\hat A=[0.35,0.30,0.20]$：第一步为 $0.2+0.5\times0.2+0.25\times0.2=0.35$。终局奖励相同，估计器却变了；它更依赖中途的 Value 预测。
+
+Critic 的回归目标可构建为：
+
+$$
+\boxed{\hat G_t=\hat A_t+V_{\mathrm{old}}(s_t).}
+$$
+
+在 $\lambda=1$ 的三步例子中 target 是 $[1,1,1]$；$\lambda=0.5$ 时为 $[0.75,0.90,1.00]$。一般的 $\hat G$ 是 bootstrap 的 $\lambda$-return target，不必等于一次 rollout 的原始 Monte Carlo Return。
+
+### Terminal 与 truncation 不能混为一谈
+
+真正 terminal 表示任务结束，下一状态未来回报为 0，不能继续 bootstrap。若只是采样窗口、时间或长度上限把一个本应继续的 episode **截断**，通常仍需用最后 prefix 的 Value bootstrap；但 GAE 的递推不能穿越 rollout 边界、padding 或下一条独立回答。
+
+因此实现常区分两个 mask：**bootstrap mask** 决定下一状态 Value 是否有效，**trace mask** 决定是否还有本段同一 episode 的下一个 residual。截断边界可以是前者为 1、后者为 0。对于 LLM，达到最大生成长度究竟算任务失败并终止，还是仅截断采样，需要由任务定义决定，不能看见“到长度上限”就一律设置 Value 为 0。
+
+## 5. PPO 的核心：Policy Ratio 和 Clipped Objective
+
+<ClippingFigure />
+
+$$
+\rho_t(\theta)
+=\frac{\pi_\theta(a_t\mid s_t)}{\pi_{\mathrm{old}}(a_t\mid s_t)}
+=\exp\!\left(\log\pi_\theta(a_t\mid s_t)-\log\pi_{\mathrm{old}}(a_t\mid s_t)\right),
+$$
+
+$$
+\boxed{
+J_{\mathrm{PPO}}(\theta)
+=\mathbb E_{t\sim\mathrm{rollout}}\left[
+\min\!\left(
+\rho_t\hat A_t,
+\operatorname{clip}(\rho_t,1-\epsilon,1+\epsilon)\hat A_t
+\right)\right].
+}
+$$
+
+分母是在 rollout 时保存的旧概率；分子是更新中的 Actor 对**同一个 prefix、同一个已采样 token**重新计算的概率。这里没有重新生成答案。新旧策略相同时 ratio 为 1；旧概率 0.2、新概率 0.3 时 ratio 为 1.5。
+
+为什么需要 ratio？采样来自 Old，但我们想更新 Current。它是 importance sampling 的逐动作概率比，让 surrogate objective 能在旧数据上衡量新策略的改变。它不是完整轨迹的概率比，也不意味着旧状态分布自动变成了新策略的状态分布；不能因此无限复用任意陈旧数据。
+
+如果只最大化 $\rho_t\hat A_t$，同一批数据上多次更新就可能让策略迅速偏离行为策略。PPO-Clip 取原始项与 clipped 项中较小者，给这种优化添加保守的改善激励。这是**要最大化**的 surrogate objective，实际代码一般最小化 $L_\pi=-J_{\mathrm{PPO}}$。[PPO 原论文](https://arxiv.org/abs/1707.06347) 还讨论 KL penalty 变体，本篇聚焦 clipping 版本。
+
+### Positive Advantage：只截断“继续提高”的收益
+
+取 $\hat A=1$、$\epsilon=0.2$。当 ratio 为 1.5：
+
+$$
+\rho\hat A=1.5,\qquad
+\operatorname{clip}(1.5,0.8,1.2)\hat A=1.2,
+\qquad \min(1.5,1.2)=1.2.
+$$
+
+这个动作比预期好，希望增加概率；但 ratio 超过 1.2 后，继续增加不再改善**这个样本的 PPO 项**。若 ratio 降到 0.6，反而取 $\min(0.6,0.8)=0.6$，仍保留纠正错误方向的梯度。正 Advantage 不是两侧都变平。
+
+### Negative Advantage：只截断“继续降低”的收益
+
+取 $\hat A=-1$，ratio 为 0.6：
+
+$$
+\rho\hat A=-0.6,\qquad
+\operatorname{clip}(0.6,0.8,1.2)\hat A=-0.8,
+\qquad \min(-0.6,-0.8)=-0.8.
+$$
+
+这个动作比预期差，希望降低概率；ratio 低于 0.8 后，再往下不再提供该项额外收益。若 ratio 升到 1.5，则 $\min(-1.5,-1.2)=-1.5$，仍会惩罚向错误方向的变化。
+
+图中 Unclipped 是 $\rho A$，Clipped Term 是 $\operatorname{clip}(\rho)A$，最终 PPO 曲线是两者的 min。切换 Advantage 正负，观察变平的一侧怎样交换；调整 $\epsilon$ 后边界是 $1\pm\epsilon$，默认示例对应 0.8 与 1.2。
+
+**Clipping 不保证 ratio 永远落在区间内，不直接约束参数，也不保证全部 token 概率或 KL 都足够小。** 同一参数受多个样本、Critic 共享梯度和其他目标影响，某个 token 的概率仍可能继续变化；有限学习率也可能一步跨过边界。实践中还会监控新旧策略 approximate KL、clip fraction、ratio 分布，必要时用 early stopping 等额外措施。
+
+## 6. Clipping 和 KL Penalty 不是一回事
+
+$$
+\rho_t=\frac{\pi_\theta(a_t\mid s_t)}{\pi_{\mathrm{old}}(a_t\mid s_t)},
+\qquad
+D_{\mathrm{KL}}\!\left(\pi_\theta(\cdot\mid s_t)\|\pi_{\mathrm{ref}}(\cdot\mid s_t)\right)
+=\sum_a\pi_\theta(a\mid s_t)\log\frac{\pi_\theta(a\mid s_t)}{\pi_{\mathrm{ref}}(a\mid s_t)}.
+$$
+
+| 比较 | 参照是谁 | 主要目的 | 何时改变参照 |
+| --- | --- | --- | --- |
+| PPO ratio / clipping | 产生本批数据的 Old Policy | 抑制本轮优化的过大改善激励 | 下一轮 rollout 刷新 Old |
+| Reference KL | 初始或选定的 Reference Policy | 给整个 RL 阶段的策略漂移增加成本 | 通常长时间冻结 |
+
+上面的 KL 对词表分布求和，是完整的 distribution-level divergence，在通常的支持集条件下非负。LLM 中为了降低计算与存储开销，也会在采样 token 上使用估计量。传统 RLHF 常见做法是在 rollout 上构建：
+
+$$
+k_t^{\mathrm{sample}}
+=\log\pi_{\mathrm{old}}(a_t\mid s_t)-\log\pi_{\mathrm{ref}}(a_t\mid s_t),
+$$
+
+$$
+\boxed{
+r_t^{\mathrm{shaped}}=r_t^{\mathrm{task}}-\beta k_t^{\mathrm{sample}},
+\qquad \beta\geq0.
+}
+$$
+
+注意这里用 **Old 的 log probability**：这是采样后冻结在本批数据上的 reward shaping，不是每次 minibatch 随 Current 重算的 reward。对固定状态、动作从 $\pi_{\mathrm{old}}$ 采样时，$k_t^{\mathrm{sample}}$ 的期望等于 $D_{\mathrm{KL}}(\pi_{\mathrm{old}}\|\pi_{\mathrm{ref}})$；它不是训练若干步后 Current 对 Reference 的精确 KL。
+
+单个样本的 log-ratio 可以为负。例如 Old 给某 token 概率 0.1、Reference 给 0.2，差值是 $\log(0.5)<0$；即便分布级 KL 非负，不能把每个采样差值都说成非负距离。不同 KL estimator 也有不同性质，不能混用名称和数值解释。
+
+若本题任务奖励仍是 $[0,0,1]$，逐 token 的 sampled log-ratio 恰好都是 0.1，且取教学值 $\beta=0.2$，shaped reward 就变为 $[-0.02,-0.02,0.98]$。在 $\gamma=1$ 下，三个位置的实际 shaped Return 分别是 0.94、0.96、0.98；前面无 KL 时 $[1,1,1]$ 的计算不能原封不动沿用。
+
+也可以把 Reference KL 直接加入可微损失，而不是扣进 reward；这会改变它进入梯度的路径。两者都是实现设计，不能不加区分地双重惩罚。**PPO 算法本身不强制要求一个独立 Reference Model。** 它和 RLHF reference regularization 是两个层次的问题。
+
+## 7. PPO 每一轮实际怎么训练？
+
+<PipelineFigure />
+
+$$
+L_\pi=-J_{\mathrm{PPO}},\qquad
+L_V=\frac12\,\mathbb E_t\left[\left(V_\phi(s_t)-\operatorname{stopgrad}(\hat G_t)\right)^2\right].
+$$
+
+图里的流程分成两段：先用当前策略收集数据并冻结统计，再在这份数据上更新参数。一次 rollout 后的多个 PPO epoch 都属于后一段。Critic 的 $\hat G$ 来自真实奖励与 bootstrap 估计，不能在它学习时把 target 一起追着改。
+
+### Step 0 — 初始化
+
+准备 SFT Actor、带 Value Head 的 Critic、冻结 Reference、冻结 Reward Model 或规则 reward function，以及 prompt dataset。Reference 通常复制初始 Actor；Critic 的初始化来源不表示它已经预测准确，Value Head 仍需学习。定义终止规则、截断处理、生成配置、奖励尺度、$\gamma$、$\lambda$、$\epsilon$ 和 $\beta$。
+
+### Step 1 — Rollout Generation
+
+抽一批 prompt，用行为策略 sampling 生成回答。保存完整输入 token IDs、生成 token IDs、attention mask、只覆盖有效生成动作的 response mask、EOS / terminal / truncation 信息和逐动作 `old_logps`。多个长度不同的回答会 padding，prompt 与 padding 都不能成为 policy loss 的训练位置。
+
+`old_logps` 必须对应**真正用于采样的行为分布**。如果 sampling 使用 temperature 或改变支持集的 top-k / top-p，概率计算就必须与其一致；不能用一个经过截断的分布采样，再把未处理的原始 softmax 概率冒充采样概率。
+
+### Step 2 — Reward Evaluation
+
+评分器读取 prompt 与完整回答，得到 sequence score。终局奖励通常放在最后一个有效 response 动作上；Reference 在相同 prefix 上计算所选 token 的 log probability，构造逐 token KL shaping。不同任务也可能在推理过程给出中间奖励。
+
+### Step 3 — Critic Forward
+
+Critic 对每个动作之前的状态给出 $V_{\mathrm{old}}(s_t)$。张量位置必须与被采样动作对齐：预测下一个 token 的 prefix hidden state 对应同一状态的 Value。对需要 bootstrap 的截断，还要保存最后一个动作之后的 $V(s_{T+1})$；真正终止则取 0。
+
+### Step 4 — Compute Advantages and Returns
+
+在本批数据上从后往前算 GAE，再构建 $\hat G=\hat A+V_{\mathrm{old}}$。这些统计量全部 detach。若选择 Advantage whitening / normalization，只在有效 response 位置上做，且应**先构建未归一化的 Return target**，再归一化用于 Actor 的 Advantage，避免改坏 Critic 目标。
+
+### Step 5 — Actor Update
+
+在保存的回答上做 teacher-forced forward，重新计算 `new_logps`，用它与固定 `old_logps` 算 ratio。最大化 clipped surrogate，相当于最小化 $L_\pi$，梯度只沿 Current 的概率流向 Actor。
+
+### Step 6 — Critic Update
+
+重新计算 $V_\phi(s_t)$，拟合固定 target $\hat G_t$。Value loss 是回归损失，Actor loss 是带 Advantage 权重和 clipping 的策略损失。即使最终 Reward 相同，不同状态的 Value residual 也可能不同。
+
+例如 target 是 $[1,1,1]$，当前 Value 仍为 $[0.4,0.6,0.8]$，半 MSE 为：
+
+$$
+L_V=\frac12\frac{(0.4-1)^2+(0.6-1)^2+(0.8-1)^2}{3}
+=\frac{0.56}{6}\approx0.09333.
+$$
+
+最小化它会把当前 Value 向 1 推。若 $\hat A=0.4$，更新前 $\rho=1$，则这个动作的 policy objective 是 0.4；此时 Actor 学“提高动作概率”，Critic 学“预测回报更准”，两者不是拟合同一个标签。
+
+### Step 7 — 多次 Mini-batch Optimization
+
+把固定 rollout 分成 minibatch，打乱次序，重复若干 PPO epoch。每次只重算 Current 的 log probabilities 和 Values；**不重新生成回答，不更新 old log probabilities，不重算会随 Critic 改变的 GAE target**。学习率、epoch 数和 early stopping 共同影响新旧策略的偏离。
+
+若 Actor 与 Critic 参数完全分开，可以对各自 loss 分别 backward 和 optimizer step。若共享 Backbone，通常构建联合损失 $L=L_\pi+c_VL_V$，一次 backward 后更新共享参数，避免先 step 一个模型，再沿另一个使用旧参数版本的计算图反向传播。Entropy bonus、Value clipping 等是可选扩展，本教学流程未加入。
+
+### Step 8 — 下一轮 Rollout
+
+本批优化结束后，用更新后的 Actor 生成新回答，建立新的 Old 统计，再重复流程。Reference 仍保持其选定的锚点。PPO 是这种不断采样、有限复用、再次采样的过程，不能把一份初始离线回答无限训练就称作标准 on-policy PPO。
+
+## 8. PPO 伪代码
+
+下面是**教学伪代码，不是可直接运行的完整 Trainer**。为突出因果关系，它省略分布式训练、梯度累积、混合精度和 checkpoint。`[B, T]` 表示 batch 内 padding 到相同长度的生成动作；所有 log probability / Value 都与动作前的 prefix 对齐。
+
+<CodeBlock lang="python" title="教学伪代码（非完整 Trainer）">{`
+# reference / reward_model parameters are frozen for the PPO stage.
+# Actor and critic remain trainable; no_grad below only freezes rollout statistics.
+def masked_mean(x, mask):
+    # Replace invalid entries before reduction; avoid 0 * NaN.
+    x = torch.where(mask.bool(), x, torch.zeros_like(x))
+    return x.sum() / mask.sum().clamp_min(1)
+
+
+def gae(rewards, old_values, next_old_values,
+        response_mask, bootstrap_mask, trace_mask, gamma, lam):
+    # All inputs: [B, T]. Padding has response_mask=0.
+    # bootstrap_mask=0 at true terminal; may be 1 at truncation.
+    # trace_mask=1 only if the next residual is in this same episode/segment.
+    advantages = torch.zeros_like(rewards)
+    carry = torch.zeros_like(rewards[:, 0])
+    for t in reversed(range(rewards.shape[1])):
+        delta = (rewards[:, t]
+                 + gamma * bootstrap_mask[:, t] * next_old_values[:, t]
+                 - old_values[:, t])
+        carry = delta + gamma * lam * trace_mask[:, t] * carry
+        carry = torch.where(response_mask[:, t].bool(), carry, 0.0)
+        advantages[:, t] = carry
+    returns = advantages + old_values
+    return advantages.detach(), returns.detach()
+
+
+for prompts in dataloader:
+    # 1. Collect one fixed batch with the current behavior policy.
+    with torch.no_grad():
+        batch = rollout(actor, prompts, sampling_config)
+        # tokens, attention_mask, response_mask: prompt/padding excluded.
+        # terminal/truncation and prefix states determine the two masks.
+        mask = batch.response_mask
+        old_logps = batch.behavior_logps.detach().clone()
+        scores = reward_fn(prompts, batch.responses)
+        ref_logps = action_logps(reference, batch).detach()
+        old_values, next_old_values = aligned_values(critic, batch)
+        old_values = old_values.detach().clone()
+        next_old_values = next_old_values.detach().clone()
+
+        sampled_kl = old_logps - ref_logps
+        shaped_rewards = torch.where(
+            mask.bool(), -beta * sampled_kl, 0.0
+        )
+        # Adds sequence score to each row's LAST VALID response action.
+        shaped_rewards = add_terminal_scores(shaped_rewards, scores, mask)
+        advantages, returns = gae(
+            shaped_rewards, old_values, next_old_values,
+            mask, batch.bootstrap_mask, batch.trace_mask, gamma, lam
+        )
+        # Optional: masked normalization ONLY for the actor advantages.
+        # returns were already constructed from the unnormalized advantages.
+        actor_advantages = advantages.detach()
+        frozen_rollout = pack(
+            batch, old_logps, actor_advantages, returns.detach()
+        )
+
+    # 2. Reuse these tokens and detached targets; do not call rollout here.
+    for epoch in range(ppo_epochs):
+        for mb in shuffled_minibatches(frozen_rollout):
+            # Fresh differentiable forwards under CURRENT parameters.
+            # Logps use the SAME probability convention as behavior_logps.
+            new_logps = action_logps(actor, mb, sampling_config)
+            new_values = aligned_current_values(critic, mb)
+            m = mb.response_mask
+            # Set invalid log-ratios to 0 before exp, preventing padding overflow.
+            log_ratio = torch.where(
+                m.bool(), new_logps - mb.old_logps, 0.0
+            )
+            ratio = torch.exp(log_ratio)
+            unclipped = ratio * mb.actor_advantages
+            clipped = (ratio.clamp(1 - clip_eps, 1 + clip_eps)
+                       * mb.actor_advantages)
+            policy_loss = -masked_mean(torch.minimum(unclipped, clipped), m)
+            value_loss = 0.5 * masked_mean((new_values - mb.returns) ** 2, m)
+
+            # joint_optimizer contains each trainable parameter only once.
+            # This is safe for a shared backbone; also valid for disjoint models.
+            loss = policy_loss + value_coef * value_loss
+            joint_optimizer.zero_grad()
+            loss.backward()
+            joint_optimizer.step()
+    # Next prompts -> a NEW rollout with the updated actor.
+`}</CodeBlock>
+
+`rollout` 与 `action_logps` 是抽象接口：实际代码要统一 temperature、logit processors、因果位置 shift 与 response mask。`aligned_values` 返回当前状态和下一状态的旧 Value，并在真 terminal 位置关闭 bootstrap；`trace_mask` 在回答结束、截断或数据段边界关闭。没有有效生成动作的样本应在组 batch 前过滤。
+
+为什么这样组织梯度？
+
+| 问题 | 原因 |
+| --- | --- |
+| `old_logps` 为什么不能一起更新？ | 它记录这批样本来自哪个分布；若每次替换成 Current，ratio 的数值会总回到 1，失去衡量本轮累计偏移的意义。 |
+| rollout 为什么用 `no_grad`？ | 生成 token、评分、旧概率、旧 Value 与目标属于固定训练数据，不需要保存穿过整个采样过程的计算图。Actor、Critic 的参数仍然可训练。 |
+| 为什么重新算 `new_logps`？ | 优化需要当前参数的可微概率；冻结旧概率既不能表示更新后的策略，也不能给 Current 提供梯度。 |
+| 为何 Advantage / Return 要 detach？ | 它们是本轮用于优化的估计目标；不能让 Actor 通过篡改基线或 Critic 通过移动 target 来“降低 loss”。 |
+| 两个 loss 为何不同？ | Actor 调整动作分布，Critic 估计未来回报；前者是 policy objective，后者是标量回归。 |
+| 能否分别 backward？ | 无共享参数时可用独立计算图和 optimizer；共享 Backbone 时联合 backward 更直接，同一参数只更新一次。 |
+
+只要把 optimizer 里的参数限制为 LoRA adapters、Value Head 等可训练部分，这个数据流仍然成立；[LoRA](/notes/ml/post-training/lora/) 不会取代 PPO 的 clipped loss，也不会自动让 Reference 的角色消失。
+
+## 9. 为什么 GRPO 要去掉 Critic？
+
+<PpoVsGrpoFigure />
+
+$$
+\underbrace{\hat A^{\mathrm{PPO}}\approx G-V_\phi(s)}_{\text{本节先用简化 MC 形式对照}},
+\qquad
+\underbrace{\hat A_i^{\mathrm{GRPO}}
+=\frac{R_i-\operatorname{mean}(R)}{\operatorname{std}(R)+\varepsilon_{\mathrm{num}}}}_{\text{同题回答组提供基线与尺度}}.
+$$
+
+PPO 的 Critic 帮每个 prefix 建立状态价值基线，但需要学习另一个函数，保存训练状态并承受估计误差。对于长推理回答，只有最后一个正确性分数时，逐 prefix Value 本身也不容易学。[DeepSeekMath 第 4.1 节](https://arxiv.org/html/2402.03300v3#S4.SS1) 提出的 GRPO 用同题多个回答的相对得分替代这套 Critic 基线。
+
+### PPO：一个回答，加一个学出来的基线
+
+正确回答 `156` 得到 $R=1$，假设某个状态预测 $V(s_t)=0.6$；忽略 KL、取 $\gamma=1$，用简化 Monte Carlo 形式得到 $\hat A=1-0.6=0.4$。真实 PPO 可按前文用 GAE 得到逐位置估计。Actor 用 Advantage 更新，Critic 继续回归 Value target。
+
+### GRPO：同题四个回答，用组内比较
+
+| Response | Answer | Reward $R_i$ | 相对均值 | 标准化 Advantage |
+| --- | --- | --- | --- | --- |
+| 1 | 156 | 1 | $1-0.5=0.5$ | 1 |
+| 2 | 156 | 1 | $1-0.5=0.5$ | 1 |
+| 3 | 144 | 0 | $0-0.5=-0.5$ | −1 |
+| 4 | 169 | 0 | $0-0.5=-0.5$ | −1 |
+
+这里按**总体标准差**计算，并为手算忽略数值稳定项：
+
+$$
+\mu=\frac{1+1+0+0}{4}=0.5,\qquad
+\sigma=\sqrt{\frac{\sum_{i=1}^{4}(R_i-0.5)^2}{4}}=0.5,
+\qquad \hat A=[1,1,-1,-1].
+$$
+
+如果实现选择样本标准差、其他归一化或保留非零 $\varepsilon_{\mathrm{num}}$，数值就会不同；上表不能被当成所有 Trainer 的默认计算。$\varepsilon_{\mathrm{num}}$ 防除零，和 PPO clipping 的 $\epsilon$ 是两个不同参数。
+
+这是原始 **Outcome-based GRPO** 的典型形式：每个回答的 sequence-level Advantage 可以共享给该回答内多个生成 token。它表达“这条回答在同题组内比其他回答更好”，**不提供哪个具体推理 token 立功的精细归因**。DeepSeekMath 也讨论 process supervision 版本，不应把 outcome 形式当作全部 GRPO 的唯一形态。
+
+为看出保留了什么，可以写出原始形式的核心目标：
+
+$$
+J_{\mathrm{GRPO}}=\mathbb E\left[
+\frac1G\sum_{i=1}^{G}\frac1{T_i}\sum_{t=1}^{T_i}
+\left\{\min\!\left(\rho_{i,t}\hat A_i,
+\operatorname{clip}(\rho_{i,t},1-\epsilon,1+\epsilon)\hat A_i\right)
+-\beta\hat D_{i,t}\right\}\right].
+$$
+
+$\rho_{i,t}$ 仍是 Current / Old 的逐 token ratio，$\hat D_{i,t}$ 表示 Reference KL 的采样估计。这里强调结构：**去掉 Critic 与 Value regression，保留采样、奖励、策略梯度与 PPO-style clipping**；Reference KL 可按方法与实现配置。原论文中的序列归一化和不同实现的 token 聚合也可能不同。
+
+| 维度 | 常见 LLM PPO | Outcome-based GRPO |
+| --- | --- | --- |
+| Actor | 需要训练 | 需要训练 |
+| Critic | 需要训练 Value Function | 不需要 |
+| Reward | 模型或规则 | 模型或规则 |
+| Reference | RLHF 中通常使用 | 使用 Reference KL 时可用 |
+| Advantage | Critic + GAE 等估计器 | 同题 Group-relative Rewards |
+| Policy Update | PPO Clipping | PPO-style Clipping |
+| Value Regression Loss | 有 | 无 |
+| 可训练逻辑角色 | 通常 Actor + Critic 两种 | 通常只有 Actor |
+| 主要额外成本 | Critic forward、backward、训练状态 | 同一 prompt 的多个 Response Sampling |
+
+图中切换 PPO 与 GRPO，先看 Advantage 的来源，再看需要更新谁。GRPO 的变化核心在于估计训练信号的方式，不是连 Reward 或 clipped policy optimization 都一起拿掉。
+
+## 10. GRPO 的优势与局限
+
+GRPO 省去了训练 Critic 所需的 Value Model、Value loss 与优化器状态，也少了一个需要调参和诊断的训练目标。对于数学、代码这类可验证奖励任务，同题多次采样能直接形成相对好坏的对照。这是它的吸引力，尤其在 Critic 显存与训练开销显著时。
+
+但它把成本和误差来源挪到了别处：
+
+1. **需要同题多回答。** 组大小增加，生成 token 和 rollout 成本通常也增加；长推理可能让 sampling 成为主要瓶颈。省 Critic 不代表总 GPU 时间一定减少。
+2. **同分组没有奖励区分信号。** 对 $[0,0,0,0]$ 或 $[1,1,1,1]$，减均值后的分子全为 0；加入稳定项后 Advantage 仍为 0。这组没有 reward-driven 的 policy 信号，但若另有 KL 正则，仍可能有该项梯度。
+3. **Outcome credit assignment 粗糙。** 一条回答的好分数共享给多个 token，不能可靠区分正确推理、冗余文字或碰巧猜对的部分。
+4. **归一化受分布与组大小影响。** 标准差会改变信号尺度；稀有成功、组内极端值与不同题目难度都可能影响权重。更大的组也并非自动无偏或更优。
+5. **奖励质量仍是瓶颈。** 组内比较不会修复漏洞，模型同样可能学习错误的奖励捷径，参见 [Reward Hacking](/notes/ml/post-training/reward-hacking/)。
+
+PPO 则保留了逐 prefix 的 Value 估计，能结合中间奖励和 bootstrap 给不同状态不同的 Advantage。这个潜力取决于 Critic 是否学得准；错误的 Value 会引入估计偏差，Actor、Critic 联合训练也增加不稳定性与工程成本。不能仅凭“PPO 有 Critic”就说它完成了精确因果归因，也不能仅凭“GRPO 没 Critic”就断言它全面更快、更准。
+
+> PPO 需要训练 Critic 才能估计某个动作比预期好多少。那么，如果让模型对同一道题生成多个回答，能不能直接利用这些回答的相对好坏作为 Baseline，而不用再训练 Critic？
+
+下一篇 [GRPO：组内比较代替 Critic](/notes/ml/post-training/grpo/) 沿这个问题继续，用具体梯度和组内同分概率研究它的信号与代价。
+
+## 11. 常见误区与面试总结
+
+### 1. PPO 一定需要四个独立的大模型吗？
+
+不需要。四种角色来自常见 LLM RLHF 系统，Actor / Critic 可共享 Backbone，奖励可由规则提供，Reference 也可用冻结 adapter / base 的方案实现。是否真能共享与省下多少，取决于参数组织、训练框架和 serving 方案。Old Policy 也通常只需保留 rollout 概率，而非永久多加载一个模型。
+
+### 2. Reward Model 和 Critic 为什么不是同一个模型？
+
+两者的输入时机与目标不同。Reward Model 根据 prompt 与已完成回答给质量分；Critic 对当前 prefix 预测策略未来会取得的 Return，供 Advantage 与 bootstrap 使用。前者通常在 PPO 中冻结，后者随着策略变化继续训练。共享某些参数或初始化来源，不会消除这两种逻辑职责。
+
+### 3. PPO 为什么需要保存 Old Log Probabilities？
+
+同批数据会训练多个 epoch，需要一个固定的行为分布作为 ratio 分母。保存 log probabilities 既便于计算 $\exp(\log p_{\mathrm{new}}-\log p_{\mathrm{old}})$，也避免每次为旧策略额外 forward；它们必须与采样分布及动作位置一致，并且 detach。
+
+### 4. Old Policy 与 Reference Model 有什么区别？
+
+Old 是“这批回答是谁采的”，下一轮更新；Reference 是“策略长期相对谁保持接近”，通常跨轮冻结。两者在起点可能相同，却服务不同目标：Current / Old 用于 PPO surrogate，Current 或 rollout Old 对 Reference 的 KL 用于漂移正则。
+
+### 5. GAE 为什么比直接使用最终 Reward 更有用？
+
+最终 Reward 直接广播会忽略当前状态的难度和中间预测。GAE 使用 Value baseline 与多步 TD residual，能在采样方差与 bootstrap 偏差之间调节，产生逐状态估计。它不创造新的任务信息，也不保证总比 Monte Carlo 更准确；效果依赖 Critic、$\gamma$、$\lambda$ 与边界处理。
+
+### 6. PPO Clipping 是否保证 Ratio 永远处于区间内？
+
+不保证。它只让单样本在“有利方向超过阈值”后失去额外改善激励，错误方向仍保留惩罚。参数共享、其他目标与有限更新步长仍能把 ratio 推出区间。硬裁剪概率、约束参数和信任域约束是不同操作。
+
+### 7. GRPO 不需要 Critic，是否表示它不需要 Reward Model？
+
+不是。它必须得到各回答的 Reward，但来源可为训练的评分器或规则函数。去掉的是 Value estimator 及其回归训练，不是评价信号。可验证任务无需神经网络 Reward Model，原因在于能用规则评分，与是否采用 GRPO 无直接等价关系。
+
+### 8. PPO 和 GRPO 是否都支持 LoRA？
+
+都可以。LoRA 是参数高效更新方式，PPO / GRPO 是根据奖励优化策略的方法；两者在不同层次。Actor adapters 可训练，Reference 的参数或 adapter 必须按设计冻结；Critic 是否也用 LoRA、Value Head 如何训练则要明确配置。
+
+### 9. GRPO 是否一定比 PPO 快？
+
+不一定。它省 Critic 训练，却需要多条 rollout；总时间取决于模型大小、回答长度、组大小、生成吞吐、参数共享和分布式实现。合理比较应在相近任务质量目标下报告总生成 token、训练开销、显存和 wall time，不能只数模型角色。
+
+### 10. GRPO 和 DPO 的偏好数据、Rollout 要求有什么区别？
+
+标准离线 DPO 使用固定的 $(x,y_{\mathrm{chosen}},y_{\mathrm{rejected}})$ 偏好对，不要求在每个训练循环中用当前策略现场采样，也不单独训练 Value Function。GRPO 通常是 online：对当前 prompt 用行为策略采多条回答，逐条打 Reward 后形成组内 Advantage。GRPO 不要求预先准备 chosen / rejected 对，但要求可获得评分信号。存在在线 DPO 与其他变体，不能把这一对照推广成所有方法的绝对限制。
+
+### 1 分钟中文面试版
+
+PPO 是一种策略优化方法。在 LLM 中，Actor 根据 prefix 生成 token，Critic 估计未来回报，Reward Model 或规则给回答评分，冻结 Reference 用于控制长期偏离。先用行为策略采样，保存旧概率和旧 Value，再用 Reward 与 Value 通过 GAE 计算 Advantage 和固定的 Return target。训练时重算当前概率，以 Current / Old ratio 构造 clipped surrogate 更新 Actor，以 Value regression 更新 Critic；同一批数据可以做多个 minibatch、多个 epoch。Clipping 限制单样本改善激励，不保证概率比永远在区间内。GRPO 用同题多回答的相对奖励替代 Critic-based Advantage，省去 Value 训练，但增加 sampling 与粗粒度归因的取舍。两者都能用 LoRA。
+
+### One-minute English interview answer
+
+PPO is a policy optimization method. For an LLM, the actor generates tokens and the critic estimates expected future returns. A reward model or a rule scores the response, while a frozen reference policy can regularize long-term drift. We collect rollouts, save behavior-policy log probabilities and old values, and compute detached advantages and return targets with GAE. During optimization, we recompute current log probabilities, update the actor with the clipped surrogate, and fit the critic with value regression. Several minibatch epochs can reuse one rollout batch. Clipping removes extra improvement incentives beyond a threshold; it does not enforce a hard ratio bound. GRPO replaces critic-based advantages with group-relative rewards from multiple responses to the same prompt. It removes critic training but adds sampling costs and coarser credit assignment. Both methods support LoRA.
+
+## 12. 延伸阅读与复习路径
+
+算法公式以上述原论文为准；下列 TRL 链接在 **2026-10-27 查阅的是 `main` 文档**，它会随版本变化。Loss reduction、Advantage normalization、KL estimator、Value clipping、采样次数与超参数都是需要明确的实现选择，不能把某个 Trainer 的配置说成所有 PPO / GRPO 的统一默认。
+
+1. [Proximal Policy Optimization Algorithms — Schulman et al., 2017](https://arxiv.org/abs/1707.06347)：看 clipped surrogate 与“采样后多轮 minibatch 更新”的算法定义；它不是一份专门针对 LLM 的四模型配置表。
+2. [OpenAI Spinning Up — PPO](https://spinningup.openai.com/en/latest/algorithms/ppo.html)：用正负 Advantage 理解 PPO-Clip，并对照实践中的更新控制。
+3. [High-Dimensional Continuous Control Using Generalized Advantage Estimation](https://arxiv.org/abs/1506.02438)：理解 TD residual 的指数加权和，以及 $\gamma$、$\lambda$ 对估计的影响。
+4. [DeepSeekMath — GRPO 原始论文](https://arxiv.org/abs/2402.03300)：第 4.1 节从 PPO 推向 GRPO，区分 outcome 与 process supervision。
+5. [Hugging Face TRL — PPO Trainer](https://huggingface.co/docs/trl/main/en/ppo_trainer)：了解具体 Trainer 的输入、训练配置与日志，区分新旧策略 approximate KL 和 Reference KL。
+6. [Hugging Face TRL — GRPO Trainer](https://huggingface.co/docs/trl/main/en/grpo_trainer)：对照组内归一化、KL、loss aggregation 等实现选项，并核对使用的版本。
+
+复习时先回到 [SFT](/notes/ml/post-training/sft/) 和 [RLHF](/notes/ml/post-training/rlhf/) 确认监督来源，再手算本篇三步 GAE 与两种符号的 clipping，最后进入 [GRPO](/notes/ml/post-training/grpo/)；[LoRA](/notes/ml/post-training/lora/) 单独回答“哪些参数被更新”。

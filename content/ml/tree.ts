@@ -145,6 +145,7 @@ export const chapters: TreeChapter[] = [
       n("ml/post-training/sft", "SFT", "预训练完了，怎么让模型照指令回答？", "用（指令, 好回答）对继续训练；loss 还是逐 token 的 cross-entropy，但 prompt 的 token 被 mask 掉，只在回答上算。", "ready"),
       n("ml/post-training/lora", "LoRA", "全量微调太贵，能只训一小部分吗？", "冻结 W，只学 W' = W + BA，B 是 d×r、A 是 r×k、r ≪ d；B 初始化为 0，推理时把 BA 合并回 W 没有额外延迟。", "ready"),
       n("ml/post-training/rlhf", "RLHF：RM、PPO 与 DPO", "好回答很难写出来，但能比出来，怎么用？", "用成对偏好训一个奖励模型（Bradley–Terry），再用 PPO 在和参考模型的 KL 约束下优化；DPO 把这两步合成一个分类式的 loss。", "ready", "RLHF 与 DPO"),
+      n("ml/post-training/ppo", "PPO：从 Actor–Critic 到 LLM 强化学习", "奖励如何变成逐 token 的策略更新？", "Actor 生成、Critic 估值，GAE 计算 advantage，clipping 限制旧采样上更新的激励；参考 KL 另管长期漂移。", "ready", "PPO"),
       n("ml/post-training/grpo", "GRPO", "PPO 的 critic 太贵，能去掉吗？", "每个 prompt 采样 G 个回答各自打分，advantage = (r − 组内均值) / 组内标准差；用组内平均当基线，省掉 critic，其余沿用 PPO 的 clip 和 KL。", "ready"),
       n("ml/post-training/reward-hacking", "奖励设计与 Reward Hacking", "奖励一加上去，模型为什么学歪了？", "策略只优化你写下的奖励，不优化你心里的目标；长度奖励会被堆字刷分，要用正确性门控、上限和 KL 拉住它。", "ready", "Reward Hacking"),
     ],
@@ -186,6 +187,10 @@ export const chapters: TreeChapter[] = [
     section: "Recommender Systems",
     existing: true,
     nodes: [
+      n("ml/recsys/ranking-overview", "推荐系统排序架构总览", "多个行为概率怎么变成排序分数？", "Shared-Bottom 共享底层表示、独立预测行为；负例降采样后先校准概率，再按业务目标融合为排序分数。", "ready", "01 · Ranking Overview"),
+      n("ml/recsys/mmoe", "MMoE：多门控专家混合模型", "不同任务能自己决定怎么共享专家吗？", "共享多个专家，各任务用独立 Softmax Gate 聚合表示；Gate Dropout 在训练时屏蔽权重并做期望缩放。", "ready", "02 · MMoE"),
+      n("ml/recsys/score-fusion", "多目标预估分数融合", "模型预测了多个目标，最终按什么排序？", "直接融合分数、用 CTR 调节、先融合名次或做乘法，表达不同排序偏好。", "ready", "03 · Score Fusion"),
+      n("ml/recsys/watch-time-completion", "观看时长与完播率建模", "观看多久与是否完播，分别怎么预测？", "时长映射成 soft label 用 BCE 学习，exp(z) 是代理；完播概率除以长度基准得到相对分数。", "ready", "04 · Watch Time"),
       n("ml/recsys/kuairand-input", "一条曝光的 84 维输入", "排序模型看到什么？", "KuaiRand-1K 的曝光日志怎样变成排序模型的输入：数据流、一条真实样本的 84 个特征、只看过去的时间窗统计。", "ready"),
       n("ml/recsys/lightgbm-explained", "梯度提升树如何给曝光打分", "树怎么给曝光打分？", "以真实训练的 LightGBM click 模型为例：目标函数与梯度、一轮迭代、直方图与 leaf-wise、一条样本的 407 步轨迹。", "ready"),
       n("ml/recsys/boosting-lab", "提升树训练实验台", "一轮一棵树怎么长？", "16 个点、一个特征，按一轮长一棵树：看残差被压小、LogLoss 下降、森林长出；GBDT / XGBoost / LightGBM 的差别做成开关。", "ready"),

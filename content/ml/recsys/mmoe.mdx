@@ -1,0 +1,181 @@
+import MmoeArchitectureFigure from "@/components/visualization/ml/recsys/MmoeArchitectureFigure";
+import GateDropoutFigure from "@/components/visualization/ml/recsys/GateDropoutFigure";
+
+# MMoE：多门控专家混合模型
+
+**Chapter 02 — MMoE & Gating Networks**。MMoE（Multi-gate Mixture-of-Experts）让多个任务共享一组 Expert Networks，再用每个任务独立、依赖输入的 Gate，决定如何组合这些专家的表示。
+
+> 本章按王树森《推荐系统》的课程交接稿整理，Gate Polarization / Gate Dropout 按交接稿给出的定义解释；未直接核验课程视频。图中的二维专家、任务塔与数值均为本站教学示例，并非课程实验结果。原始 MMoE 结构参考 [Ma 等，KDD 2018](https://research.google/pubs/modeling-task-relationships-in-multi-task-learning-with-multi-gate-mixture-of-experts/)。
+
+## 1. Motivation: Shared-Bottom Limitations
+
+[上一章](/notes/ml/recsys/ranking-overview/)的 Shared-Bottom 先计算一个共享表示，所有任务再接各自的预测头：
+
+$$
+h=f_\theta(x),\qquad \hat y_t=\sigma(T_t(h))
+$$
+
+这里 $x$ 是输入特征，$f_\theta$ 是共享网络，$T_t$ 是任务 $t$ 的预测塔。所谓「固定共享」是**所有任务拿到同一份表示**，并不是 $h$ 不随输入变化。独立任务头仍然可以利用 $h$ 的不同维度，但底层参数更新要同时服务所有任务。
+
+例如，点击可能偏爱吸引眼球的内容，点赞更依赖内容本身的质量；两个任务想强调的信号不完全一致。如果共享层容量或表示不合适，来自不同任务的梯度可能相互冲突，出现负迁移。
+
+MMoE 的回答是：保留共享的好处，同时提供多个表示来源，让不同任务学会**向谁借、借多少**。
+
+## 2. MMoE Architecture
+
+<MmoeArchitectureFigure />
+
+一条前向路径可以读成：**Input Features → Shared Experts + Task-specific Gates → Weighted Aggregation → Task Towers → Predictions**。注意输入同时进入专家和 Gate；并不是把专家输出当作本章 Gate 的输入。
+
+图中蓝、绿、黄对应三个共享专家，橙色虚线表示 Gate 分支。选择 CTR 或 Like 后，所选任务的专家连线按权重变粗。拖动滑块只修改这个任务的第三个 logit，实际权重仍由 Softmax 计算，不能把其他权重固定不动。
+
+图中的专家输出与任务塔参数固定，只演示一次前向计算；真实模型会通过任务损失联合学习专家、Gate 与 Tower 的参数，Gate 的输出还会随不同输入 $x$ 改变。
+
+## 3. Expert Networks
+
+假设输入是 $x\in\mathbb R^n$，共有 $K$ 个专家，每个专家输出相同维度 $d$ 的向量：
+
+$$
+e_1(x)=f_1(x),\quad e_2(x)=f_2(x),\quad e_3(x)=f_3(x),\qquad e_i(x)\in\mathbb R^d
+$$
+
+专家拥有**各自独立的参数**，共同组成所有任务可使用的共享池。「共享 Expert」是说同一个 $f_i$ 被多个任务复用，不是说 $f_1,f_2,f_3$ 的参数相同。专家也不必事先指定为「点击专家」「点赞专家」；它们的分工是训练形成的。
+
+这里的标准 MMoE 是 **dense mixture**：通常先算所有专家，再进行加权聚合。权重小不等于跳过了该专家的计算，不应与只执行 Top-k 专家的稀疏 MoE 混为一谈。增加专家数会增加参数量和计算量，收益需要验证。
+
+## 4. Gate Networks & Softmax
+
+每个任务有独立的 Gate Network。以 CTR 与 Like 为例：
+
+$$
+\mathbf p=\operatorname{Softmax}(G_{\mathrm{CTR}}(x)),\qquad
+\mathbf q=\operatorname{Softmax}(G_{\mathrm{Like}}(x))
+$$
+
+$G_t(x)\in\mathbb R^K$ 输出任务 $t$ 的专家 logits；简单实现可以是 $G_t(x)=W_t^g x+b_t^g$，其中 $W_t^g\in\mathbb R^{K\times n}$、$b_t^g\in\mathbb R^K$。Gate 也可以使用更一般的网络。
+
+对三个专家，记 CTR 的 logits 为 $\mathbf a$，则：
+
+$$
+p_i=\frac{\exp(a_i)}{\sum_{j=1}^{3}\exp(a_j)},\qquad
+\sum_i p_i=1,\quad p_i>0
+$$
+
+Softmax 沿**专家轴**归一化：$p_i$ 是 CTR 任务分给 Expert $i$ 的权重，不是 CTR 预测概率。有限 logits 下它在数学上严格为正；实现中极端数值可能下溢为零，通常先减去最大 logit 来稳定计算。
+
+这与上一章不矛盾：**Gate 用 Softmax 分配专家权重，行为预测用各自的 Sigmoid**，CTR 与 Like 的输出不要求相加为 1。独立 Gate 指参数独立，并不意味着 Gate 的输出或任务在统计上独立。
+
+## 5. Task-specific Weighted Aggregation
+
+对同一组专家，两个任务分别得到自己的表示：
+
+$$
+h_{\mathrm{CTR}}=\sum_{i=1}^{3}p_i e_i(x),\qquad
+h_{\mathrm{Like}}=\sum_{i=1}^{3}q_i e_i(x)
+$$
+
+一般形式为：
+
+$$
+\boxed{h_t(x)=\sum_{i=1}^{K}g_{t,i}(x)e_i(x)},\qquad
+\hat y_t=\sigma(T_t(h_t(x)))
+$$
+
+$t$ 是任务索引，$K$ 是专家数，$g_{t,i}(x)$ 是该任务对第 $i$ 个专家的权重。每个权重是标量，对向量的每一维都乘同一个数，再逐维求和，得到 $h_t\in\mathbb R^d$。
+
+例如，设 $e_1=[1,0]$、$e_2=[0,1]$、$e_3=[1,1]$。某个 Gate 给出 $[0.3,0.4,0.3]$ 时：
+
+$$
+h=0.3[1,0]+0.4[0,1]+0.3[1,1]=[0.6,0.7]
+$$
+
+这是表示向量，不是 $0.6$ 或 $0.7$ 的行为概率；它还要进入 Task Tower。无 Dropout 时，非负且和为 1 的权重让 $h_t$ 成为专家向量的凸组合。
+
+### Tensor Dimensions
+
+记 $B$ 为 batch size、$T$ 为任务数。以下选择把专家轴放在中间，框架也可使用其他排列，只要聚合轴一致。
+
+| 对象 | 单样本 | Batch | 含义 |
+| --- | --- | --- | --- |
+| 输入 $X$ | $[n]$ | $[B,n]$ | 用户、物品、上下文等特征 |
+| 堆叠专家 $E$ | $[K,d]$ | $[B,K,d]$ | 每个专家一条 $d$ 维向量 |
+| 一个任务的 $g_t$ | $[K]$ | $[B,K]$ | 沿 $K$ 做 Softmax |
+| 全部 Gate $g$ | $[T,K]$ | $[B,T,K]$ | 每任务一组权重 |
+| 全部融合表示 $H$ | $[T,d]$ | $[B,T,d]$ | 沿专家轴求加权和 |
+| 全部预测 $\hat Y$ | $[T]$ | $[B,T]$ | 每任务一个二分类概率 |
+
+训练仍可使用多任务加权 BCE：
+
+$$
+\mathcal L=\sum_t\lambda_t\operatorname{BCE}(y_t,\hat y_t)
+$$
+
+这里写单样本损失，再对 batch 平均；$\lambda_t\ge0$ 是训练权重。专家会收到多个任务的梯度；各 Gate 与 Tower 通过自己的任务路径学习。标签缺失或定义在条件样本空间时，仍需要上一章讨论的 masking 或条件概率建模。MMoE 改变的是**任务内部的表示融合**，并没有替代预测之后的多目标 Ranking Score 融合。
+
+## 6. Gate Polarization
+
+下一节交互图左侧提供两种分布：正常示例 $[0.3,0.4,0.3]$，以及极化示例 $[0.01,0.01,0.98]$。它们都合法地满足 Softmax 的归一化性质，但后一组几乎只依赖 Expert 3。
+
+**Gate Polarization** 是权重过度集中于少数专家的现象。若一个任务在许多样本上都只选同一个专家，其他专家在这条路径上的直接梯度贡献就很弱，模型可能过早依赖少量专家。
+
+但一次输入上的尖锐 Gate，不等于所有任务、所有样本都塌缩：别的样本或任务可能正好使用其他专家。专家专门化本身可以有用，不应该以「权重必须均匀」作为目标。应结合跨样本、跨任务的专家使用分布、梯度与验证效果，判断极化是否伤害训练或泛化。
+
+## 7. Gate Dropout
+
+<GateDropoutFigure />
+
+按课程交接稿提供的缓解方法，在**训练时对 Softmax 输出做 Dropout**。设丢弃率为 $r\in[0,1)$，各专家独立采样 mask：
+
+$$
+m_i\sim\operatorname{Bernoulli}(1-r),\qquad
+\boxed{\tilde g_i=\frac{m_i}{1-r}g_i}
+$$
+
+对某任务、某样本来说，第 $i$ 个 mask 为 $0$，就把这个专家的 Gate 权重屏蔽；为 $1$ 时则乘 $1/(1-r)$。这里采用标准 **inverted dropout**，不是 Softmax 之前屏蔽 logit，也不是删除或重新创建 Expert Network。
+
+例如 $r=0.1$、$g=[0.01,0.01,0.98]$，用手选示例 $m=[1,1,0]$：
+
+$$
+\tilde g=[0.01/0.9,\ 0.01/0.9,\ 0]
+\approx[0.0111,0.0111,0],\qquad
+\sum_i\tilde g_i\approx0.0222
+$$
+
+其余专家**不会自动瓜分**被屏蔽的 $0.98$。如果三个权重都保留，权重和反而是 $1/0.9\approx1.1111$。把结果重新除以权重和，是另一种方法，不再是这里的标准 inverted dropout。
+
+### 保持的是期望，不是每一次结果
+
+固定输入和原始 Gate，单个权重的期望保持不变：
+
+$$
+\mathbb E_m[\tilde g_i]=g_i,\qquad
+\mathbb E_m\!\left[\sum_i\tilde g_i e_i\right]=\sum_i g_i e_i
+$$
+
+因此专家向量固定时，聚合表示的期望也不变。但经过非线性 Task Tower 和 Sigmoid 后，预测的期望不保证等于原预测。Dropout 增加训练扰动，让模型有机会减少对单个专家的脆弱依赖；它不保证弱专家一定学好，也不保证完全避免极化。
+
+每个 mask 独立采样时，还有 $r^K$ 的概率全部丢弃。图中 $K=3,r=0.1$，概率为 $0.001$，此时聚合向量为零；Tower 若有偏置，预测不一定为零。强制保留一个专家或重抽 mask 会改变上述分布，本图不做这种隐藏处理。
+
+**推理时关闭 Dropout**，直接使用原始 $g_t(x)$，不再乘 $1/(1-r)$。正常与极化 preset 都可以按按钮重新抽样；初始 mask 是为展示 Expert 3 被屏蔽而手选的，后续随机序列使用固定种子，刷新或重置后可复现。
+
+## 8. Summary & Key Formulas
+
+Shared-Bottom 共享同一份底层表示；MMoE 共享多个专家，并通过任务独立、依赖输入的 Gate 学习各自的表示组合。记住三个步骤：
+
+$$
+\boxed{g_t(x)=\operatorname{Softmax}(G_t(x))}
+$$
+
+$$
+\boxed{h_t(x)=\sum_i g_{t,i}(x)e_i(x),\qquad\hat y_t=\sigma(T_t(h_t(x)))}
+$$
+
+$$
+\boxed{\tilde g_{t,i}=\frac{m_{t,i}}{1-r}g_{t,i}\quad\text{（仅训练时）}}
+$$
+
+Gate Softmax 分配的是专家权重，Task Sigmoid 输出的是行为概率。标准 Gate Dropout 屏蔽权重并做期望缩放，单次权重和无需为 1；是否值得使用，要看验证效果，而不是只看 Gate 是否均匀。
+
+回看 [Ranking Overview](/notes/ml/recsys/ranking-overview/) 可把 MMoE 放回「预测 → 校准 → 分数融合」的整体流程；共享专家内部怎样表达特征组合，另见已有的 [特征交叉：FM 与 DCN](/notes/ml/recsys/feature-crossing/)。本章不扩展到后续课程模型或实验复现。
+
+参考：[MMoE 原始论文（Ma 等，KDD 2018）](https://research.google/pubs/modeling-task-relationships-in-multi-task-learning-with-multi-gate-mixture-of-experts/)；[PyTorch Dropout 文档](https://docs.pytorch.org/docs/stable/generated/torch.nn.Dropout.html)说明标准训练缩放与推理恒等行为，应用位置在本章为 Softmax 之后的 Gate 权重。

@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 
 type LabFrameProps = {
-  /** Path under public/, e.g. "/labs/recsys/boosting-lab.html". Must be same-origin. */
+  /** Directory entrypoint under public/, e.g. "/labs/recsys/boosting-lab/". Must be same-origin. */
   src: string;
   title: string;
   minHeight?: number;

@@ -1,0 +1,165 @@
+import WatchTimeFigure from "@/components/visualization/ml/recsys/WatchTimeFigure";
+import CompletionRateFigure from "@/components/visualization/ml/recsys/CompletionRateFigure";
+
+# 观看时长与完播率建模
+
+**Chapter 04 — Watch Time & Completion Modeling**。[上一章](/notes/ml/recsys/score-fusion/)解释如何融合多个预估分数；这一章追问：观看时长与完播概率这两个目标，本身该怎么定义和学习？
+
+> 课程公式按王树森《推荐系统》的交接稿整理，本次未直接核验视频。随机目标的总体最优解、时间单位讨论及数值保护是理论与工程补充；交互数据和长度基准曲线均为教学示例，不是线上统计或复现实验。
+
+## 1. Overview
+
+Watch Time Prediction 关心看了多长时间；Completion Prediction 关心是否达到某个观看比例。前者是非负连续量，后者是二分类事件，不能都当作普通 CTR 来解释。
+
+本章先用 $y=t/(1+t)$ 将时长映射成 soft label，再用 BCE 学习，推理时将 logit 通过指数变换还原为时长代理。随后定义「观看达到视频长度的 80%」这一完播事件，并比较原始完播概率与长度校正后的相对表现。
+
+## 2. Watch Time Prediction
+
+用户、视频、统计与场景特征组成 $x$。网络先输出一个标量 logit，再在训练与推理时使用不同的变换：
+
+$$
+z=f_\theta(x),\qquad
+\boxed{p=\sigma(z)=\frac{e^z}{1+e^z}}\ \text{（训练）},\qquad
+\boxed{\hat t=e^z}\ \text{（推理）}
+$$
+
+$t$ 是真实观看时长的非负数值，$z$ 是网络输出，$p$ 是训练用 Sigmoid 输出，$\hat t$ 是推理时的**观看时长代理值**。这里的 $p$ 不是「看满视频的概率」，也不是 $t$ 本身；它要匹配下面定义的 soft label。
+
+时间单位必须固定。本章所有 $t$ 都是以秒表示的数值；因此式中的 $1+t$ 是数值变换，不能一会儿用毫秒、一会儿用分钟而保持同一个标签定义。
+
+## 3. Soft Label & Special BCE Loss
+
+课程把连续时长映射到 $[0,1)$：
+
+$$
+\boxed{y=\frac{t}{1+t}},\qquad 1-y=\frac{1}{1+t}
+$$
+
+将它代入 BCE，得到：
+
+$$
+\boxed{\mathcal L=-\left[\frac{t}{1+t}\log p+\frac{1}{1+t}\log(1-p)\right]},\qquad p=\sigma(z)
+$$
+
+这是用连续 soft label 的 BCE，并不是先把时长二值化。实际实现可直接使用带 logits 的稳定损失形式，避免先算出接近 0 或 1 的 $p$ 再取对数。
+
+### 固定目标的代数推导
+
+对于给定、确定的 $t>0$，如果模型能够精确拟合 $p=y$，则：
+
+$$
+\frac{e^z}{1+e^z}=\frac{t}{1+t}
+\quad\Longrightarrow\quad e^z(1+t)=t(1+e^z)
+\quad\Longrightarrow\quad\boxed{e^z=t}
+$$
+
+因此课程在推理时使用 $\hat t=e^z$。但 $t=0$ 是边界：理想 $p=0$ 只能由 $z\to-\infty$ 逼近，不能给它编造一个有限的 $\log0$。
+
+### 随机观看时长的统计意义（补充）
+
+同一组特征通常不决定唯一时长。若真实目标是随机变量 $T$，最小化条件期望 BCE 得到：
+
+$$
+p^*(x)=\mathbb E\!\left[\frac{T}{1+T}\mid x\right],\qquad
+ e^{z^*(x)}=\frac{p^*(x)}{1-p^*(x)}\ne\mathbb E[T\mid x]\quad\text{（一般情形）}
+$$
+
+原因是先对 $T$ 做非线性变换、取平均，再反变换，通常不同于直接对 $T$ 取平均。例如 $T$ 以相同概率取 1 秒和 9 秒，$p^*=(0.5+0.9)/2=0.7$，代理值为 $0.7/0.3=7/3\approx2.3333$ 秒，而平均时长是 5 秒。**不能把固定目标的反变换推导，升级成「必然学到条件平均时长」的结论。**
+
+若希望显式控制尺度，可选定一个固定 $s>0$，使用 $y=t/(s+t)$，对应固定目标的逆变换为 $\hat t=s e^z$。这属于补充推广；下图始终取 $s=1$ 秒对应的数值尺度。
+
+## 4. Watch Time Transformation Playground
+
+<WatchTimeFigure />
+
+从 0 秒拖到 300 秒，观察 $y$ 趋近于 1。四个关键点是：$t=0$ 时 $y=0$，$t=1$ 时 $y=0.5$，$t=9$ 时 $y=0.9$，$t=99$ 时 $y=0.99$。标签越接近 1，一点概率误差反变换后可能对应较大的时长误差。
+
+图中的「理想 Logit」是假定精确匹配目标后的 $z=\ln t$，不是从真实训练模型读出的数值。展开 Show Derivation 可以同时看到固定目标推导与随机时长的反例。
+
+## 5. Video Completion Prediction
+
+设 $L>0$ 是视频长度，$t\ge0$ 是观看时长，课程以 $\tau=0.8$ 为完播阈值：
+
+$$
+\boxed{y_{\mathrm{finish}}=\mathbf1\left(\frac{t}{L}\ge\tau\right)},\qquad\tau=0.8
+$$
+
+例如 10 分钟即 600 秒的视频，观看 **达到或超过 480 秒** 都是正样本；479 秒仍是负样本。80% 是这里的业务定义，并不意味着播放到了视频最后一帧。
+
+模型预测的是这一事件的条件概率：
+
+$$
+\boxed{p_{\mathrm{finish}}=P\left(\frac{t}{L}\ge0.8\mid x,L\right)}
+$$
+
+若 $p_{\mathrm{finish}}=0.73$，表示达到上述 80% 阈值的概率是 73%，不是预测用户会观看 73% 的视频。重复播放、后台播放与观看时长上限等仍需明确数据口径。
+
+训练使用普通二分类 BCE，下面 $y=y_{\mathrm{finish}}$、$p=p_{\mathrm{finish}}$：
+
+$$
+\mathcal L=-[y\log p+(1-y)\log(1-p)]
+$$
+
+## 6. Video Length Bias
+
+短视频往往更容易达到相同的观看比例，长视频则更难。假设 15 秒视频的完播概率为 50%，180 秒视频为 30%，直接按原始概率排序会选择前者，但不能因此断言前者的内容质量更高：两个目标事件的时间要求不同。
+
+下方模拟器用一条随长度下降的**教学基准曲线**展示这个问题。曲线并不是「视频长度决定完播率」的因果定律；真实基准也受到内容类型、人群、场景与曝光策略影响。
+
+## 7. Completion Rate Length Normalization
+
+课程给出的策略是用预测完播概率除以相同长度视频的基准完播率：
+
+$$
+\boxed{S_{\mathrm{finish}}=\frac{p_{\mathrm{finish}}}{f(L)}}
+$$
+
+$f(L)$ 应从历史数据估计，$S_{\mathrm{finish}}$ 表示相对于该基准的表现。下面是交接稿中的数值例子：
+
+| 视频 | 预测完播概率 | 长度基准 | 相对表现分数 |
+| --- | ---: | ---: | ---: |
+| A，短视频 | 0.40 | 0.50 | 0.80 |
+| B，长视频 | 0.30 | 0.10 | 3.00 |
+
+原始概率 A 高于 B；但 B 达到了自身基准的 3 倍，比 A 的 0.8 倍更突出，因此按归一化分数 B 排在前面。这个分数可以大于 1，**不再是概率，也不是新的校准完播概率**。
+
+当 $f(L)$ 很小时，估计噪声会被分母放大。工程中可做平滑、分桶与样本量约束；下图为了展示边界，明确使用 $p/\max(f(L),0.01)$ 作为数值保护。这个截断会改变原始比值，不是课程原公式的一部分，阈值也不是生产建议。
+
+长度归一化表达的是一种排序偏好。它不保证完全消除所有长度偏差，也不保证自动提升用户满意度，需要与其他目标一起验证。
+
+## 8. Interactive Completion Rate Explorer
+
+<CompletionRateFigure />
+
+默认 Video A 是 15 秒、50% 完播概率，Video B 是 180 秒、30%。切换到 Normalized Completion，观察相对于基准的表现。点击「课程例子」会把 A 的概率换成 40%，精确复现上表的 $0.80$ 与 $3.00$。
+
+编辑 A 或 B 时，可以分别改变时长、预测概率与长度基准。改变时长会根据教学曲线重新给出基准；手动改基准仅覆盖这个视频的点，并不会把整条曲线伪装成根据两个点拟合出来的历史统计。
+
+曲线采用 $f_{\mathrm{demo}}(L)=0.5\exp[-\ln5\,(L-15)/165]$，因此恰好经过 $(15,0.5)$ 与 $(180,0.1)$。它只是为交互构造的例子，不应直接拿去作为推荐系统的长度校正模型。
+
+## 9. Chapter Summary
+
+| 维度 | Watch Time | Completion |
+| --- | --- | --- |
+| 目标 | 非负观看时长的代理 | 达到观看比例阈值的概率 |
+| 训练标签 | 连续 soft label | 二分类标签 |
+| Loss | Soft-label BCE | Binary BCE |
+| 推理变换 | $\exp(z)$ | $\sigma(z)$ |
+| 主要问题 | 非线性标签变换与时间尺度 | 视频长度与样本空间差异 |
+| 核心处理 | 固定单位、明确统计含义 | 用历史基准构造相对表现分数 |
+
+本章三个核心公式是：
+
+$$
+\boxed{\mathcal L=-\left[\frac{t}{1+t}\log p+\frac{1}{1+t}\log(1-p)\right]}
+$$
+
+$$
+\boxed{\hat t=e^z}
+$$
+
+$$
+\boxed{S_{\mathrm{finish}}=\frac{p_{\mathrm{finish}}}{f(L)}}
+$$
+
+观看时长代理、完播概率、长度相对分数是三个不同对象。将它们放回 [多目标分数融合](/notes/ml/recsys/score-fusion/)时，先说明单位与含义，再讨论业务权重。本次课程笔记到 Chapter 04 为止，不提前实现后续模型。

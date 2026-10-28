@@ -1,0 +1,213 @@
+import RankingArchitectureFigure from "@/components/visualization/ml/recsys/RankingArchitectureFigure";
+import RankingCalibrationFigure from "@/components/visualization/ml/recsys/RankingCalibrationFigure";
+import RankingFusionFigure from "@/components/visualization/ml/recsys/RankingFusionFigure";
+
+# 推荐系统排序架构总览
+
+**Chapter 01 — Ranking Overview**。排序模型为每个「用户 × 候选物品 × 场景」预测多个行为概率，再将它们变成最终排序分数。
+
+> 内容来源：第 1–4 节按学习交接稿中的王树森[推荐系统课程](https://www.bilibili.com/video/BV19t4y1p7UM)截图笔记整理；本次未直接核验视频。第 5 节为额外补充，交互示例由本站设计，不代表讲师给出的实验或生产配置。
+
+## 1. Ranking Architecture
+
+<RankingArchitectureFigure />
+
+输入包括 User Features（用户）、Item Features（物品）、Statistical Features（统计）与 Context Features（场景）。离散字段可先做 embedding，数值字段可先归一化；将各组表示拼接成 $x$：
+
+$$
+x=[e_{\mathrm{user}};e_{\mathrm{item}};e_{\mathrm{stat}};e_{\mathrm{context}}],\qquad
+h=f_\theta(x),\qquad
+p_k=\sigma(W_kh+b_k)
+$$
+
+其中 $e$ 是各组特征表示，$[\cdot;\cdot]$ 表示拼接；$f_\theta$ 是共享 DNN，$\theta$ 是共享参数，$h$ 是共享表示。第 $k$ 个任务头拥有自己的 $W_k,b_k$；$\sigma(z)=1/(1+e^{-z})$ 将其 logit 转为行为概率 $p_k$。
+
+典型任务是 CTR（Click-Through Rate，点击率）、Like Rate（点赞率）、Favorite Rate（收藏率）、Share Rate（转发率）。**每个任务使用独立 Sigmoid，不能把四个任务放进统一 Softmax**：一次曝光可以既被点击又被收藏，行为不互斥，概率之和无需等于 1。独立输出也不意味着这些行为统计独立。
+
+Shared-Bottom 的共享层学习共性，任务头学习各自的决策边界。例如「用户对视频主题感兴趣」可能同时帮助预测点击和收藏，但点击与收藏的基础发生率不同，不能强行共用同一个输出。
+
+## 2. Multi-Task Learning & Loss Function
+
+切换上图到「联合训练」：每个任务的概率与标签进入各自的 BCE，按权重汇总。下面先写单个样本的损失，训练时再对 batch 取均值。
+
+$$
+\mathcal L_k=\operatorname{BCE}(y_k,p_k)
+=-\left[y_k\ln p_k+(1-y_k)\ln(1-p_k)\right]
+$$
+
+$y_k\in\{0,1\}$ 是真实标签，$p_k\in(0,1)$ 是预测概率。多个任务联合训练：
+
+$$
+\boxed{\mathcal L=\sum_{k=1}^{K}\lambda_k\operatorname{BCE}(y_k,p_k)}
+$$
+
+$K$ 是任务数，$\lambda_k\ge0$ 是**训练阶段**的任务权重。共享参数收到所有任务的加权梯度，而每个任务头只收到自身任务的梯度：
+
+$$
+\nabla_\theta\mathcal L
+=\sum_k\lambda_k\nabla_\theta\mathcal L_k
+$$
+
+例如图中的标签为 $(1,0,0,0)$，预测为 $(0.6,0.2,0.1,0.05)$。点击任务的 BCE 是 $-\ln0.6\approx0.5108$；点赞任务是 $-\ln(1-0.2)\approx0.2231$。用演示权重 $(0.4,0.3,0.2,0.1)$ 汇总，Total Loss 约为 $0.2975$。
+
+任务的标签定义和样本空间必须先说清：$P(\mathrm{favorite}\mid x)$ 与 $P(\mathrm{favorite}\mid\mathrm{click},x)$ 是两个目标。某项标签缺失时，不能直接把它当负例；可用 Label Masking，让该样本不贡献这一任务的损失，并按有效标签数归一化。对于条件行为，也可以显式建模条件概率。共享表示能借用其他任务的数据，但梯度冲突时会产生负迁移。
+
+## 3. Class Imbalance & Negative Sampling
+
+推荐行为通常不平衡。课程举例：每 100 次曝光约有 10 次点击，每 100 次点击约有 10 次收藏。这只是示例比例，且两个比例的分母不同，不能都解释成曝光收藏率。
+
+下方交互图先看两根样本比例条：原始数据是 **100 Positive + 900 Negative**；当 $\alpha=0.1$ 时，采样后的期望数量是 **100 Positive + 90 Negative**。
+
+设 $n_+$、$n_-$ 分别为正负样本数量，$\alpha\in(0,1]$ 为负样本保留率。保留全部正样本，每个负样本独立、随机地以相同概率 $\alpha$ 保留：
+
+$$
+\mathbb E[n'_-]=\alpha n_-,\qquad n'_-\approx\alpha n_-
+$$
+
+训练样本变少，计算成本下降，但也丢掉了部分负例信息，估计方差可能增加。正样本占比同时被抬高，模型学到的是**采样分布中的概率**；因此，不能直接把采样后输出当线上 CTR。这里讨论的是二分类负例降采样，不是检索训练中的任意 hard-negative 选择。
+
+## 4. Probability Calibration
+
+<RankingCalibrationFigure />
+
+### 从比例推导校正公式
+
+原始正样本比例与采样后比例分别为：
+
+$$
+p_{\mathrm{true}}=\frac{n_+}{n_++n_-},\qquad
+p_{\mathrm{sample}}=\frac{n_+}{n_++\alpha n_-}
+$$
+
+课程记作 $p_{\mathrm{pred}}$：理想模型学到了采样分布，$p_{\mathrm{pred}}=p_{\mathrm{sample}}$。当 $0<p_{\mathrm{true}}<1$ 且 $\alpha<1$ 时，$p_{\mathrm{sample}}>p_{\mathrm{true}}$。
+
+看 odds（正负比例）更直接：
+
+$$
+\frac{p_{\mathrm{pred}}}{1-p_{\mathrm{pred}}}
+=\frac{n_+}{\alpha n_-}
+=\frac{1}{\alpha}\frac{p_{\mathrm{true}}}{1-p_{\mathrm{true}}}
+$$
+
+将两边乘 $\alpha$，解出 $p_{\mathrm{true}}$：
+
+$$
+\boxed{p_{\mathrm{true}}
+=\frac{\alpha p_{\mathrm{pred}}}{1-p_{\mathrm{pred}}+\alpha p_{\mathrm{pred}}}}
+$$
+
+这也适用于给定特征 $x$ 的条件概率：设 $s=1$ 表示样本被保留，若 $P(s=1\mid y=1,x)=1$、$P(s=1\mid y=0,x)=\alpha$，贝叶斯公式给出
+
+$$
+P(y=1\mid x,s=1)
+=\frac{P(y=1\mid x)}{P(y=1\mid x)+\alpha[1-P(y=1\mid x)]}
+$$
+
+因此不仅能校正群体平均比例，也能在上述采样机制下校正模型对每个 $x$ 的输出。交互图使用群体比例，是为了把这个机制看清楚。
+
+### 数值例子与 Logit 形式
+
+$100$ 个正样本、$900$ 个负样本，取 $\alpha=0.1$。负样本期望剩 $90$ 个，因此：
+
+$$
+p_{\mathrm{pred}}=\frac{100}{190}\approx0.5263,\qquad
+p_{\mathrm{true}}=\frac{0.1\times(100/190)}{1-(100/190)+0.1\times(100/190)}=0.1
+$$
+
+计算应使用完整精度，$0.5263$ 仅用于展示。对 odds 取自然对数，得到等价形式：
+
+$$
+\boxed{\operatorname{logit}(p_{\mathrm{true}})
+=\operatorname{logit}(p_{\mathrm{pred}})+\ln\alpha},\qquad
+\operatorname{logit}(p)=\ln\frac{p}{1-p}
+$$
+
+$\alpha<1$ 时 $\ln\alpha<0$，所以是在 logit 上减去一段偏移，而不是直接把概率乘 $\alpha$。
+
+### 适用条件与取舍
+
+- 正样本全部保留、负样本按固定 $\alpha$ 随机保留，且输出确实对应这个采样分布。按难度选负例、依赖特征的采样、正例也采样时，不能直接套用同一个固定 $\alpha$。
+- 如果训练中已通过正确的重要性加权恢复原始分布目标，就不要再重复做这次先验校正。
+- 固定 $\alpha>0$ 时，校正映射的导数为 $\alpha/[1-(1-\alpha)p]^2>0$，所以不改变单任务内部排序，却会改变阈值判断、预期收益及多目标融合。
+- 这只修正采样引起的偏差。模型失配、分布漂移等仍会导致校准误差，应在代表真实流量的验证集上检查。
+
+## 5. Multi-Objective Score Fusion（扩展）
+
+**本节是扩展补充，不归因于课程截图。** 假设各任务输出已经过所需校准，记为 $\mathbf p=[p_{\mathrm{CTR}},p_{\mathrm{Like}},p_{\mathrm{Favorite}},p_{\mathrm{Share}}]$。先看同一批概率如何因融合规则而改变排序：
+
+<RankingFusionFigure />
+
+### Weighted Sum
+
+$$
+\boxed{S=\sum_{k=1}^{K}w_kp_k}
+$$
+
+$S$ 是 Ranking Score，$w_k\ge0$ 是**排序阶段**的融合权重。例如：
+
+$$
+S=0.4p_{\mathrm{CTR}}+0.3p_{\mathrm{Like}}+0.2p_{\mathrm{Favorite}}+0.1p_{\mathrm{Share}}
+$$
+
+权重只作演示，并非生产建议。默认图中 A 的分数为 $0.326$，B 为 $0.197$，高 CTR 可以补偿其他目标的低概率。真实使用不要求权重和为 1，融合分数也未必在 $[0,1]$ 内；即使恰好落在区间内，也不自动具有事件概率含义。
+
+### Multiplicative Fusion
+
+$$
+\boxed{S=\prod_{k=1}^{K}(p_k+\epsilon)^{w_k}},\qquad
+\ln S=\sum_{k=1}^{K}w_k\ln(p_k+\epsilon)
+$$
+
+$\epsilon>0$ 用于数值稳定。示例取 $\epsilon=10^{-6}$，在 log-space 累加后求指数，避免直接连乘很小的数。相同权重下，A 的分数约 $0.0577$，B 约 $0.1778$，排序反转：乘法通常更敏感于被赋予正权重的低概率目标。它是业务打分规则，不能解释为「各行为同时发生的概率」。
+
+### Conditional Probability Fusion
+
+若 conversion 被定义为点击后的转化，则概率乘法法则给出：
+
+$$
+P(\mathrm{click},\mathrm{conversion}\mid x)
+=P(\mathrm{click}\mid x)P(\mathrm{conversion}\mid\mathrm{click},x)
+$$
+
+$$
+\boxed{pCTCVR=pCTR\times pCVR}
+$$
+
+这里 $pCVR$ **必须是点击后的条件转化概率**，$pCTCVR$ 才是点击且转化的联合概率。例如 $pCTR=0.1$、$pCVR=0.2$，得到 $pCTCVR=0.02$。这不需要假设点击与转化独立，也不同于上一节任意概率的乘法融合。
+
+### Expected Utility
+
+如果第 $k$ 个行为 $a_k$ 的业务价值是 $v_k$，总收益定义为各行为价值的加和，则：
+
+$$
+\boxed{S(x)=\mathbb E\!\left[\sum_k v_k a_k\mid x\right]
+=\sum_{k=1}^{K}v_kP(a_k=1\mid x)}
+$$
+
+期望的线性性质不要求各行为独立。例如点击值 $1$、收藏额外值 $5$，曝光点击概率 $0.1$、曝光收藏概率 $0.02$，期望收益就是 $0.1+5\times0.02=0.2$。如果收藏价值已经包含点击价值，就需要重新定义增量收益，避免重复计价。
+
+### Practical Considerations
+
+- **Calibration 与 Objective Scale**：不同任务的采样率、基础发生率、标签样本空间可能不同。先统一概率语义并检查校准，再讨论权重，不能只因某个数更小就随意放大。
+- **$\lambda_k\ne w_k$**：训练权重控制表示学习与梯度，融合权重控制排序偏好；二者处于不同阶段，没有必须相等的理由。
+- **A/B Testing**：离线指标与线上体验可能不一致。最终方案和权重需要线上实验评估，并同时看用户体验与业务约束。
+
+## 6. Summary & Key Formulas
+
+**Feature Engineering → Shared Representation → Multi-Task Prediction → Probability Calibration → Score Fusion → Ranking**。
+
+共享网络提取共性，任务头预测各自行为；训练时汇总 loss，推理时按采样机制校准概率，再根据目标融合为排序分数。记住三条主公式：
+
+$$
+\boxed{\mathcal L=\sum_k\lambda_k\operatorname{BCE}(y_k,p_k)}
+$$
+
+$$
+\boxed{p_{\mathrm{true}}=\frac{\alpha p_{\mathrm{pred}}}{1-p_{\mathrm{pred}}+\alpha p_{\mathrm{pred}}}}
+$$
+
+$$
+\boxed{S=\sum_kw_kp_k}
+$$
+
+下一步可结合已有的 [Logistic Regression](/notes/ml/classifiers/logistic-regression/) 理解单个任务头，再看 [CTR、CVR 与 ESMM](/notes/ml/recsys/ctr-cvr-esmm/) 的条件概率建模，以及 [特征交叉：FM 与 DCN](/notes/ml/recsys/feature-crossing/)。后续课程模型与 PyTorch 实验另行记录，本章不包含实验复现。

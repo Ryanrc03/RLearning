@@ -391,3 +391,79 @@ button.mod-card { cursor: pointer; }
   .ms-funnel-track { grid-column: 1 / -1; grid-row: 2; }
   .ms-panel { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
+
+/* Ranking Overview figures: local surfaces inherit the host's theme tokens.
+   The current host is light-only; OS dark preference also works for these figures. */
+.ranking-viz .viz { --ranking-paper: var(--paper); --ranking-cream: var(--cream); border-color: var(--vline); }
+.ranking-viz .viz-head h4, .ranking-viz .viz-stat b { color: var(--ink); }
+.ranking-viz .viz-panel, .ranking-viz .viz-narr, .ranking-viz .viz-btn,
+.ranking-viz .viz-tabs, .ranking-viz .viz-stat div { background: var(--ranking-paper); }
+.ranking-viz .viz-panel h5, .ranking-viz .viz-table th { color: var(--muted); }
+.ranking-viz .viz-stack, .ranking-viz .viz-bar-track { background: var(--vline); }
+.ranking-viz .viz-stack span + span { margin-left: 0; }
+.ranking-viz .viz-row { gap: 10px; margin-bottom: 16px; }
+.ranking-viz .viz-slider { grid-template-columns: auto minmax(70px, 1fr) auto; width: 100%; max-width: 440px; }
+.ranking-viz .viz-slider input { max-width: 100%; }
+.ranking-viz .viz-table caption { text-align: left; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+.ranking-viz .viz-table { min-width: 380px; }
+.ranking-viz .ranking-block { margin: 16px 0; }
+.ranking-equation { margin: 14px 0; padding: 10px 12px; border: 1px solid var(--vline); border-radius: 5px; background: var(--ranking-paper); font-family: Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
+@media (prefers-color-scheme: dark) {
+  .ranking-viz .viz { color-scheme: dark; --paper: #202328; --cream: #181b20; --ink: #e5e8ed; --muted: #adb4bf; --vline: #444b57; --v1: #77b3ff; --v2: #ff9c75; --v3: #59d6aa; --v4: #f4cc67; --ranking-paper: #202328; --ranking-cream: #181b20; background: var(--ranking-cream); }
+  .ranking-viz .viz-tab.is-on { background: var(--ink); color: var(--paper); }
+  .ranking-viz .viz-btn { border-color: var(--vline); }
+  .ranking-viz .viz-slider input[type="range"] { accent-color: var(--v1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ranking-viz .viz * { transition: none !important; }
+}
+
+/* Chapter 02 uses the same locally themed surfaces as the ranking figures. */
+.mmoe-viz .mmoe-gap { margin-top: 12px; }
+.mmoe-viz .mmoe-selected { border-color: var(--ink); }
+.mmoe-viz .viz-panel { overflow-wrap: anywhere; }
+.mmoe-viz .viz-bar-row { grid-template-columns: 64px minmax(0, 1fr) auto; }
+@media (max-width: 580px) {
+  .mmoe-viz .viz-bar-row { grid-template-columns: minmax(0, 1fr) auto; }
+}
+
+/* Course Chapters 03–04: compact controls and horizontally scrollable data. */
+.chapter34-viz .chapter34-controls, .chapter34-viz .fusion-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; }
+.chapter34-viz .chapter34-controls .viz-slider, .chapter34-viz .fusion-controls .viz-slider { grid-template-columns: minmax(0, 1fr) auto; max-width: 100%; margin-bottom: 4px; }
+.chapter34-viz .chapter34-controls .viz-slider input, .chapter34-viz .fusion-controls .viz-slider input { grid-column: 1 / -1; grid-row: 2; }
+.chapter34-viz .viz-table { min-width: 420px; }
+.chapter34-viz .viz-table caption { text-align: left; }
+.chapter34-viz .chapter34-details { margin-top: 12px; }
+.chapter34-viz .chapter34-details summary { cursor: pointer; font-size: 12.5px; }
+.chapter34-viz .chapter34-details p { color: var(--muted); }
+.chapter34-viz .fusion-table-wrap { overflow-x: auto; }
+@media (max-width: 580px) {
+  .chapter34-viz .chapter34-controls, .chapter34-viz .fusion-controls { grid-template-columns: minmax(0, 1fr); }
+}
+.chapter34-viz .viz-body > * + * { margin-top: 14px; }
+.chapter34-viz .fusion-formula { padding: 10px 12px; border: 1px solid var(--vline); border-radius: 5px; background: var(--ranking-paper); overflow-wrap: anywhere; }
+.chapter34-viz select { margin-left: 8px; max-width: 100%; border: 1px solid var(--vline); border-radius: 5px; padding: 4px 8px; background: var(--ranking-paper); color: var(--ink); font: inherit; }
+.chapter34-viz .viz-bar-row { grid-template-columns: minmax(80px, 140px) minmax(0, 1fr) auto; }
+@media (max-width: 580px) {
+  .chapter34-viz .viz-bar-row { grid-template-columns: minmax(0, 1fr) auto; }
+}
+
+/* PPO teaching figures: reuse the locally themed documentation surfaces. */
+.ppo-viz .ppo-role-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; margin-bottom: 16px; }
+.ppo-viz .ppo-role { display: grid; gap: 6px; padding: 12px 8px; border: 1px solid; border-radius: 6px; background: var(--paper); color: var(--ink); font: inherit; cursor: pointer; }
+.ppo-viz .ppo-role b { font-size: 12px; }
+.ppo-viz .ppo-role span { font-size: 11px; }
+.ppo-viz .ppo-fields { display: grid; grid-template-columns: 82px minmax(0,1fr); gap: 8px 12px; margin: 10px 0; font-size: 12.5px; }
+.ppo-viz .ppo-fields dt { color: var(--muted); }
+.ppo-viz .ppo-fields dd { margin: 0; overflow-wrap: anywhere; }
+.ppo-viz .ppo-equation { padding: 12px; margin: 12px 0; border: 1px solid var(--vline); border-radius: 6px; background: var(--paper); font-family: Consolas,monospace; font-size: 13px; overflow-wrap: anywhere; }
+.ppo-viz .ppo-steps { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.ppo-viz .ppo-steps .is-on { box-shadow: inset 0 0 0 1px var(--v1); }
+.ppo-viz .viz-panel { margin: 12px 0; }
+.ppo-viz button:focus-visible { outline: 2px solid var(--v1); outline-offset: 3px; }
+@media (max-width: 580px) {
+ .ppo-viz .ppo-role-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+ .ppo-viz .viz-slider { grid-template-columns: minmax(0,1fr) auto; }
+ .ppo-viz .viz-slider input { grid-column: 1/-1; grid-row: 2; }
+ .ppo-viz .ppo-fields { grid-template-columns: 62px minmax(0,1fr); }
+}

@@ -6,7 +6,7 @@ import KnowledgeTree from "@/components/visualization/ml/KnowledgeTree";
 
 **这一章回答「预训练之后怎么教模型听话」：先用示范教它照指令回答，再想办法只训一小部分省钱，然后用比较和奖励把它往「更好」推，最后看奖励怎么被钻空子。**
 
-五页是一条问题链，每一页解决上一页留下的问题。每页都是五段：一句话、为什么需要它、怎么工作、代价与取舍、再往下看。
+六页是一条问题链，每一页解决上一页留下的问题。概念页保持短读，PPO 用数字与交互串起完整训练过程。
 
 ## 这章的问题链
 
@@ -14,8 +14,8 @@ import KnowledgeTree from "@/components/visualization/ml/KnowledgeTree";
 
 ## 怎么读
 
-按顺序读，每页 5 到 7 分钟，图里的开关和滑杆从头拨到尾再往下看。
+按顺序读，概念页约 5 到 10 分钟，PPO 深度教程约 30 分钟，图里的开关和滑杆从头拨到尾再往下看。
 
-第 1 页 SFT：base model 只会续写，拿（指令, 好回答）对继续训练，loss 还是预训练那条逐 token 的 cross-entropy，只是把 prompt 的 token mask 掉。第 2 页 LoRA：全量微调一个 8B 模型光优化器状态就上百 GB，冻结 W、只学一个低秩增量 BA，可训练参数降到千分之几。第 3 页 RLHF：SFT 只会模仿示范，可好回答难写、两个回答哪个好却容易比，于是用成对偏好训奖励模型，再用 PPO 在 KL 约束下优化；DPO 把这两步合成一个 loss。第 4 页 GRPO：PPO 的 critic 和策略一样大，换成同一个 prompt 采样一组回答、用组内平均当基线。第 5 页奖励设计与 Reward Hacking：奖励一旦成了目标就会被钻空子，长度奖励会被堆字刷分。
+第 1 页 SFT：base model 只会续写，拿（指令, 好回答）对继续训练，loss 还是预训练那条逐 token 的 cross-entropy，只是把 prompt 的 token mask 掉。第 2 页 LoRA：全量微调一个 8B 模型光优化器状态就上百 GB，冻结 W、只学一个低秩增量 BA，可训练参数降到千分之几。第 3 页 RLHF：SFT 只会模仿示范，可好回答难写、两个回答哪个好却容易比，于是用成对偏好训奖励模型，再用 PPO 在 KL 约束下优化；DPO 把这两步合成一个 loss。第 4 页 [PPO](/notes/ml/post-training/ppo/)：区分四种角色，手算 GAE，观察正负 advantage 的 clipping，再走完一轮 rollout 与优化。第 5 页 GRPO：去掉训练中的 critic，换成同一个 prompt 采样一组回答、用组内统计量构造 advantage。第 6 页奖励设计与 Reward Hacking：奖励一旦成了目标就会被钻空子，长度奖励会被堆字刷分。
 
-读完应该能用自己的话回答五个问题：SFT 为什么只在回答上算 loss；LoRA 的 r 怎么选、什么时候该换全量微调；DPO 为什么不需要单独的奖励模型；GRPO 省掉的是哪个网络；训练中回答越写越长时先查什么。前置是 LLMs 章的[预训练目标](/notes/ml/llms/pretraining-objectives/)和 [Softmax 与 Cross-Entropy](/notes/ml/classifiers/softmax-cross-entropy/)；训出来的模型怎么判好坏，回到 LLM Engineering 的评估几页。
+读完应该能用自己的话回答六个问题：SFT 为什么只在回答上算 loss；LoRA 的 r 怎么选、什么时候该换全量微调；DPO 为什么不需要单独的奖励模型；PPO 的 GAE 与 clipping 如何配合；GRPO 省掉的是哪个网络；训练中回答越写越长时先查什么。前置是 LLMs 章的[预训练目标](/notes/ml/llms/pretraining-objectives/)和 [Softmax 与 Cross-Entropy](/notes/ml/classifiers/softmax-cross-entropy/)；训出来的模型怎么判好坏，回到 LLM Engineering 的评估几页。

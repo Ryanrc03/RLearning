@@ -15,6 +15,10 @@ import BrokerVsBrokerless from "@/content/cs/networking/broker-vs-brokerless.mdx
 import ProcessesThreadsCoroutines from "@/content/cs/os/processes-threads-coroutines.mdx";
 import VirtualMemory from "@/content/cs/os/virtual-memory.mdx";
 import UCB from "@/content/ml/reinforcement-learning/ucb.mdx";
+import ScoreFusion from "@/content/ml/recsys/score-fusion.mdx";
+import WatchTimeCompletion from "@/content/ml/recsys/watch-time-completion.mdx";
+import Mmoe from "@/content/ml/recsys/mmoe.mdx";
+import RankingOverview from "@/content/ml/recsys/ranking-overview.mdx";
 import KuairandInput from "@/content/ml/recsys/kuairand-input.mdx";
 import LightgbmExplained from "@/content/ml/recsys/lightgbm-explained.mdx";
 import BoostingLab from "@/content/ml/recsys/boosting-lab.mdx";
@@ -98,6 +102,7 @@ import PostTrainingOverview from "@/content/ml/post-training/overview.mdx";
 import Sft from "@/content/ml/post-training/sft.mdx";
 import Lora from "@/content/ml/post-training/lora.mdx";
 import Rlhf from "@/content/ml/post-training/rlhf.mdx";
+import Ppo from "@/content/ml/post-training/ppo.mdx";
 import Grpo from "@/content/ml/post-training/grpo.mdx";
 import RewardHacking from "@/content/ml/post-training/reward-hacking.mdx";
 import LlmAsJudge from "@/content/ml/llm-engineering/llm-as-judge.mdx";
@@ -127,6 +132,10 @@ const noteComponents = {
   "cs/os/processes-threads-coroutines": ProcessesThreadsCoroutines,
   "cs/os/virtual-memory": VirtualMemory,
   "ml/reinforcement-learning/ucb": UCB,
+  "ml/recsys/ranking-overview": RankingOverview,
+  "ml/recsys/mmoe": Mmoe,
+  "ml/recsys/score-fusion": ScoreFusion,
+  "ml/recsys/watch-time-completion": WatchTimeCompletion,
   "ml/recsys/kuairand-input": KuairandInput,
   "ml/recsys/lightgbm-explained": LightgbmExplained,
   "ml/recsys/boosting-lab": BoostingLab,
@@ -210,6 +219,7 @@ const noteComponents = {
   "ml/post-training/sft": Sft,
   "ml/post-training/lora": Lora,
   "ml/post-training/rlhf": Rlhf,
+  "ml/post-training/ppo": Ppo,
   "ml/post-training/grpo": Grpo,
   "ml/post-training/reward-hacking": RewardHacking,
   "ml/llm-engineering/llm-as-judge": LlmAsJudge,

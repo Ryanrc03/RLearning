@@ -1,0 +1,135 @@
+import ScoreFusionPlayground from "@/components/visualization/ml/recsys/ScoreFusionPlayground";
+import RankDecayFigure from "@/components/visualization/ml/recsys/RankDecayFigure";
+
+# 多目标预估分数融合
+
+**Chapter 03 — Multi-Objective Score Fusion**。多任务模型回答「用户可能做什么」，融合函数回答「这次排序更看重什么」。把多个预测值压成一个 Ranking Score，才得到可用于候选排序的标量。
+
+> 本章按王树森[《推荐系统》课程](https://www.bilibili.com/video/BV19t4y1p7UM)的用户交接稿整理，未直接核验课程视频。标为「课程公式」的内容来自交接稿；条件概率、量纲、数值稳定性说明是本站补充。所有候选、参数与交互图均为教学示例，不是课程实验或真实业务数据。
+
+## 1. Overview
+
+[上一章的 MMoE](/notes/ml/recsys/mmoe/)可以同时输出 pCTR、pLike、pFavorite、pShare、pPay，以及预测观看时长或相应分数。任务头各自学习目标，输出不要求相加为 1；预测观看时长是连续量，命名为 pWatchTime 也不意味着它是概率。
+
+在「候选 → 多任务预测 → 校准 → 分数融合 → 排序」这条链上，本章关注最后两步。加权和、名次融合、乘法融合表达不同偏好，没有一种公式自动适合所有业务。训练损失权重决定模型如何学习；这里的融合权重决定推理后如何排，两者应分别验证。
+
+先约定概率口径。交互示例的四个行为概率都以**曝光**为分母，即 $P(\text{behavior}\mid\text{exposure},x)$；它们不是点击后样本中的条件转化率。预测的校准程度、取值尺度和标签定义都影响融合效果。最终 $S$ 是排序分数，不应解释为某个行为的发生概率。
+
+## 2. Weighted Sum
+
+### 简单加权求和
+
+课程公式固定点击系数为 1，让其他行为分别加分：
+
+$$
+\boxed{S=p_{\mathrm{click}}+w_1p_{\mathrm{like}}+w_2p_{\mathrm{collect}}+\cdots}
+$$
+
+更一般地，对 $K$ 个目标，$p_k$ 为第 $k$ 个预测值，$w_k$ 为其业务权重：
+
+$$
+\boxed{S=\sum_{k=1}^{K}w_kp_k}
+$$
+
+本章交互取 $w_k\ge0$，所以其他条件不变时，提高任一目标不会降低分数。权重不要求和为 1；全部乘同一个正数不会改变排序。若混入以秒计的观看时长，直接与概率相加会受单位影响，必须明确尺度或归一化方案，不能只把各个系数都设成 1。
+
+### CTR 调节的加权和
+
+课程另一公式是：
+
+$$
+\boxed{S=p_{\mathrm{click}}\left(1+w_1p_{\mathrm{like}}+w_2p_{\mathrm{collect}}+\cdots\right)}
+$$
+
+加法让每个目标独立贡献分数；这里点击率乘在整组增益外面。即使其他行为预测很高，低 CTR 也会压低整体贡献。这里的 $1$ 保留点击的基础分；不能把它写成只乘其他目标之和。
+
+以下同一组曝光边际概率，Click、Like、Favorite、Pay 的权重均为 1。收藏使用 Favorite，与公式中的 collect 同义。
+
+| 候选 | Click | Like | Favorite | Pay | 简单加权和 | CTR-weighted |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| A | 0.40 | 0.02 | 0.01 | 0.005 | 0.435 | 0.414 |
+| B | 0.20 | 0.18 | 0.10 | 0.020 | 0.500 | 0.260 |
+
+例如 $S_A^{\mathrm{CTR}}=0.40(1+0.02+0.01+0.005)=0.414$。加法把 B 排在 A 前；CTR 调节后顺序反转。这里没有更新模型，只改变了对同一组预测的使用方式。这两个数值例子也由纯函数单元测试核验。
+
+## 3. Rank-based Fusion
+
+当观看时长、CTR、Like、Share 的数值尺度不同，可以先按每个目标分别降序排序，再融合名次。课程中，某视频在观看时长上排名 $r_{\mathrm{time}}$，贡献为：
+
+$$
+\boxed{S_{\mathrm{time}}=\frac{1}{r_{\mathrm{time}}^\alpha+\beta}}
+$$
+
+对多个目标分别设置参数：
+
+$$
+\boxed{S=\frac{w_1}{r_{\mathrm{time}}^{\alpha_1}+\beta_1}
++\frac{w_2}{r_{\mathrm{click}}^{\alpha_2}+\beta_2}
++\frac{w_3}{r_{\mathrm{like}}^{\alpha_3}+\beta_3}+\cdots}
+$$
+
+$r_i$ 是该候选在第 $i$ 个目标中的名次，第一名为 1；$w_i\ge0$ 表示目标权重，$\alpha_i>0$ 控制衰减，$\beta_i\ge0$ 为平滑参数。不能直接把概率代进 $r_i$ 的位置。交互为便于比较，在各目标之间共享 $\alpha,\beta$，仍分别计算每个目标的名次。
+
+<RankDecayFigure />
+
+在 $r>1$ 时，增大 $\alpha$ 会降低贡献；在 $r=1$ 时贡献始终是 $1/(1+\beta)$。增大 $\beta$ 会让所有名次的绝对贡献变小，同时压缩相对于第一名的差异。例如 $\alpha=1,\beta=1$ 时，第一名贡献 $1/2$，第二名 $1/3$，第二十名 $1/21$。
+
+这种方法减弱了原始尺度的影响，却丢失分数间距：0.90 与 0.89、0.90 与 0.01 都可能只是相邻两名。它对各目标的严格单调变换保持名次不变，但名次依赖候选集合，加入一个候选也可能改变已有候选的融合分与相对顺序。并列名次必须有约定：本章采用竞争排名（1、1、3）；最终融合同分也并列，展示顺序按候选 ID，避免把展示次序误当成额外业务信号。
+
+## 4. Multiplicative Fusion
+
+课程用电商漏斗 **Exposure → Click → Add to Cart → Payment** 展示另一种组合：
+
+$$
+\boxed{S=p_{\mathrm{click}}^{\alpha_1}\cdot p_{\mathrm{cart}}^{\alpha_2}\cdot p_{\mathrm{pay}}^{\alpha_3}\cdot\mathrm{price}^{\alpha_4}}
+$$
+
+这里各行为预测与商品价格共同参与，指数调节重要性。对正输入，$\partial\log S/\partial\log p_k=\alpha_k$，所以指数表达相对变化的敏感度；并非线性加法中的「额外加几分」。某个正指数的目标很接近零，会明显压低整体分数，其他目标即使很高也可能难以补偿。
+
+### 先说明概率是否有条件
+
+漏斗的外观不意味着以上任意概率乘积都等于支付概率。若支付必须经过点击、加购，则链式法则为：
+
+$$
+P(\mathrm{pay}\mid\mathrm{exposure},x)
+=P(\mathrm{click}\mid\mathrm{exposure},x)
+P(\mathrm{cart}\mid\mathrm{click},\mathrm{exposure},x)
+P(\mathrm{pay}\mid\mathrm{cart},\mathrm{click},\mathrm{exposure},x)
+$$
+
+如果输入已经是曝光边际 $P(\mathrm{cart}\mid\mathrm{exposure},x)$、$P(\mathrm{pay}\mid\mathrm{exposure},x)$，再次相乘就不是上述链式分解。真实流程若允许跳过加购支付，这条特定漏斗也需要调整。任意指数、价格因子以及其他偏好引入后，$S$ 仍应解释为业务排序分数；它可以超过 1，不是支付概率。
+
+### 价格尺度与 Log-Space
+
+课程公式的对数形式（所有底数为正）是：
+
+$$
+\boxed{\log S=\alpha_1\log p_{\mathrm{click}}+\alpha_2\log p_{\mathrm{cart}}+\alpha_3\log p_{\mathrm{pay}}+\alpha_4\log(\mathrm{price})}
+$$
+
+在正值范围，按 $\log S$ 排序与按 $S$ 排序相同，可避免多个小概率直接连乘的下溢。为明确量纲，工程中可以将价格写成 $\mathrm{price}/P_0$，$P_0>0$ 为固定参考价，并在对数中使用该比值。统一改变价格单位、同步改变参考价，分数不变；同一组候选统一换算单位而参考价不变，会将所有分数乘同一个常数，也不改排序，但绝对数值会改变。
+
+正指数的零概率对应 $S=0,\log S=-\infty$；不能直接把 $\log 0$ 当成有限数。交互在指数为 0 时直接忽略该因子，在正指数且输入为 0 时贡献零乘积。实际系统也可采用 $\max(p,\varepsilon)$，但截断会改变分数，应明确阈值并检查极端值；这里没有隐藏加入 $\varepsilon$。展示用 $\exp(\log S)$ 还原数值，在更极端范围内应直接比较 log score。
+
+## 5. Interactive Ranking Playground
+
+<ScoreFusionPlayground />
+
+四个候选的输入固定，所有模式都使用相同的 Click、Like、Favorite、Pay 概率，避免把输入变化误认为融合变化。选择目标后可调整其权重或指数；Rank 模式另可调整共享 $\alpha,\beta$。公式行给出全部当前参数，输入表可检查每个目标的名次；排名箭头与**当前模式的默认参数排序**相比，而不是与前一个模式相比。
+
+为了在同一数据表上比较融合偏好，Product 模式把课程中的 Click / Cart / Pay 扩为 **Click / Like / Favorite / Pay** 四个曝光边际概率，并乘 $(\mathrm{price}/100\text{元})^{\alpha_{\mathrm{price}}}$。这是本站教学适配，不是课程漏斗公式的概率分解。价格默认指数为 0.5，四个概率默认指数为 1；其他模式默认权重为 1，Rank 默认 $\alpha=1,\beta=1$。
+
+可先在 Weighted Sum 中提高 Click 权重，观察 A 是否超过 B；切换 CTR-weighted 后调节 Like 权重，观察 B 需要多少增益才能补偿 CTR 差距。再切 Rank，核对各目标名次和贡献；最后在 Product 中令 Pay 指数为 0，观察忽略支付目标后的顺序。柱长按**当前模式当前最大分**缩放，具体分数始终单独显示；不同模式的绝对分数、柱长都不应横向比较。
+
+## 6. Chapter Summary
+
+| 方法 | 核心思想 | 主要取舍 |
+| --- | --- | --- |
+| Weighted Sum | 直接融合各预测分数 | 易解释，但依赖校准、尺度和权重 |
+| CTR-weighted Sum | 用 CTR 调节其他目标的贡献 | 偏向先发生点击的候选，其他目标的作用受 CTR 限制 |
+| Rank-based Fusion | 先排序再融合名次 | 弱化尺度差异，丢失间距且依赖候选集 |
+| Multiplicative Fusion | 用指数将多个目标相乘 | 能强调短板与价值，须处理概率口径、单位和零值 |
+
+**模型负责预测，融合函数负责决定排序偏好。** 融合分数不是概率；校准误差、权重与候选构成都可能影响结果，最终仍要结合业务约束和线上实验评估。
+
+回看 [Chapter 02 — MMoE & Gating Networks](/notes/ml/recsys/mmoe/)，区分模型内部的专家表示融合与预测之后的分数融合；继续读 [Chapter 04 — Watch Time & Completion Modeling](/notes/ml/recsys/watch-time-completion/)，理解观看时长、完播概率这些目标本身怎样建模。
