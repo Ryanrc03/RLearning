@@ -36,7 +36,7 @@ export const machineParts: MachinePart[] = [
   { id: "psu", name: "PSU", spec: { zh: "整机功耗", en: "system power" }, minor: true },
 ];
 
-// Numbers come from content/ml/post-training/grpo-3060-project.mdx.
+// Phase text (G = 6, 30 ms vs 7 ms, 63% / 37%, LoRA r = 32) comes from content/ml/post-training/grpo-3060-project.mdx; gpuUtil and cpuTemp are illustrative animation targets.
 export const grpoPhases: GrpoPhase[] = [
   {
     durationMs: 2600, path: "ssdToRam", color: 0x4cc9ff, gpuUtil: 6, cpuTemp: 44,
