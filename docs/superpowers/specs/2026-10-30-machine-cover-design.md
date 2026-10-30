@@ -64,11 +64,11 @@ HUD 显示当前阶段、`step n / 500` 和相关笔记链接（表中是笔记 
 | `content/machine.ts` | 纯数据：规格、部件 → 链接、GRPO 阶段（文字、相关笔记 slug、利用率 / CPU 目标值）。所有面向读者的文字写成 `{ zh, en }`，给英文版直接用 | 无 |
 | `components/home/machine/sim.ts` | 纯函数：阶段推进（按时长循环、step 计数）、读数向目标值缓动、功耗估算 | `content/machine.ts` |
 | `components/home/machine/scene.ts` | Three.js 场景：机箱、主板、散热器与风扇、内存、显卡、SSD、电源仓、数据包粒子。对外只暴露 `createScene(canvas) → { update(dt, state), setMode, project(partId), resize, dispose }` | `three` |
-| `components/home/machine/MachineHero.tsx` | `"use client"`。先渲染海报图；面板可见、有 WebGL、未开启减少动态时 `import()` `scene.ts`；HTML 标签叠在 canvas 上（`<a>` 可点）；tab 切换；拖动旋转、空闲时轻微摆动 | 以上三个 |
+| `components/home/machine/MachineHero.tsx` | `"use client"`。先渲染部件标签列表；面板可见、有 WebGL、未开启减少动态时 `import()` `scene.ts`；HTML 标签叠在 canvas 上（`<a>` 可点）；tab 切换；拖动旋转、空闲时轻微摆动 | 以上三个 |
 | `app/page.tsx` | 组装 hero、活动方格、路线图、最近记录 | — |
 
 - 依赖：新增 `three`（锁定版本）和 `@types/three`。只在首页动态加载，`npm run build` 的静态导出不受影响。
-- 海报：从 3D 场景截一张静态图，存到 `public/machine-poster.webp`。首屏、没有 WebGL、减少动态时都显示它，标签照常叠加。
+- 首屏与兜底（实施计划阶段改定，不用海报图）：3D 加载前，深色面板里先把各部件标签显示成一列文字；没有 WebGL 时一直是这一列。开启减少动态时渲染一帧静止画面，GRPO 视角改成五个阶段的列表。
 - 性能：面板离开视口或标签页隐藏时停止渲染；`devicePixelRatio` 上限 2，窄屏上限 1.5。
 - 可访问性：面板 `role="img"` 加一句描述；标签是真实链接，能用 Tab 聚焦；tab 是 `<button>`；`prefers-reduced-motion` 时不加载动画，只显示海报和标签。
 
@@ -76,4 +76,4 @@ HUD 显示当前阶段、`step n / 500` 和相关笔记链接（表中是笔记 
 
 - `tests/machine-sim.test.ts`：阶段按时长推进并循环、step 到 500 后回到 1、读数缓动不越界、减少动态时不推进。
 - `npm test`、`npm run typecheck`、`npm run lint`、`npm run build` 全过。
-- 内置浏览器预览：桌面和手机宽度、两个 tab、海报兜底、标签点击能跳转、无横向溢出、控制台无报错。
+- 内置浏览器预览：桌面和手机宽度、两个 tab、列表兜底和减少动态、标签点击能跳转、无横向溢出、控制台无报错。
