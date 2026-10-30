@@ -32,11 +32,11 @@
 | 部件 | 规格 | 点进 |
 | --- | --- | --- |
 | 整机 | Lenovo Legion T5 26IAB7 | — |
-| CPU | Intel Core i7-12700，12 核 20 线程 | CS Foundations |
-| 内存 | 16 GB DDR5-4800（2 × 8 GB） | Memory Hierarchy 笔记 |
-| GPU | NVIDIA GeForce RTX 3060 12 GB，功耗上限 170 W | ML & LLM / GPU Kernels |
-| SSD | KIOXIA 256 GB NVMe | Systems |
-| HDD | WD 1 TB | Systems |
+| CPU | Intel Core i7-12700，12 核 20 线程 | `cs/fundamentals/overview` |
+| 内存 | 16 GB DDR5-4800（2 × 8 GB） | `cs/fundamentals/memory-hierarchy` |
+| GPU | NVIDIA GeForce RTX 3060 12 GB，功耗上限 170 W | `ai-infra/gpu/overview` |
+| SSD | KIOXIA 256 GB NVMe | `systems/data/overview` |
+| HDD | WD 1 TB | `systems/data/overview` |
 | 电源 | — | 不链接，显示整机功耗 |
 
 外观参照作者的照片：黑色机箱、玻璃侧板、双风扇塔式散热器带 RGB 环、显卡侧面绿色「RTX 3060」字样、电源仓顶部蓝色灯带、前面板竖向灯条。不画品牌 logo。
@@ -49,13 +49,13 @@
 
 | # | 数据流 | 说明 | 相关笔记 |
 | --- | --- | --- | --- |
-| 1 | SSD → 内存 | 读一道 GSM8K 题，CPU 分词，prompt ≤ 256 token | 数据管线 |
-| 2 | 内存 → PCIe → 显存 | 显存里常驻 4-bit Qwen2.5-3B 和 r = 32 的 LoRA | LoRA |
-| 3 | GPU 内部 | vLLM 为这道题采样 G = 6 个回答；每个 decode 步 30 ms，带宽下限 7 ms | Decoding、Compute vs memory-bound |
-| 4 | 显存 → CPU | 5 个规则函数打分，组内归一化成 advantage | GRPO、Reward hacking |
-| 5 | GPU 内部 | 反向 + 8-bit paged AdamW，只更新 LoRA；GPU 63% 时间在算，37% 是 WSL 调度空转 | Backprop、Optimizers |
+| 1 | SSD → 内存 | 读一道 GSM8K 题，CPU 分词，prompt ≤ 256 token | `ml/post-training/grpo-3060-project` |
+| 2 | 内存 → PCIe → 显存 | 显存里常驻 4-bit Qwen2.5-3B 和 r = 32 的 LoRA | `ml/post-training/lora` |
+| 3 | GPU 内部 | vLLM 为这道题采样 G = 6 个回答；每个 decode 步 30 ms，带宽下限 7 ms | `ml/llms/decoding-strategies`、`ai-infra/gpu/compute-vs-memory-bound` |
+| 4 | 显存 → CPU | 5 个规则函数打分，组内归一化成 advantage | `ml/post-training/grpo`、`ml/post-training/reward-hacking` |
+| 5 | GPU 内部 | 反向 + 8-bit paged AdamW，只更新 LoRA；GPU 63% 时间在算，37% 是 WSL 调度空转 | `ml/dl-blocks/backprop-chain-rule`、`ml/training/gradient-descent-optimizers` |
 
-HUD 显示当前阶段、`step n / 500` 和相关笔记链接。GPU 利用率、温度和风扇转速跟着阶段变化。
+HUD 显示当前阶段、`step n / 500` 和相关笔记链接（表中是笔记 slug，链接到 `/notes/<slug>/`）；整机视角里 HUD 另给 `ml/overview` 和项目笔记的入口，作为 ML 部分的总入口。GPU 利用率、温度和风扇转速跟着阶段变化。
 
 ## 架构
 
