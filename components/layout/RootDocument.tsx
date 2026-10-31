@@ -1,29 +1,32 @@
-import type { Metadata } from "next";
 import { Patrick_Hand } from "next/font/google";
 import NotebookShell from "@/components/layout/NotebookShell";
 import LearningActivity from "@/components/layout/LearningActivity";
-import "./globals.css";
+import { LangProvider } from "@/components/i18n/LangProvider";
+import type { Lang } from "@/lib/i18n";
+import "@/app/globals.css";
 import "@/styles/visualization.css";
 import "@/styles/sketch.css";
 import "@/styles/machine.css";
 import "katex/dist/katex.min.css";
 
 // Handwritten face for the Excalidraw-style figures; self-hosted at build time.
+// Defined once here so both root layouts share a single font instance.
 const sketchFont = Patrick_Hand({ weight: "400", subsets: ["latin"], variable: "--font-sketch", display: "swap" });
 
-export const metadata: Metadata = {
-  title: { default: "RLearning", template: "%s | RLearning" },
-  description: "Notes on computer systems, machine learning, LLMs, and AI infrastructure.",
-};
-
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+/** The <html> document shared by the Chinese and English root layouts. */
+export default function RootDocument({ lang, children }: { lang: Lang; children: React.ReactNode }) {
   return (
-    <html lang="zh-CN" className={sketchFont.variable} suppressHydrationWarning>
+    <html lang={lang === "en" ? "en" : "zh-CN"} className={sketchFont.variable} suppressHydrationWarning>
+      {/* eslint-disable-next-line @next/next/no-head-element -- App Router root document (rendered by the root layouts), not a Pages Router page. */}
       <head>
         {/* A note opened in the split-reading pane drops the site chrome before first paint. */}
         <script dangerouslySetInnerHTML={{ __html: "if(window.self!==window.top)document.documentElement.classList.add('is-embedded')" }} />
       </head>
-      <body><NotebookShell activity={<LearningActivity />}>{children}</NotebookShell></body>
+      <body>
+        <LangProvider lang={lang}>
+          <NotebookShell activity={<LearningActivity />}>{children}</NotebookShell>
+        </LangProvider>
+      </body>
     </html>
   );
 }

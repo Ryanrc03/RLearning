@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { noteEntries, type NoteEntry } from "@/content/notes";
 import Icon from "@/components/ui/Icon";
@@ -6,6 +7,11 @@ import Avatar from "@/components/layout/Avatar";
 import LearningActivity from "@/components/layout/LearningActivity";
 import MachineHero from "@/components/home/machine/MachineHero";
 import { profile } from "@/content/profile";
+
+// Language alternates sit on the home page, not the layout, so note pages don't inherit them.
+export const metadata: Metadata = {
+  alternates: { languages: { "zh-CN": "/", en: "/en/" } },
+};
 
 const RECENT = 6;
 
