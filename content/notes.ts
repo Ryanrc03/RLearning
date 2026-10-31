@@ -1,3 +1,5 @@
+import type { NoteTranslation } from "@/lib/i18n";
+
 export type NoteEntry = {
   slug: string;
   title: string;
@@ -14,6 +16,8 @@ export type NoteEntry = {
   series?: { id: string; title: string; order: number };
   /** "case-study" switches the article to the hand-drawn case-study styling (styles/sketch.css). */
   layout?: "case-study";
+  /** Present when an English translation exists at content/<slug>.en.mdx. */
+  en?: NoteTranslation;
 };
 
 // Published notes share this metadata across navigation, search, and article pages.
@@ -1749,6 +1753,13 @@ export const noteEntries: NoteEntry[] = [
     readingMinutes: 10,
     tags: ["ml-fundamentals", "post-training", "interactive"],
     series: { id: "ml-post-training", title: "Post-training：预训练之后怎么教模型听话", order: 5 },
+    en: {
+      title: "GRPO: group comparison in place of a critic",
+      description:
+        "Starting from how policy gradient updates the parameters: baseline, actor-critic, TRPO and PPO all the way to GRPO; a hand-computed single update of a three-token toy policy, then why groups that are all correct or all wrong give no gradient.",
+      updated: "2026-10-30",
+      seriesTitle: "Post-training: teaching a pretrained model to follow instructions",
+    },
   },
   {
     slug: "ml/post-training/reward-hacking",
@@ -1764,6 +1775,12 @@ export const noteEntries: NoteEntry[] = [
     readingMinutes: 6,
     tags: ["ml-fundamentals", "post-training", "interactive"],
     series: { id: "ml-post-training", title: "Post-training：预训练之后怎么教模型听话", order: 6 },
+    en: {
+      title: "Reward design and reward hacking",
+      description: "A length reward gets farmed by padding: whatever the reward is, that is what the policy learns.",
+      updated: "2026-10-30",
+      seriesTitle: "Post-training: teaching a pretrained model to follow instructions",
+    },
   },
   {
     slug: "ml/post-training/kl-divergence",
@@ -1794,6 +1811,13 @@ export const noteEntries: NoteEntry[] = [
     readingMinutes: 15,
     tags: ["project", "grpo", "reward-hacking", "kl-divergence", "post-training", "interactive"],
     series: { id: "ml-post-training", title: "Post-training：预训练之后怎么教模型听话", order: 8 },
+    en: {
+      title: "Project: training GRPO on an RTX 3060 — a reward-hacking post-mortem",
+      description:
+        "A real Qwen2.5-3B + GRPO experiment and handoff on GSM8K: reward rises while accuracy falls from 62.1% to 56.9% and responses shrink to 90 tokens; the definition of reward hacking, training curves, checkpoints and verbatim outputs, four causes, four changes, and a fixed run at 77.3%.",
+      updated: "2026-10-30",
+      seriesTitle: "Post-training: teaching a pretrained model to follow instructions",
+    },
   },
   {
     slug: "ml/llm-engineering/llm-as-judge",

@@ -1,0 +1,200 @@
+import G3ResultsFigure from "@/components/visualization/ml/post-training/grpo3060/G3ResultsFigure";
+import G3TrainingCurves from "@/components/visualization/ml/post-training/grpo3060/G3TrainingCurves";
+import G3CheckpointSweep from "@/components/visualization/ml/post-training/grpo3060/G3CheckpointSweep";
+import G3SampleCompare from "@/components/visualization/ml/post-training/grpo3060/G3SampleCompare";
+
+# Project: training GRPO on an RTX 3060 — a reward-hacking post-mortem
+
+## Summary
+
+We trained Qwen2.5-3B-Instruct with GRPO on GSM8K math problems on a single RTX 3060 (12 GB), and compared it with SFT and the untrained model. The first run used the course project's original settings for 500 steps: training reward rose from 1.53 to 2.13, yet GSM8K test accuracy fell from 62.1% to 56.9%, worse than not training at all. Broken down, all of the gain came from the format rewards; correctness slid the whole way, and responses shrank from about 280 tokens to 90. This is textbook reward hacking. We identified four causes and made four changes (add KL, switch the loss normalization, halve the format rewards and gate them on reasoning length, fix a regex that never fired). In the second 500-step run, accuracy held on a plateau of 75%–77%, ending at 77.3% on the full test set, 9.7 points above SFT.
+
+This page is both an experiment log and a handoff: Section 2 explains in detail what reward hacking is, Sections 3 and 4 are the symptoms, Sections 5 and 6 the causes and the fix, and Section 8 has the reproduction commands, file locations and unfinished work. The code is on the `claude/project-refactor-model-selection-5f49e3` branch of [Ryanrc03/Chasing-the-Aha-Moment](https://github.com/Ryanrc03/Chasing-the-Aha-Moment/tree/claude/project-refactor-model-selection-5f49e3), and every number below comes from that run's logs and evaluation files.
+
+<G3ResultsFigure />
+
+## 1 Experimental setup
+
+| Item | Setting |
+| --- | --- |
+| Model | `unsloth/Qwen2.5-3B-Instruct`, bitsandbytes 4-bit, LoRA r = 32 on seven projections: q, k, v, o, gate, up, down |
+| Training data | GSM8K train, 7,473 problems; only the question and the final number are used, not the worked solution |
+| Output format | the system prompt requires `<reasoning>…</reasoning><answer>…</answer>` |
+| Sampling | G = 6 responses per problem, temperature 1.0, prompt ≤ 256 tokens, response ≤ 768 tokens; vLLM and training share one GPU |
+| Optimization | lr 5e-6, cosine, 10% warmup, 8-bit paged AdamW, gradient clipping 0.1, 1 problem per step, 500 steps |
+| Framework | TRL 0.22.2 + Unsloth, WSL2 Ubuntu |
+| Wall time | first run 64 minutes (responses kept getting shorter, so it kept getting faster); fixed run 112 minutes |
+| Evaluation | GSM8K test, 1,319 problems; AIME 2024 / 2025, 30 problems each; temperature 0.2, at most 512 tokens, answers compared after numeric normalization |
+
+The reward is the sum of five rule-based functions, the GSM8K recipe the original notebook reused:
+
+| Reward term | What it checks | Max, first run | Max, fixed run |
+| --- | --- | --- | --- |
+| correctness | the number in `<answer>` equals the reference answer | 2.0 | 2.0 |
+| int | `<answer>` is a bare number | 0.5 | 0.25 |
+| strict format | strict newline layout, matched over the whole response from start to end | 0.5 (never fired) | 0.25 |
+| soft format | `<reasoning>` then `<answer>`, any whitespace | 0.5 | 0.25 |
+| xml count | +0.125 for each of the four tags in its proper place, −0.001 for each extra character after `</answer>` | 0.5 | 0.25 |
+
+In the first run the four format terms add up to a maximum of 2.0, as heavy as correctness. The SFT baseline uses the same model and LoRA, trained for 1 epoch on the GSM8K gold solutions (the gold solutions had their `<<48/2=24>>` calculator annotations stripped and were rewritten into the same XML format), taking 28 minutes.
+
+## 2 What reward hacking actually is
+
+**Definition.** The goal we actually want, $R^*$, cannot be written directly as code: here it is “get this math problem right, with reliable reasoning.” All we can write is a proxy reward $\hat R$, here the sum of five rule-based functions. Reward hacking is when the policy finds behavior that raises $\hat R$ without improving $R^*$, or even while making it worse:
+
+$$
+\mathbb{E}_{\pi_t}\big[\hat R\big] \;\uparrow \qquad\text{while}\qquad \mathbb{E}_{\pi_t}\big[R^*\big] \;\downarrow
+$$
+
+The policy made no mistake; it faithfully optimized what you wrote down. The fault lies in the gap between $\hat R$ and $R^*$, and finding gaps is exactly the optimizer's job. This is Goodhart's law: when a measure becomes a target, it ceases to be a good measure. DeepMind calls this kind of phenomenon specification gaming; the classic example is an agent in a boat-racing game that discovers that circling in place to collect bonus items scores higher than finishing the course.
+
+**Why RL is especially prone to it.** SFT's training data is fixed, so the model can only imitate. RL's data is sampled by the policy itself, and every step moves toward “responses that score higher,” which makes it a search process aimed squarely at holes in $\hat R$. When three conditions hold at once, reward hacking is all but certain:
+
+1. **A gap between proxy and goal**: the format rewards look only at tags, not at reasoning; the int reward only checks whether the answer is a bare number.
+2. **Enough optimization pressure**: enough steps, and exploiting the gap is easier than solving the problem.
+3. **The policy is free to wander off**: nothing holds it near the original model; our first run had β = 0.
+
+**It is different from several problems that look like it.**
+
+| Problem | Training reward | Held-out metric | How to tell |
+| --- | --- | --- | --- |
+| Reward hacking | rises | flat or falls | among the reward's components, the one rising is not the one you care about; spot-check high-scoring samples |
+| Overfitting | rises | falls | the gap between training problems and unseen problems widens; rare in RL, which samples new problems every step |
+| Reward too sparse | flat | flat | groups are all correct or all wrong, advantages all 0 |
+| Implementation bug | one term is constant forever | unclear | unit-test every reward function; our strict format was 0 for all 500 steps |
+
+**The direction can be reversed.** In the toy model on the [Reward design and reward hacking](/en/notes/ml/post-training/reward-hacking/) page, the length reward makes the policy pad its answers to farm points, and responses grow longer and longer. Our real run had no length reward at all, and the hacking went the other way: responses grew shorter and shorter, because short responses are the easiest to format cleanly. Both come down to the same thing: the total reward rises while the term you actually care about falls.
+
+## 3 Symptom 1: training curves
+
+<G3TrainingCurves />
+
+Averages over the first 50 and the last 50 steps of the first run, side by side:
+
+| Curve | First 50 steps | Last 50 steps | Change |
+| --- | --- | --- | --- |
+| Total reward | 1.53 | 2.13 | +0.60 |
+| correctness (max 2) | 1.58 | 0.93 | −0.65 |
+| Format rewards, combined (max 2) | −0.05 | 1.20 | +1.25 |
+| of which int | 0.02 | 0.42 | +0.40 |
+| of which xml count | −0.48 | 0.28 | +0.76 |
+| Response length (tokens) | 282 | 90 | −68% |
+| KL | 0 | 0 | not computed |
+
+The format rewards rose by 1.25, more than the total reward's gain of 0.60, and the 0.65 difference is exactly the amount correctness lost: the model was trading correctness for format reward, and the total reward kept climbing all the same. If you watched only the total reward during training, this run would look like a success.
+
+Two details: the KL column is 0 not because the policy stood still, but because TRL does not compute it at all when β = 0 (see [KL divergence](/notes/ml/post-training/kl-divergence/)); strict format being 0 for all 500 steps is a regex bug, covered in Section 5.
+
+## 4 Symptom 2: checkpoints and real outputs
+
+<G3CheckpointSweep />
+
+The first run saved a checkpoint every 100 steps. Re-evaluated on the same 300 test problems, they score 71%, **76%**, 66%, 58%, 57%: the model at step 200 was in fact the best of the whole run, and after that, hacking steadily degraded it. The step-200 checkpoint scores 74.5% on the full test set. The fixed run saved every 50 steps; from step 250 on it stayed at 75%–77%, and its response length stayed at 240–256 tokens throughout.
+
+<G3SampleCompare />
+
+Checking the outputs on all 1,319 problems one by one:
+
+| Check | Untrained | SFT | First run, 500 steps | Fixed run, 500 steps |
+| --- | --- | --- | --- | --- |
+| `<reasoning>` under 5 words | 0% | 0.1% | **3.6%** | 0% |
+| `</answer>` never written (truncated) | 15.1% | 0.2% | 1.0% | 1.6% |
+| Mean length, correct vs wrong | 237 vs 282 | 98 vs 121 | 77 vs 89 | 229 vs 282 |
+
+Of the 569 problems the first run got wrong at step 500, 138 had an entire response under 60 tokens. There are no multiple `<answer>` tags, no junk after the tags, no repetition loops: this hack did not take the form of garbage output, but of **compressing the reasoning to almost nothing while writing a perfect envelope**. In the fixed run the wrong answers are longer than the right ones; that is because hard problems naturally take more writing, not padding.
+
+## 5 Why it happened
+
+The first three causes have direct evidence; the fourth is a mechanism not yet confirmed.
+
+**The format rewards weigh as much as correctness, and are much easier to earn.** The four format terms max out at 2.0. Getting a problem right takes real skill; getting the tags right only takes following the rules. The format rewards also have low variance, so they easily separate better from worse responses within a group of 6. GRPO's advantage looks only at relative standing within the group: if a group's answers are all correct or all wrong, the correctness difference is 0, the advantage is decided entirely by the format rewards, and whichever response has cleaner formatting gets pushed up. A short response has fewer places to go wrong, so it is the easiest to keep clean.
+
+**No KL.** In TRL 0.22, `beta` defaults to 0. Without β·KL, nothing penalizes the policy however far it drifts from the original model, so every loophole in the format rewards can be dug into indefinitely. The KL between the first run's final response-length distribution and the original model's is 3.54 nats; for the fixed run it is only 0.017 (see the figure in [KL divergence](/notes/ml/post-training/kl-divergence/)).
+
+**The strict format regex never fires.** The original notebook's regex requires one more newline after `</answer>` before the end. vLLM stops at EOS and never outputs that newline, so this term was 0 for all 500 steps. Its 0.5 points of weight went to waste, and the entire push of the format rewards landed on int, soft and xml count. This is a bug, not the hacking itself, but it shows that every reward function should have unit tests.
+
+**Loss normalization may have amplified the drift (unconfirmed).** TRL 0.22 defaults to `loss_type="dapo"`: sum the loss over every token in a batch and divide by the batch's total token count. It is designed precisely to remove length bias, giving tokens from long and short responses in the same group equal weight. But we had only 1 problem with 6 responses per step, so as responses get shorter the denominator shrinks with them and each token's gradient grows: with responses shrinking from 282 to 90, the effective step size becomes roughly 3×, and the shorter they get, the faster they drift. `dr_grpo` uses a constant (the maximum response length) as the denominator, so the step size does not change with response length. This is only a possible mechanism; no ablation has verified it.
+
+## 6 The fix
+
+The fixed run's config is `configs/qwen2.5-3b_3060_fixed.yaml`, with four changes:
+
+| Cause | Change | Config |
+| --- | --- | --- |
+| No KL | restore the KL penalty, using DeepSeekMath's value | `train.kl_beta: 0.04` |
+| Denominator varies with length | switch to constant normalization | `train.loss_type: dr_grpo` |
+| Format rewards too heavy | halve each of the four format terms, 1.0 combined; correctness stays at 2.0 | `reward.int_weight` and the other three |
+| Empty envelopes still earn format reward | when `<reasoning>` has fewer than 30 words, all four format terms give 0; correctness is unaffected | `reward.min_reasoning_words: 30` |
+| Strict regex broken | make the trailing newline optional | `STRICT_XML_PATTERN` |
+
+The gate is the most direct cut: as soon as the reasoning is compressed below 30 words, not a single point of format reward is available, so shortening the reasoning no longer gains anything. It is the same idea as “gate the length reward on correctness” on the [reward design](/en/notes/ml/post-training/reward-hacking/) page: pay out a reward term only when it truly represents what you want.
+
+**After the fix.** The training log shows no red flags: correctness went from 1.56 over the first 50 steps to 1.46 over the last 50, essentially flat; response length from 282 to 260; per-token KL rose slowly from 0.0007 to 0.014; strict format earned points for the first time, 0.09 to 0.24. The format rewards rose by only 0.33 combined. On evaluation, GSM8K test accuracy is 77.3%, 2.7 points above even the first run's peak checkpoint.
+
+The fixed run was not smooth all the way either: there is a trough at steps 160–200, where the 50-step moving average of batch accuracy fell to 59% while responses grew to about 290 tokens, recovering to above 72% after step 210. This was mainly caused by the problems: every run samples problems with the same seed in the same order, and counting the fixed run, the first run and the four experiments run overnight later, all six runs dropped at steps 150–210 (1–10 points below steps 100–150), and all of their responses got longer, so the training problems in that stretch are harder; the fixed run dropped the deepest. The step-200 checkpoint scores 71.7% on test, lower than the checkpoints on either side of it. The fixed run's answer field often reads `$360` or a whole sentence, so it mostly misses the 0.25 int points, and it did not try to farm them either: after numeric normalization these are all graded correct, so by the metric we actually care about, it is right.
+
+## 7 Side findings
+
+**SFT vs GRPO.** SFT saw all 7,473 gold solutions with their worked steps; GRPO saw only the questions and final numbers of 500 problems, and GRPO overtook it by step 200. What SFT learned was the gold solutions' two-line arithmetic style, not the habit of checking one more step: on the bad-oranges problem in Section 4, SFT and the untrained model made the same mistake. On AIME 2024, 43% of SFT's responses got stuck repeating the same sentence: the short demonstrations weakened its long-reasoning ability.
+
+**AIME is all zeros.** All five models are near 0 on both AIME 2024 and 2025, consistent with the paper's finding for its 8B model: RL on GSM8K improves reasoning stability and formatting, not the ability to solve competition problems. The fixed run's format rate on AIME is only 17%–23% because it keeps reasoning at length, and most problems get truncated at the 512-token evaluation limit. The first run reaches a 67%–87% format rate only because it writes everything short.
+
+**The 3060's bottleneck is not memory bandwidth.** Profiling one GRPO step: in the training half, the GPU is computing only 63% of the time, and 37% is scheduling idle time under WSL; of the compute time, 70% is bf16 GEMM, but the 3B model's matrices are small and thin, reaching only 28% of BF16 peak. In the sampling half, 74% of GPU time goes to bitsandbytes' 4-bit matmul kernel, at 30 ms per decode step, 4× the 7 ms bandwidth lower bound. Both halves are kernel-efficiency problems; see [Compute-bound and memory-bound](/notes/ai-infra/gpu/compute-vs-memory-bound/).
+
+## 8 Handoff
+
+**Reproduce.** In WSL2 or Linux:
+
+```bash
+bash scripts/setup_wsl.sh && source ~/.venvs/aha/bin/activate
+python scripts/train.py --config configs/qwen2.5-3b_3060_fixed.yaml
+bash scripts/sweep_checkpoints.sh outputs/qwen3b_fixed configs/qwen2.5-3b_3060_fixed.yaml 300
+python scripts/analyze_hacking.py qwen3b_base qwen3b_fixed
+python scripts/plot_curves.py outputs/qwen3b_base outputs/qwen3b_fixed --compare completion_length
+```
+
+`scripts/run_grpo_and_sweep.sh <config>` chains training, the checkpoint sweep and full evaluation into one command, which can be left running under `nohup`.
+
+**Where things are.**
+
+| Content | Location |
+| --- | --- |
+| Results, hacking analysis, bottleneck analysis (long write-up in Chinese) | `docs/results_2026-10-26_grpo_vs_sft.md` |
+| Verbatim output comparison of the four models | `docs/examples_gsm8k_four_models.md` |
+| Raw training-curve data | `outputs/<run>/train_log.jsonl`, `log_history.json` (local, not in git) |
+| Per-problem predictions, metrics | `results/<run>/<dataset>/` (local) |
+| LoRA and checkpoints | `outputs/qwen3b_base/checkpoint-*`, `outputs/qwen3b_fixed/checkpoint-*` (local) |
+| Diagnostic script | `scripts/analyze_hacking.py`: compares the first and last 10% of the training curves, plus output-level checks for empty reasoning, truncation and repetition |
+
+**Unfinished work, by priority.**
+
+1. **Ablations.** The four changes went in together, so we do not know which one did most of the work. Turn off one at a time and run each; a run takes about 2 hours of training plus 1 hour of evaluation. What we most want to know is whether gating alone, without KL, can stop the collapse.
+2. **Remove the within-group std scaling.** The full version of Dr. GRPO also requires the advantage to subtract only the mean, without dividing by std; we did not change that (TRL's `scale_rewards` is still at its default).
+3. **Re-evaluate AIME.** Raise `eval.max_tokens` to 1024 or more; otherwise truncation drags down the fixed run's format rate, and the comparison with the first run is unfair.
+4. **The paper's length reward R_len.** `qwen2.5-3b_3060_shaped.yaml` is still based on the first run's settings; it should be changed to inherit from the fixed run and then rerun. By the analysis in Section 2, it will push the direction of hacking toward “writing long,” so use the same diagnostics to check whether wrong answers systematically get longer.
+5. **Why steps 150–210 are the hardest.** All six runs lose accuracy and produce longer responses here; look at the training problems and sampled outputs in that stretch to confirm whether the problem type or the length limit is at work.
+6. **Occasional evaluation hangs.** Once, vLLM hung on a batch for 36 minutes at 96% GPU utilization with no progress; after it was killed, the rerun went fine. Evaluation commands should be wrapped in `timeout`.
+
+## Key takeaways
+
+1. Reward hacking is the policy faithfully optimizing the reward you wrote rather than the goal you want; it always appears in the gap between the two.
+2. The total reward alone will not reveal hacking: break the reward into its components, and also watch a metric that training did not optimize.
+3. Keep format rewards light, and pay them only when the content meets the bar; an empty envelope should earn nothing.
+4. KL makes drifting far away expensive; when β = 0, a zero KL in the logs means it was not computed, not that there was no drift.
+5. Evaluate every checkpoint; the first run's best model was at step 200, not at the end.
+
+## Related notes
+
+- [GRPO](/en/notes/ml/post-training/grpo/): how the within-group advantage is computed, and why all-correct or all-wrong groups have no gradient.
+- [Reward design and reward hacking](/en/notes/ml/post-training/reward-hacking/): a toy model in which a length reward gets farmed by padding, the opposite direction from here.
+- [KL divergence](/notes/ml/post-training/kl-divergence/): what KL measures, seen through the real distributions from these two runs.
+- [SFT](/notes/ml/post-training/sft/): the control group's loss is computed only on response tokens.
+- [Eval harness and the data flywheel](/notes/ml/llm-engineering/eval-harness/): turning the output checks from Section 4 into a gate that runs automatically every round.
+
+## Further reading
+
+- [DeepSeekMath](https://arxiv.org/abs/2402.03300) (Shao et al., 2024): where GRPO comes from; β = 0.04 also comes from here.
+- [DAPO](https://arxiv.org/abs/2503.14476) (Yu et al., 2025): token-level normalization, dynamic sampling, handling of truncated samples.
+- [Understanding R1-Zero-Like Training: A Critical Perspective](https://arxiv.org/abs/2503.20783) (Liu et al., 2025): Dr. GRPO, and where GRPO's two biases, length and difficulty, come from.
+- [Scaling Laws for Reward Model Overoptimization](https://arxiv.org/abs/2210.10760) (Gao et al., 2022): when a proxy reward is over-optimized, the true score first rises and then falls.
+- [Approximating KL Divergence](http://joschu.net/blog/kl-approx.html) (John Schulman): a comparison of the three per-sample KL estimators k1, k2 and k3.

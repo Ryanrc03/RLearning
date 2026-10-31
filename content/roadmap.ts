@@ -6,6 +6,7 @@
 
 import { noteEntries, type NoteEntry } from "./notes";
 import { edges as treeEdges, nodeBySlug } from "./ml/tree";
+import type { Lang } from "@/lib/i18n";
 
 export type RoadmapNode = {
   /** Stable id, e.g. "cs-os" or "ml-llms". ML chapters use `ml-${chapter.id}`. */
@@ -15,6 +16,8 @@ export type RoadmapNode = {
   categoryId: NoteEntry["categoryId"];
   /** Short label drawn on the card; defaults to the section name. */
   label?: string;
+  /** English pages' label, needed only when `label` is not English. */
+  labelEn?: string;
   /** Grid row (0 at the top) and column; columns may be fractional to centre a node. */
   row: number;
   col: number;
@@ -35,7 +38,7 @@ export const roadmapNodes: RoadmapNode[] = [
   { id: "sys-backend", section: "Backend Systems", categoryId: "systems", label: "Backend", row: 3, col: 2 },
   { id: "ai-gpu", section: "GPU Kernels", categoryId: "ai-infra", row: 3, col: 3 },
   // ML & LLM
-  { id: "ml-tree", section: "Knowledge Tree", categoryId: "ml", label: "ML 知识树", row: 0, col: 5 },
+  { id: "ml-tree", section: "Knowledge Tree", categoryId: "ml", label: "ML 知识树", labelEn: "ML Knowledge Tree", row: 0, col: 5 },
   { id: "ml-training", section: "Training", categoryId: "ml", row: 1, col: 4 },
   { id: "ml-ab-testing", section: "A/B Testing", categoryId: "ml", label: "A/B Testing", row: 0, col: 7 },
   { id: "ml-evaluation", section: "Evaluation", categoryId: "ml", row: 1, col: 6 },
@@ -111,6 +114,11 @@ const byId = new Map(roadmapNodes.map((node) => [node.id, node]));
 
 export function roadmapNode(id: string): RoadmapNode | undefined {
   return byId.get(id);
+}
+
+/** The card label in the page language. */
+export function nodeLabel(node: RoadmapNode, lang: Lang): string {
+  return (lang === "en" ? node.labelEn : undefined) ?? node.label ?? node.section;
 }
 
 /** The section's notes in reading order: notes outside a series (overviews) first, then by series order. */

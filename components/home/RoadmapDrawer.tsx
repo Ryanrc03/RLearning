@@ -2,9 +2,12 @@
 
 import { useEffect, useRef } from "react";
 import Link from "next/link";
-import { maturity, nextSteps, notesForNode, prerequisites, roadmapNode, type RoadmapNode } from "@/content/roadmap";
+import { maturity, nextSteps, nodeLabel, notesForNode, prerequisites, roadmapNode, type RoadmapNode } from "@/content/roadmap";
 import { categories } from "@/content/navigation";
 import Icon from "@/components/ui/Icon";
+import NoteTitle from "@/components/i18n/NoteTitle";
+import { useLang } from "@/components/i18n/LangProvider";
+import { notePath, noteText, t } from "@/lib/i18n";
 
 type Props = {
   nodeId: string;
@@ -16,6 +19,7 @@ type Props = {
 const statusLabel = { seed: "Seed", growing: "Growing", stable: "Stable" } as const;
 
 export default function RoadmapDrawer({ nodeId, onSelect, onClose }: Props) {
+  const lang = useLang();
   const node = roadmapNode(nodeId)!;
   const closeButton = useRef<HTMLButtonElement>(null);
   const notes = notesForNode(nodeId);
@@ -37,7 +41,7 @@ export default function RoadmapDrawer({ nodeId, onSelect, onClose }: Props) {
       <p>{title}</p>
       {list.map((other) => (
         <button key={other.id} type="button" className={`rm-chip rm-cat-${other.categoryId}`} onClick={() => onSelect(other.id)}>
-          <span />{other.label ?? other.section}
+          <span />{nodeLabel(other, lang)}
         </button>
       ))}
     </div>
@@ -45,32 +49,36 @@ export default function RoadmapDrawer({ nodeId, onSelect, onClose }: Props) {
 
   return (
     <>
-      <button type="button" className="rm-backdrop" aria-label="关闭" tabIndex={-1} onClick={onClose} />
+      <button type="button" className="rm-backdrop" aria-label={t(lang, "close")} tabIndex={-1} onClick={onClose} />
       <aside className={`rm-drawer rm-cat-${node.categoryId}`} role="dialog" aria-modal="true" aria-labelledby="rm-drawer-title">
         <header className="rm-drawer-head">
           <div>
             <p className="rm-drawer-category"><span />{category?.title}</p>
             <h2 id="rm-drawer-title">{node.section}</h2>
-            <p className="rm-drawer-progress">{total} 篇笔记 · {[stable && `${stable} stable`, growing && `${growing} growing`, seed && `${seed} seed`].filter(Boolean).join(" · ")}</p>
+            <p className="rm-drawer-progress">{t(lang, "roadmapDrawerNotes", { n: total })} · {[stable && `${stable} stable`, growing && `${growing} growing`, seed && `${seed} seed`].filter(Boolean).join(" · ")}</p>
           </div>
-          <button ref={closeButton} type="button" className="icon-button" aria-label="关闭" onClick={onClose}><Icon name="close" /></button>
+          <button ref={closeButton} type="button" className="icon-button" aria-label={t(lang, "close")} onClick={onClose}><Icon name="close" /></button>
         </header>
         <ol className="rm-drawer-notes">
-          {notes.map((note, index) => (
-            <li key={note.slug}>
-              <Link href={`/notes/${note.slug}/`}>
-                <span className="rm-drawer-index">{index + 1}</span>
-                <span className="rm-drawer-copy">
-                  <strong>{note.title}</strong>
-                  <span>{note.description}</span>
-                </span>
-                <span className={`note-status status-${note.status}`}><span />{statusLabel[note.status]}</span>
-              </Link>
-            </li>
-          ))}
+          {notes.map((note, index) => {
+            // English pages list an untranslated note under its Chinese title and description.
+            const { description, textLang } = noteText(note, lang);
+            return (
+              <li key={note.slug}>
+                <Link href={notePath(note, lang)}>
+                  <span className="rm-drawer-index">{index + 1}</span>
+                  <span className="rm-drawer-copy">
+                    <NoteTitle note={note} lang={lang} as="strong" />
+                    <span lang={textLang}>{description}</span>
+                  </span>
+                  <span className={`note-status status-${note.status}`}><span />{statusLabel[note.status]}</span>
+                </Link>
+              </li>
+            );
+          })}
         </ol>
-        {neighbours("先修", prerequisites(nodeId))}
-        {neighbours("接下来", nextSteps(nodeId))}
+        {neighbours(t(lang, "roadmapBefore"), prerequisites(nodeId))}
+        {neighbours(t(lang, "roadmapAfter"), nextSteps(nodeId))}
       </aside>
     </>
   );

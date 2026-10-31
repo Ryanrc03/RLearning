@@ -102,7 +102,7 @@ export default function KlDivergenceFigure() {
         <button type="button" className="viz-btn" onClick={reset}>重置</button>
       </div>
 
-      <Figure width={W} height={H} label={`${MODEL_LABEL[model]} 的回答长度分布与参考模型的 KL 为 ${kl.toFixed(3)} nats`}>
+      <Figure width={W} height={H} label={`${MODEL_LABEL[model].zh} 的回答长度分布与参考模型的 KL 为 ${kl.toFixed(3)} nats`}>
         <Plot box={{ x: 0, y: 0, w: W, h: TOP_H }} xDomain={[0, n]} yDomain={[0, 0.7]} xTicks={[]} yTicks={[0, 0.2, 0.4, 0.6]} yLabel="占比" title="回答长度分布（token）" format={(v) => `${Math.round(v * 100)}%`}>
           {(f) => (
             <>

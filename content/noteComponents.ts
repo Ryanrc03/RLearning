@@ -1,6 +1,5 @@
-import type { Metadata } from "next";
-import Link from "next/link";
-import { notFound } from "next/navigation";
+import type { ComponentType } from "react";
+import type { MDXComponents } from "mdx/types";
 import FundamentalsOverview from "@/content/cs/fundamentals/overview.mdx";
 import NetworkingOverview from "@/content/cs/networking/overview.mdx";
 import OsOverview from "@/content/cs/os/overview.mdx";
@@ -133,13 +132,15 @@ import Correlation from "@/content/ml/causal-inference/correlation.mdx";
 import LinearRegression from "@/content/ml/causal-inference/linear-regression.mdx";
 import DifferenceInDifferences from "@/content/ml/causal-inference/difference-in-differences.mdx";
 import MinimumWageExample from "@/content/ml/causal-inference/minimum-wage-example.mdx";
-import { getNote, getSeriesNeighbors, noteEntries } from "@/content/notes";
-import { getNoteToc } from "@/lib/content";
-import TableOfContents from "@/components/layout/TableOfContents";
-import SplitReader from "@/components/layout/SplitReader";
-import Icon from "@/components/ui/Icon";
+import GrpoEn from "@/content/ml/post-training/grpo.en.mdx";
+import RewardHackingEn from "@/content/ml/post-training/reward-hacking.en.mdx";
+import Grpo3060ProjectEn from "@/content/ml/post-training/grpo-3060-project.en.mdx";
 
-const noteComponents = {
+/** An MDX page as typed by mdx.d.ts. */
+export type NoteComponent = ComponentType<{ components?: MDXComponents }>;
+
+/** Chinese pages, one per entry in content/notes.ts. */
+export const noteComponents = {
   "cs/fundamentals/overview": FundamentalsOverview,
   "cs/networking/overview": NetworkingOverview,
   "cs/os/overview": OsOverview,
@@ -272,51 +273,11 @@ const noteComponents = {
   "ml/causal-inference/linear-regression": LinearRegression,
   "ml/causal-inference/difference-in-differences": DifferenceInDifferences,
   "ml/causal-inference/minimum-wage-example": MinimumWageExample,
-};
+} satisfies Record<string, NoteComponent>;
 
-export const dynamicParams = false;
-
-export function generateStaticParams() {
-  return noteEntries.map((note) => ({ slug: note.slug.split("/") }));
-}
-
-export async function generateMetadata({ params }: { params: Promise<{ slug: string[] }> }): Promise<Metadata> {
-  const { slug } = await params;
-  const note = getNote(slug.join("/"));
-  return { title: note?.title ?? "Note", description: note?.description };
-}
-
-export default async function NotePage({ params }: { params: Promise<{ slug: string[] }> }) {
-  const { slug } = await params;
-  const key = slug.join("/");
-  const note = getNote(key);
-  const Content = noteComponents[key as keyof typeof noteComponents];
-  if (!note || !Content) notFound();
-  const toc = getNoteToc(key);
-  const { prev, next } = getSeriesNeighbors(key);
-
-  return (
-    <div className="note-layout">
-      <div className="note-main">
-        <header className="article-header">
-          <div className="note-breadcrumb"><span>{note.category}</span><Icon name="chevron" /><span>{note.section}</span></div>
-          <h1>{note.title}</h1>
-          <p className="article-description">{note.description}</p>
-          <div className="article-meta"><span className={`note-status status-${note.status}`}><span />{note.status === "growing" ? "Growing" : note.status === "stable" ? "Stable" : "Seed"}</span><span><Icon name="calendar" /><time dateTime={note.updated}>{note.updated.replaceAll("-", ".")}</time></span><span><Icon name="clock" />约 {note.readingMinutes} 分钟</span></div>
-        </header>
-        <article className={note.layout === "case-study" ? "prose prose-case" : "prose"}><Content components={{ h1: () => null }} /></article>
-        {note.series && (prev || next) && (
-          <nav className="series-nav" aria-label={`系列：${note.series.title}`}>
-            {prev ? <Link className="series-link" href={`/notes/${prev.slug}/`}><small>← 上一篇 · {note.series.title}</small><span>{prev.title}</span></Link> : <span />}
-            {next ? <Link className="series-link is-next" href={`/notes/${next.slug}/`}><small>下一篇 →</small><span>{next.title}</span></Link> : <span />}
-          </nav>
-        )}
-        <div className="note-tags"><span>FILED UNDER</span>{note.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div>
-        <div className="article-end"><div><Icon name="leaf" /><span>这篇笔记还会继续生长。</span></div><Link href="/">回到知识库 <Icon name="arrow" /></Link></div>
-      </div>
-      <TableOfContents items={toc} />
-      {/* Keyed by note so moving to another note (e.g. from the sidebar) closes the split. */}
-      <SplitReader key={key} />
-    </div>
-  );
-}
+/** English pages; keys must match the notes that carry an `en` entry in content/notes.ts. */
+export const noteComponentsEn = {
+  "ml/post-training/grpo": GrpoEn,
+  "ml/post-training/reward-hacking": RewardHackingEn,
+  "ml/post-training/grpo-3060-project": Grpo3060ProjectEn,
+} satisfies Record<string, NoteComponent>;

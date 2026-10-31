@@ -2,23 +2,24 @@
 // training-curve figure, first-vs-last summaries, the checkpoint peak, and the
 // length distributions the KL page compares. No React here; see tests/grpo3060.test.ts.
 
+import type { Localized } from "@/lib/i18n";
 import { GRPO3060, type ModelKey, type RunKey } from "./grpo3060Data";
 import { klDivergence, klTerms, smoothCounts } from "./klDivergence";
 
 export { GRPO3060 };
 export type { ModelKey, RunKey };
 
-export const RUN_LABEL: Record<RunKey, string> = {
-  base: "第一轮：base reward，β = 0",
-  fixed: "修正版：β = 0.04 + Dr. GRPO + 门控格式分",
+export const RUN_LABEL: Record<RunKey, Localized> = {
+  base: { zh: "第一轮：base reward，β = 0", en: "First run: base reward, β = 0" },
+  fixed: { zh: "修正版：β = 0.04 + Dr. GRPO + 门控格式分", en: "Fixed run: β = 0.04 + Dr. GRPO + gated format reward" },
 };
 
-export const MODEL_LABEL: Record<ModelKey, string> = {
-  instruct: "Instruct（未训练）",
-  sft: "SFT · 1 epoch",
-  base200: "GRPO 第一轮 · 200 步",
-  base500: "GRPO 第一轮 · 500 步",
-  fixed500: "GRPO 修正版 · 500 步",
+export const MODEL_LABEL: Record<ModelKey, Localized> = {
+  instruct: { zh: "Instruct（未训练）", en: "Instruct (untrained)" },
+  sft: { zh: "SFT · 1 epoch", en: "SFT · 1 epoch" },
+  base200: { zh: "GRPO 第一轮 · 200 步", en: "GRPO first run · 200 steps" },
+  base500: { zh: "GRPO 第一轮 · 500 步", en: "GRPO first run · 500 steps" },
+  fixed500: { zh: "GRPO 修正版 · 500 步", en: "GRPO fixed run · 500 steps" },
 };
 
 export type CurveKey = "reward" | "correct" | "int" | "strict" | "soft" | "xml" | "len" | "kl";

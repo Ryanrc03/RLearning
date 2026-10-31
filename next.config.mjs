@@ -14,6 +14,8 @@ const nextConfig = {
   output: "export",
   trailingSlash: true,
   pageExtensions: ["ts", "tsx", "md", "mdx"],
+  // Two root layouts ((zh), (en)) leave no single layout for the 404; app/global-not-found.tsx fills in.
+  experimental: { globalNotFound: true },
 };
 
 export default withMDX(nextConfig);

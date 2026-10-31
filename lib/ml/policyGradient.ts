@@ -7,6 +7,8 @@
 // (baseline), or that divided by the group std (GRPO).
 // No React here; see tests/policy-gradient.test.ts.
 
+import type { Localized } from "@/lib/i18n";
+
 export const PG_ANSWERS = ["5", "6", "4"] as const;
 export const PG_CORRECT = 0;
 
@@ -68,9 +70,9 @@ export type PgPreset = "binary" | "score";
 // Four sampled answers with the same tokens; only the reward scale differs.
 // "score" uses the handwritten-note example: one answer scores 95 against a
 // group average of 92.
-export const PG_PRESETS: Record<PgPreset, { label: string; samples: PgSample[] }> = {
+export const PG_PRESETS: Record<PgPreset, { label: Localized; samples: PgSample[] }> = {
   binary: {
-    label: "对错奖励 0 / 1",
+    label: { zh: "对错奖励 0 / 1", en: "Correctness reward 0 / 1" },
     samples: [
       { answer: 0, reward: 1 },
       { answer: 1, reward: 0 },
@@ -79,7 +81,7 @@ export const PG_PRESETS: Record<PgPreset, { label: string; samples: PgSample[] }
     ],
   },
   score: {
-    label: "打分奖励（满分 100）",
+    label: { zh: "打分奖励（满分 100）", en: "Scored reward (out of 100)" },
     samples: [
       { answer: 0, reward: 95 },
       { answer: 1, reward: 90 },
