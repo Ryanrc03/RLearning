@@ -1,6 +1,6 @@
 /* Homepage machine cover: the one dark, animated element on an otherwise quiet light site. */
 .machine-panel { position: relative; height: 460px; border-radius: 14px; overflow: hidden; background: #05070d; color: #d9e4ff; isolation: isolate; }
-.machine-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+.machine-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: pan-y pinch-zoom; }
 .machine-canvas:active { cursor: grabbing; }
 .machine-tabs { position: absolute; top: 12px; left: 12px; display: flex; flex-wrap: wrap; gap: 6px; z-index: 2; }
 .machine-tab { font: inherit; font-size: 12px; padding: 4px 11px; border-radius: 999px; border: 1px solid rgba(160, 180, 255, .3); background: rgba(10, 16, 32, .75); color: #b9c6ea; cursor: pointer; }
@@ -13,7 +13,7 @@ a.machine-label:hover, a.machine-label:focus-visible { border-color: #9a87fe; co
 .machine-label b { color: #fff; font-weight: 500; }
 .machine-readout { color: #ffb86b; }
 .machine-readout:empty { display: none; }
-/* max-height resolves against the fixed-height panel, so the five-phase list (still / list modes) scrolls instead of overflowing. */
+/* max-height resolves against the fixed-height panel, so a long HUD scrolls instead of overflowing it. */
 .machine-hud { position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 2; max-height: 60%; overflow-y: auto; font-size: 12px; line-height: 1.55; background: rgba(8, 12, 24, .86); border: 1px solid rgba(120, 160, 255, .25); border-radius: 8px; padding: 8px 11px; }
 .machine-hud p, .machine-hud ol { margin: 0; }
 .machine-hud ol { padding-left: 0; list-style: none; display: grid; gap: 4px; }
@@ -26,9 +26,18 @@ a.machine-label:hover, a.machine-label:focus-visible { border-color: #9a87fe; co
 .machine-panel[data-status="loading"] .machine-label,
 .machine-panel[data-status="list"] .machine-label { position: static; transform: none !important; align-self: flex-start; }
 .machine-panel[data-status="list"] .machine-canvas { display: none; }
+/* Without WebGL the panel grows to fit: label list, then the HUD in normal flow, so neither covers the other. */
+.machine-panel[data-status="list"] { height: auto; padding-bottom: 12px; }
+.machine-panel[data-status="list"] .machine-hud { position: static; margin: 12px 12px 0; max-height: none; }
+/* Reduced motion lists every phase over a still frame; keep most of the machine visible. */
+.machine-panel[data-status="still"] .machine-hud { max-height: 40%; }
 
 @media (max-width: 640px) {
   .machine-panel { height: 400px; border-radius: 10px; }
+  /* Below the tabs, so the two don't collide on narrow phones. */
+  .machine-model { top: 44px; }
+  .machine-panel[data-status="loading"] .machine-labels,
+  .machine-panel[data-status="list"] .machine-labels { padding-top: 84px; }
   .machine-label { font-size: 10px; padding: 2px 6px; }
   .machine-hud { font-size: 11px; }
 }
