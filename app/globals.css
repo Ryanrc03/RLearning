@@ -349,9 +349,11 @@ html.is-embedded .note-layout { display: block; max-width: 780px; margin-left: a
   .series-nav { grid-template-columns: 1fr; }
   .series-link.is-next { text-align: left; }
   .topbar { padding: 0 15px; height: 62px; }
-  .topbar-path { gap: 9px; }
+  .topbar-path { gap: 9px; min-width: 0; }
   .breadcrumb-home svg { display: none; }
   .breadcrumb-home, .breadcrumb-current { font-size: 11px; }
+  /* A long category gives way to the topbar buttons instead of wrapping. */
+  .breadcrumb-current { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .avatar-small { width: 32px; height: 32px; font-size: 16px; }
   .intro-links { margin-left: 44px; }
   .workspace-content { padding: 18px 20px 0; }
