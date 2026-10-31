@@ -10,7 +10,7 @@ Rule-based rewards, reward models, an LLM acting as judge: once RL optimizes aga
 
 ## Why it exists
 
-The GRPO on the previous page takes rewards at face value: whichever response scores higher gets pushed. On GSM8K a 0/1 reward for answer correctness alone is too sparse, so a natural idea is to add a little length reward to encourage the model to write out more reasoning steps. The problem is that writing long is far easier than writing correctly, and the policy learns the easy one first. This is Goodhart's law: when a measure becomes a target, it ceases to be a good measure.
+GRPO, from the previous page, takes rewards at face value: whichever response scores higher gets pushed. On GSM8K a 0/1 reward for answer correctness alone is too sparse, so a natural idea is to add a little length reward to encourage the model to write out more reasoning steps. The problem is that writing long is far easier than writing correctly, and the policy learns the easy one first. This is Goodhart's law: when a measure becomes a target, it ceases to be a good measure.
 
 ## How it works
 
@@ -24,7 +24,7 @@ $$
 r_{\text{gated}} = \mathbb{1}[\text{correct}] \cdot \big(1 + \alpha \min(L,\ L_{\text{cap}})\big)
 $$
 
-The toy policy in the figure has two knobs: reasoning ability is hard to improve, while response length $L$ is easy to change. Each step can only move a short distance, standing in for the step size that PPO / GRPO's clip and KL limit, and the step goes toward whichever knob pays more. Accuracy first rises with length, gets diluted by filler past about 300 tokens, and beyond the 1024-token generation limit the answer gets truncated.
+The toy policy in the figure has two knobs: reasoning ability is hard to improve, while response length $L$ is easy to change. Each step can only move a short distance, like the step size limited by the clip and KL in PPO / GRPO, and it goes toward whichever knob pays more. Accuracy first rises with length, gets diluted by filler past about 300 tokens, and beyond the 1024-token generation limit the answer gets truncated.
 
 For roughly the first 70 steps, both paths improve. After that the “additive” path starts padding: the length reward is paid whether the answer is right or wrong, so stuffing in a thousand tokens earns nearly 1 point for free, far cheaper than getting the problem right. In the left panel the reward climbs all the way to 1.6; in the right panel accuracy falls from a peak of 69% to 8%. If you watched only the training curve, you would think everything was going fine.
 
@@ -32,7 +32,7 @@ The gated version pays the length reward only when the answer is correct, and ca
 
 ## Costs and trade-offs
 
-- **How to stop length farming**: gate the length reward on correctness and cap it, and give truncated or overlong responses nothing; use KL to hold the policy near the reference; during training, plot accuracy, mean length and truncation rate together. Length rising while accuracy does not is the signal.
+- **How to stop length padding**: gate the length reward on correctness and cap it, and give truncated or overlong responses nothing; use KL to hold the policy near the reference; during training, plot accuracy, mean length and truncation rate together. Length rising while accuracy does not is the signal.
 - **Every patch has a cost**: gating makes the reward sparse again, and all-wrong groups still carry no signal; a cap set too low cuts off hard problems that genuinely need long reasoning, and AIME-style problems are exactly the ones that need long chains; KL that is too strong stops learning, and KL that is too weak stops nothing.
 - **Format rewards get gamed too**: requiring `<think>…</think><answer>…</answer>` makes the answer parseable and verifiable, but if the reward is paid whenever the format is right, the model will output an empty shell of the format. Keep the format reward small, and ideally gate it on the answer as well.
 - **Learned rewards are easier to game**: reward models and LLM judges favor long, confident, flattering responses. Common mitigations are ensembling several RMs, retraining the RM on samples from the new policy, and adding KL.

@@ -15,7 +15,7 @@ Read [PPO: from actor–critic to reinforcement learning for LLMs](/notes/ml/pos
 
 RL on an LLM is a loop: feed a problem to the LLM as the prompt, generate a response, score it to get a reward, update the LLM with that reward, then repeat with the next problem. PPO and GRPO use this online sampling loop; standard DPO usually trains directly on offline preference pairs and does not need a rollout every round.
 
-Reinforcement learning has two routes. In a **policy-based** method the network directly outputs a probability distribution over actions: state → NN → action. An LLM is itself such a policy: context → NN → distribution over the next token. In a **value-based** method the network outputs how good the state is: state → NN → good / bad, like a judge estimating the odds of winning. PPO needs both: besides the policy, a critic (value network) estimates state values, which adds training cost; the critic can be deployed as a separate model or share a backbone with the actor. And an LLM's reward arrives only once, at the end of the response, so per-token values are hard to estimate accurately. GRPO keeps only the policy: answer the same problem several times, and the average score is itself a good baseline.
+Reinforcement learning has two routes. In a **policy-based** method the network directly outputs a probability distribution over actions: state → NN → action. An LLM is itself such a policy: context → NN → distribution over the next token. In a **value-based** method the network outputs how good the state is: state → NN → good / bad, like a judge estimating the odds of winning. PPO needs both: besides the policy, a critic (value network) estimates state values, which adds training cost; the critic can be a separate model or share a backbone with the actor. And an LLM's reward arrives only once, at the end of the response, so per-token values are hard to estimate accurately. GRPO keeps only the policy: answer the same problem several times, and the average score is itself a good baseline.
 
 ## How it works
 
@@ -28,7 +28,7 @@ $$
 \log \pi_\theta(o \mid q) = \sum_t \log \pi_\theta(o_t \mid q, o_{<t})
 $$
 
-The gradient supplies the **direction** (make this response more likely); the reward supplies the **strength and sign**: a high score pushes harder, and a negative score pushes the opposite way. Every token in the response shares this one $R$. So RL can be read as “SFT on your own samples, each weighted by its score.” For a softmax policy, $\nabla_{\text{logits}} \log \pi(a) = \text{onehot}(a) - \pi$: the sampled token's logit goes up, the others go down in proportion to their probabilities, the total is 0, and probability only moves between answers.
+The gradient supplies the **direction** (make this response more likely); the reward supplies the **strength and sign**: a high score pushes harder, and a negative score pushes the opposite way. Every token in the response shares this one $R$. So RL can be read as “SFT on your own samples, each weighted by its score.” For a softmax policy, $\nabla_{\text{logits}} \log \pi(a) = \text{onehot}(a) - \pi$: the sampled token's logit goes up, the others go down in proportion to their probabilities, the components sum to 0, and probability only moves between answers.
 
 The trouble is that the reward is sparse and high-variance. Think of a racing game: in a run with a good time, most of the moves were actually ordinary, yet they all get the same reward; and since every score is positive, whatever was sampled gets pushed up. Each step that follows is a treatment for this problem:
 
@@ -52,7 +52,7 @@ Say a group's average score is 60: responses below 60 get $A < 0$ and are pushed
 
 <PolicyGradientStepFigure />
 
-Shrink the LLM down to three tokens that can only answer “2 + 3 = ?”. The parameters are three logits, all starting at 0, so each of the three answers has 33.3%. Sample 4 responses: 5 ✓, 6 ✗, 5 ✓, 4 ✗; the 0 / 1 rewards are 1, 0, 1, 0.
+Shrink the LLM to a model that only answers “2 + 3 = ?”, with one of three tokens. The parameters are three logits, all starting at 0, so each of the three answers has 33.3%. Sample 4 responses: 5 ✓, 6 ✗, 5 ✓, 4 ✗; the 0 / 1 rewards are 1, 0, 1, 0.
 
 - **Compute the advantages**: mean 0.5, std 0.5, so $A = (+1, -1, +1, -1)$.
 - **Compute each sample's push**: sample 1 gives $+1 \times \big((1,0,0) - (\tfrac13,\tfrac13,\tfrac13)\big) = (+0.67, -0.33, -0.33)$. Sample 2 answered 6 with $A = -1$, so its push is $(+0.33, -0.67, +0.33)$: pushing a wrong answer down amounts to handing its probability back to the other two.
@@ -61,7 +61,7 @@ Shrink the LLM down to three tokens that can only answer “2 + 3 = ?”. The pa
 
 Switch to “Scored reward” and pick “① Raw reward”: all four scores are around 90, so even the wrong answers get pushed up, and a single step has ‖Δθ‖ ≈ 20. That is what high variance and instability look like. Pick “② Subtract the mean” and the 95-point response is pushed by only +3; pick “③ GRPO” and the step size stays on the same order whether the reward is 0 / 1 or out of 100.
 
-### No signal when a group is all right or all wrong
+### No signal when a group is all correct or all wrong
 
 <GrpoFigure />
 
@@ -72,7 +72,7 @@ Switch to the easy problem with G = 4: all four are correct, std = 0, and every 
 ## Costs and trade-offs
 
 - **Why drop the critic**: it removes the critic role and its value-regression training (the exact memory saved depends on whether the backbone is shared), and it sidesteps the hard problem of estimating per-token values from a sparse reward given at the end. The cost is generating G times per prompt: compute moves from “training a critic” to rollouts.
-- **What if all G are right, or all wrong**: the group's advantages are all 0, so the samples are wasted. Common remedies are raising G, filtering out groups with std = 0 and sampling replacements (DAPO's dynamic sampling), or building a curriculum of medium-difficulty problems picked by the current pass rate.
+- **What if all G are correct or all wrong**: the group's advantages are all 0, so the samples are wasted. Common remedies are raising G, filtering out groups with std = 0 and sampling replacements (DAPO's dynamic sampling), or building a curriculum of medium-difficulty problems picked by the current pass rate.
 - **Dividing by std amplifies differences in difficulty**: with 1 correct out of 8, that one gets +2.65; with 7 correct out of 8, each correct one gets only +0.38. Dr. GRPO argues this introduces a problem-difficulty bias, and it only subtracts the mean without dividing by std. The $1/|o_i|$ length normalization also penalizes a long wrong answer less per token, quietly encouraging longer outputs.
 - **Rewards must be comparable, and ideally verifiable**: the group carries only relative information, so answer correctness, unit tests and format checks are the most robust. A learned reward model also works, but it is easier to exploit.
 
