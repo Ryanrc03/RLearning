@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { GRPO_TOTAL_STEPS, grpoPhases, machineModel, machineParts, type PartId } from "@/content/machine";
 import { getNote } from "@/content/notes";
-import type { Lang } from "@/lib/i18n";
+import LangTag from "@/components/i18n/LangTag";
+import { notePath, noteText, type Lang } from "@/lib/i18n";
 import { advance, initialState, readout, withMode, type Mode, type SimState } from "./sim";
 import type { MachineScene } from "./scene";
 
@@ -46,7 +47,8 @@ function hasWebGL2() {
   }
 }
 
-const noteHref = (slug: string) => `/notes/${slug}/`;
+// English pages link to a translation when there is one, otherwise to the Chinese original.
+const noteHref = (slug: string, lang: Lang) => notePath({ slug, en: getNote(slug)?.en }, lang);
 const CALLOUT_GAP_PX = 22;
 const EDGE_PX = 6;
 
@@ -226,9 +228,12 @@ export default function MachineHero({ lang = "zh" }: { lang?: Lang }) {
   }, []);
 
   const current = grpoPhases[phase];
-  const relatedLinks = (slugs: string[]) => slugs.map((slug, i) => (
-    <span key={slug}>{i > 0 && " · "}<Link href={noteHref(slug)}>{getNote(slug)?.title ?? slug}</Link></span>
-  ));
+  const relatedLinks = (slugs: string[]) => slugs.map((slug, i) => {
+    const note = getNote(slug);
+    const { title, translated } = note ? noteText(note, lang) : { title: slug, translated: true };
+    const zhOnly = lang === "en" && !translated;
+    return <span key={slug}>{i > 0 && " · "}<Link href={noteHref(slug, lang)} lang={zhOnly ? "zh-CN" : undefined}>{title}{zhOnly && <LangTag lang={lang} />}</Link></span>;
+  });
 
   return (
     <section ref={panel} className="machine-panel" data-status={status} aria-label={copy.region}>
@@ -247,7 +252,7 @@ export default function MachineHero({ lang = "zh" }: { lang?: Lang }) {
           const refs = partRefs[i];
           const body = <><b>{part.name}</b> <span className="machine-spec">{part.spec[lang]}</span> <span className="machine-readout" ref={refs.readout} /></>;
           return part.slug
-            ? <Link key={part.id} ref={refs.label} href={noteHref(part.slug)} className="machine-label" data-side={part.side}>{body}</Link>
+            ? <Link key={part.id} ref={refs.label} href={noteHref(part.slug, lang)} className="machine-label" data-side={part.side}>{body}</Link>
             : <span key={part.id} ref={refs.label} className="machine-label" data-side={part.side}>{body}</span>;
         })}
       </div>
