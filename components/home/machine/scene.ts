@@ -72,6 +72,7 @@ function mulberry32(seed: number) {
 
 type Packet = { sprite: Sprite; curve: CatmullRomCurve3; t: number; durationMs: number; jitter: number; on: boolean };
 
+/** Requires WebGL2: three r187 throws on WebGL1 or when the context can't be created, so callers must catch. */
 export function createMachineScene(canvas: HTMLCanvasElement, options: SceneOptions): MachineScene {
   const renderer = new WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(options.pixelRatio);
@@ -117,7 +118,9 @@ export function createMachineScene(canvas: HTMLCanvasElement, options: SceneOpti
     g.fillRect(0, 0, w, h);
   });
   const glow = (color: number, size: number, x: number, y: number, z: number, opacity: number) => {
-    const sprite = new Sprite(new SpriteMaterial({ map: glowTexture, color, transparent: true, opacity, blending: AdditiveBlending, depthWrite: false }));
+    const sprite = new Sprite(new SpriteMaterial({
+      map: glowTexture, color, transparent: true, opacity, blending: AdditiveBlending, depthWrite: false,
+    }));
     sprite.scale.set(size, size, 1);
     return place(sprite, x, y, z);
   };
@@ -130,9 +133,13 @@ export function createMachineScene(canvas: HTMLCanvasElement, options: SceneOpti
   box(0.8, 45, 21, 0x0a0d15, 20.2, 0, 0);
   box(0.3, 28, 0.7, 0x4cc9ff, 20.7, 3, 7, { emissive: 0x4cc9ff, emissiveIntensity: 1.4 });
   const caseShape = new BoxGeometry(40.8, 46, 21.6);
-  scene.add(new LineSegments(new EdgesGeometry(caseShape), new LineBasicMaterial({ color: 0x3a4a7a, transparent: true, opacity: 0.9 })));
+  const caseEdges = new LineBasicMaterial({ color: 0x3a4a7a, transparent: true, opacity: 0.9 });
+  scene.add(new LineSegments(new EdgesGeometry(caseShape), caseEdges));
   caseShape.dispose();
-  place(new Mesh(new PlaneGeometry(40, 45), new MeshStandardMaterial({ color: 0x88aaff, transparent: true, opacity: 0.06, depthWrite: false, roughness: 0.1, metalness: 0.9 })), 0, 0, 10.6);
+  const glass = new MeshStandardMaterial({
+    color: 0x88aaff, transparent: true, opacity: 0.06, depthWrite: false, roughness: 0.1, metalness: 0.9,
+  });
+  place(new Mesh(new PlaneGeometry(40, 45), glass), 0, 0, 10.6);
 
   // Motherboard with procedural traces, PCIe slot, SSD.
   const rand = mulberry32(PCB_SEED);
@@ -165,7 +172,8 @@ export function createMachineScene(canvas: HTMLCanvasElement, options: SceneOpti
   const fan = (x: number, y: number, z: number) => {
     box(11, 11, 2.2, 0x0e1220, x, y, z - 1.2);
     const frame = place(new Group(), x, y, z);
-    const ring = place(new Mesh(new TorusGeometry(5.1, 0.32, 12, 64), new MeshStandardMaterial({ color: 0x111111, emissive: 0x4cc9ff, emissiveIntensity: 1.6 })), x, y, z + 0.1);
+    const ringMaterial = new MeshStandardMaterial({ color: 0x111111, emissive: 0x4cc9ff, emissiveIntensity: 1.6 });
+    const ring = place(new Mesh(new TorusGeometry(5.1, 0.32, 12, 64), ringMaterial), x, y, z + 0.1);
     const blades = new Group();
     for (let i = 0; i < 7; i++) {
       const a = (i / 7) * Math.PI * 2;
@@ -220,7 +228,11 @@ export function createMachineScene(canvas: HTMLCanvasElement, options: SceneOpti
   const spawn = (path: PacketPath, color: number) => {
     const p = packets.find((q) => !q.on);
     if (!p) return;
-    Object.assign(p, { on: true, curve: packetCurves[path], t: 0, durationMs: 850 + Math.random() * 350, jitter: (Math.random() - 0.5) * 1.4 });
+    p.on = true;
+    p.curve = packetCurves[path];
+    p.t = 0;
+    p.durationMs = 850 + Math.random() * 350;
+    p.jitter = path === "gpuLoop" ? (Math.random() - 0.5) * 1.4 : 0;
     p.sprite.material.color.setHex(color);
     p.sprite.material.opacity = 1;
     p.sprite.visible = true;
@@ -237,7 +249,9 @@ export function createMachineScene(canvas: HTMLCanvasElement, options: SceneOpti
     cyan.color.setHSL(hue, 0.8, 0.6, SRGBColorSpace);
   };
 
-  let az = IDLE_AZ, el = IDLE_EL, lastOrbitMs = -Infinity, lastNow = -1, lastSpawn = -Infinity;
+  let az = IDLE_AZ, el = IDLE_EL, orbited = false, lastOrbitMs = -Infinity;
+  // animMs only advances while animating, so RGB, sway and spawns pick up where they paused.
+  let lastNow = -1, animMs = 0, lastSpawn = -Infinity;
   let width = 0, height = 0;
   const scratch = new Vector3();
   const placeCamera = () => {
@@ -253,17 +267,24 @@ export function createMachineScene(canvas: HTMLCanvasElement, options: SceneOpti
 
   return {
     render(state, nowMs) {
-      const dt = lastNow < 0 ? 0 : Math.min(MAX_DT_MS, Math.max(0, nowMs - lastNow));
+      const gap = nowMs - lastNow;
+      // A gap longer than MAX_DT_MS means the loop was paused (offscreen, hidden tab): resume with one ordinary frame.
+      const dt = lastNow < 0 ? 0 : gap > MAX_DT_MS ? FRAME_MS : Math.max(0, gap);
       lastNow = nowMs;
+      if (orbited) {
+        lastOrbitMs = nowMs;
+        orbited = false;
+      }
       const util = state.telemetry.gpuUtil;
-      paintRgb(options.animate ? ((nowMs / 1000) * 0.06) % 1 : STILL_HUE);
+      if (options.animate) animMs += dt;
+      paintRgb((STILL_HUE + (animMs / 1000) * 0.06) % 1);
       if (options.animate) {
         for (const f of fans) f.blades.rotation.z -= ((0.04 + util * 0.004) * dt) / FRAME_MS;
         if (state.mode === "grpo") {
           const phase = grpoPhases[state.phase];
-          if (nowMs - lastSpawn > (phase.path === "gpuLoop" ? 70 : 150)) {
+          if (animMs - lastSpawn > (phase.path === "gpuLoop" ? 70 : 150)) {
             spawn(phase.path, phase.color);
-            lastSpawn = nowMs;
+            lastSpawn = animMs;
           }
         }
         for (const p of packets) {
@@ -271,12 +292,15 @@ export function createMachineScene(canvas: HTMLCanvasElement, options: SceneOpti
           p.t += dt / p.durationMs;
           if (p.t >= 1) { p.on = false; p.sprite.visible = false; continue; }
           p.curve.getPointAt(p.t, scratch);
-          p.sprite.position.set(scratch.x, scratch.y + (p.curve === packetCurves.gpuLoop ? p.jitter : 0), scratch.z);
+          p.sprite.position.set(scratch.x, scratch.y + p.jitter, scratch.z);
           p.sprite.material.opacity = Math.min(1, (1 - p.t) * 3);
         }
         if (nowMs - lastOrbitMs > IDLE_AFTER_MS) {
+          const goal = IDLE_AZ + 0.28 * Math.sin((animMs / 1000) * 0.22);
+          // Ease toward the nearest equivalent angle, so spins from dragging don't unwind whole turns.
+          az -= Math.round((az - goal) / (2 * Math.PI)) * 2 * Math.PI;
           const k = Math.min(1, (0.01 * dt) / FRAME_MS);
-          az += (IDLE_AZ + 0.28 * Math.sin((nowMs / 1000) * 0.22) - az) * k;
+          az += (goal - az) * k;
           el += (IDLE_EL - el) * k;
         }
       }
@@ -288,6 +312,7 @@ export function createMachineScene(canvas: HTMLCanvasElement, options: SceneOpti
       renderer.render(scene, camera);
     },
     partScreenPosition(id) {
+      if (!width || !height) return { x: 0, y: 0, visible: false };
       scratch.copy(partAnchors[id]).project(camera);
       const x = ((scratch.x + 1) / 2) * width;
       const y = ((1 - scratch.y) / 2) * height;
@@ -303,13 +328,15 @@ export function createMachineScene(canvas: HTMLCanvasElement, options: SceneOpti
     orbitBy(dx, dy) {
       az -= dx * 0.006;
       el = Math.min(0.95, Math.max(-0.15, el + dy * 0.004));
-      lastOrbitMs = performance.now();
+      orbited = true;
+      placeCamera();
     },
     dispose() {
       const geometries = new Set<BufferGeometry>(), materials = new Set<Material>(), textures = new Set<Texture>();
       scene.traverse((object) => {
         if (!(object instanceof Mesh || object instanceof LineSegments || object instanceof Sprite)) return;
-        geometries.add(object.geometry);
+        // Sprites share three's geometry singleton; renderer.dispose() releases this renderer's copy.
+        if (!(object instanceof Sprite)) geometries.add(object.geometry);
         for (const m of ([] as Material[]).concat(object.material)) {
           materials.add(m);
           if ("map" in m && m.map instanceof Texture) textures.add(m.map);
