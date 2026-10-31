@@ -34,6 +34,7 @@ export const roadmapNodes: RoadmapNode[] = [
   { id: "sys-design", section: "System Design", categoryId: "systems", row: 3, col: 1 },
   { id: "sys-backend", section: "Backend Systems", categoryId: "systems", label: "Backend", row: 3, col: 2 },
   { id: "ai-gpu", section: "GPU Kernels", categoryId: "ai-infra", row: 3, col: 3 },
+  { id: "sys-ads", section: "Ads Backend Systems", categoryId: "systems", label: "Ads Backend", row: 4, col: 1 },
   // ML & LLM
   { id: "ml-tree", section: "Knowledge Tree", categoryId: "ml", label: "ML 知识树", row: 0, col: 5 },
   { id: "ml-training", section: "Training", categoryId: "ml", row: 1, col: 4 },
@@ -64,6 +65,8 @@ const handEdges: RoadmapEdge[] = [
   { from: "sys-distributed", to: "sys-data" },
   { from: "sys-distributed", to: "sys-design" },
   { from: "sys-distributed", to: "sys-backend" },
+  { from: "sys-data", to: "sys-ads" },
+  { from: "sys-design", to: "sys-ads" },
   { from: "cs-os", to: "ai-gpu" },
   { from: "ml-dl-blocks", to: "ai-gpu" },
   { from: "ml-tree", to: "ml-training" },

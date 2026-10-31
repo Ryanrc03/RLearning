@@ -1,0 +1,150 @@
+import Callout from "@/components/visualization/sketch/Callout";
+import PipelineExplorer from "@/components/visualization/systems/ads/PipelineExplorer";
+
+# Ads Backend Overview：一次点击怎么变成一条训练样本
+
+**一句话：** 广告后端的训练数据链路，是把“用户点了广告”和“用户在别处买了东西”这两类分散、重复、迟到的信号，经过 **Signal → Identity → Attribution → 流式 Join → 样本构建**，变成一张每个 `sample_id` 只有一行、label 可以被修正的训练表；在线服务只读这张表训练出来的模型，不等任何 label。
+
+<Callout tone="example" title="关于这个系列">
+这是一套通用的 Ads Backend System Design 学习笔记。文中的架构是**逻辑上的教学模型**，不是任何公司（包括 TikTok）的内部实现；所有 ID、时间、数量和指标都是**模拟数据**。SIA 在本系列里只是 **S**ignal、**I**dentity、**A**ttribution 三个阶段的概念性统称。Kafka / Flink 的行为以 Apache 官方文档为准，ByteMQ 只当作“Kafka 一类的分区日志型消息队列”来讨论。
+</Callout>
+
+## 为什么需要这条链路
+
+CVR 模型要回答的问题是：**这次点击之后，用户会不会转化？** 要训练它，就需要大量 `(点击时刻的特征, 后来有没有转化)` 这样的样本。麻烦在于“后来有没有转化”这件事，广告平台自己看不到：
+
+- **点击发生在平台上，购买发生在广告主的网站或 App 里。** 两边的数据通过 Pixel、Events API、SDK、MMP 等不同渠道回传，同一次购买常常被报好几次。
+- **两边不共享同一个用户 ID。** 要靠 click_id 回传、经同意的哈希邮箱等信号判断“这次购买的人，是不是刚才点广告的人”。
+- **转化会迟到。** 有的几分钟后就买了，有的三天后才买。训练任务不能无限等，又不能把“还没买”当成“不会买”。
+- **系统会出故障。** 重试、重放、机房切换都会让同一条数据被处理不止一次。
+
+这条链路的每一层，都是为了解决上面某一个问题而存在的。
+
+## 怎么工作：一张全链路图
+
+<PipelineExplorer />
+
+几个读图要点：
+
+1. **上半部分是异步的训练路径**，追求的是正确：不重、不丢、label 可修正。从事件发生到样本定稿，快则分钟，慢则要等 label window 结束。
+2. **下半部分是同步的在线路径**：一次广告请求在几十毫秒内查特征、跑 pCTR / pCVR、出价。它只消费训练路径产出的模型和特征。
+3. 两条路径在 **Feature / Label Store** 和 **Impression / Click** 处相遇：在线服务产生的曝光和点击，又成为下一轮训练的输入。这是一个反馈回路，也是为什么训练数据里的偏差会被模型放大。
+
+## 统一案例：从广告点击到 CVR Label
+
+整个系列反复使用同一组数据。所有时间和 ID 均为模拟。
+
+| 发生时间 | 事件 | ID |
+| --- | --- | --- |
+| 09:50 | Click Ad A | `click_100` |
+| 10:00 | Click Ad B | `click_101` |
+| 10:30 | Purchase | `purchase_501` |
+| 10:31 | Pixel 上报该 Purchase | `event_501` |
+| 10:33 | Events API 重复上报 | `event_501` |
+| 11:00 | Region B Replay 同一事件 | `event_501` |
+
+用这个案例要回答的七个问题，以及在哪一章回答：
+
+| 问题 | 章节 |
+| --- | --- |
+| 为什么 Pixel 和 Events API 会发送同一事件？ | [01 Signal Collection](/notes/systems/ads/signal-collection/) |
+| 如何用稳定 Event ID 去重？ | [01](/notes/systems/ads/signal-collection/)、[06 Dedup](/notes/systems/ads/dedup-exactly-once/) |
+| 如何把网站 Purchase 关联到广告 Click？ | [02 Identity Resolution](/notes/systems/ads/identity-resolution/) |
+| Last-click 下 credit 给哪个 Click？ | [03 Attribution](/notes/systems/ads/attribution-labels/) |
+| 下游 CVR label 怎么构建？ | [03](/notes/systems/ads/attribution-labels/)、[05 Flink](/notes/systems/ads/flink-streaming-training/) |
+| 两个 Region 都处理了，为什么不能产出两条样本？ | [06](/notes/systems/ads/dedup-exactly-once/)、[07 Disaster Recovery](/notes/systems/ads/multi-region-dr/) |
+| Flink 故障重放后，数据怎样保持一致？ | [05](/notes/systems/ads/flink-streaming-training/)、[06](/notes/systems/ads/dedup-exactly-once/) |
+
+从第 03 章开始还会引入一个独立的 **Late Conversion** 场景：`click_200` 在第 0 小时被点击，用户 52 小时后才下单，label window 是 7 天。它用来演示 label 从 provisional 到 final，以及必要时的修正。
+
+## 六个对象，不要混在一起
+
+链路里流动的不是“一种数据”，而是六种不同的对象。很多线上事故的根源，就是把其中两个当成了一个。
+
+| 对象 | 是什么 | 逻辑唯一键（示例） | 案例里有几个 |
+| --- | --- | --- | --- |
+| Raw Event | 一条收到的消息 | 无，可能重复 | 3 条 `event_501` |
+| Deduplicated Event | 一个业务事实 | `px_7:Purchase:event_501` | 1 个 |
+| Identity Match | “这次转化和那个触点是同一个人”的判断，带置信度 | `(conversion_id, touchpoint_id, model_version)` | 2 个候选 |
+| Attribution Decision | 按某条归因规则分出去的 credit | `attr:event_501:last_click_7d` | 1 条（credit 全给 `click_101`） |
+| Training Sample | 一个 click 级训练样本：特征 + label + 状态 | `s:cvr:click_101:lp_v3` | 每个 click 一条 |
+| Training Label | 样本上的 0 / 1，有 status 和 revision | 随样本，靠 `label_revision` 区分版本 | `click_101` = 1，`click_100` = 0 |
+
+<Callout tone="warn" title="全系列最重要的一句话">
+**Attribution Result 不直接等于 Training Label。** 归因是给广告主报表和计费用的“功劳分配”；label 是给模型用的监督信号。两者可以用不同的窗口、不同的规则，甚至不同的数据源。第 03 章专门讲这件事。
+</Callout>
+
+## 核心数据结构
+
+下面是四个核心对象的示例。字段名只是为了讲清楚概念，真实系统的 schema 会根据业务、隐私要求和存储方式变化。
+
+```json
+// RawEvent：收到的一条消息
+{
+  "event_id": "event_501",
+  "advertiser_id": "adv_42",
+  "event_type": "Purchase",
+  "event_time": "2026-10-30T10:30:00Z",
+  "receive_time": "2026-10-30T10:31:04Z",
+  "source": "pixel",
+  "schema_version": 3
+}
+
+// IdentityMatch：一次匹配判断，不是身份证明
+{
+  "conversion_id": "event_501",
+  "candidate_touchpoint_id": "click_101",
+  "match_method": "deterministic:click_id",
+  "confidence": 1.0,
+  "model_version": "idm_2026_10"
+}
+
+// AttributionResult：报表口径的 credit
+{
+  "conversion_id": "event_501",
+  "touchpoint_id": "click_101",
+  "attribution_policy_id": "last_click_7d",
+  "credit": 1.0,
+  "revision": 1
+}
+
+// TrainingSample：训练口径的样本
+{
+  "experiment_id": "exp_base",
+  "task_id": "cvr",
+  "sample_id": "s:cvr:click_101:lp_v3",
+  "label": 1,
+  "label_status": "final",
+  "label_revision": 1,
+  "feature_version": "fv_88"
+}
+```
+
+注意三个 ID 的粒度不同：`event_id` 是**转化**级的，`attribution` 的键是**转化 × 归因规则**，`sample_id` 是**点击 × 任务 × label 规则**。它们不能互相代替：一个 click 可以没有任何转化（仍然有样本，label 0），一个转化在 multi-touch 下可以给多个 click 分 credit。
+
+## System Design Trade-offs
+
+整套系统反复出现的几组取舍，后面每章会展开：
+
+| 问题 | 方案 A | 方案 B | 关键考虑 | 章节 |
+| --- | --- | --- | --- | --- |
+| Event Time vs Processing Time | 按业务时间对齐，结果正确 | 实现简单、响应快 | 正确性 vs 延迟 | 05 |
+| Short TTL vs Long TTL | 状态成本低 | 接住更多迟到数据 | 内存 vs 完整性 | 05、06 |
+| At-least-once vs Exactly-once | 吞吐高、实现简单 | 状态与输出更强的保证 | 端到端成本 | 06 |
+| Active-Passive vs Active-Active | 容易保证单写者 | 并行能力、恢复更快 | Failover vs 一致性 | 07 |
+| Append-only vs Upsert | 写入简单、便宜 | 支持修正与幂等 | Label Revision | 03、06 |
+| Shared vs Isolated Pipelines | 节省资源 | 实验之间不互相干扰 | 成本 vs 实验可信度 | 08 |
+
+还有一组贯穿全系列、但很少被明说的取舍：**新鲜度 vs label 成熟度**。样本写得越早，模型越快学到新流量，但 label 越可能还会变；等 label window 结束再写，label 准确，但模型永远在学一周前的世界。
+
+## 面试 Follow-up
+
+- **“一次 purchase 是怎么变成 CVR label 的？”** 按六个对象回答：三条 raw event → 一个去重后的转化 → identity 匹配到两个候选 click → last-click 归因给 `click_101` → 按 label 规则给 `click_101` 写 label 1、`click_100` 写 label 0 → 样本以 `sample_id` 幂等写入，label 带 status 和 revision。
+- **“为什么不直接用归因结果当 label？”** 用途不同：报表要的是“功劳只算一次、能对账”，训练要的是“这个 click 后用户会不会转化”的无偏估计。归因规则（如 last-click）会系统性地把较早的 click 标成 0。
+- **“在线和离线最大的区别？”** 延迟预算和一致性要求不同：在线是几十毫秒的同步请求，宁可降级也要返回；离线是分钟到天级别的异步流，宁可晚也要对。
+- **“画这张图时最容易漏掉什么？”** 去重（三处：事件、归因、样本）、label 修正路径、以及多机房下谁是最终写入者。
+
+## 再往下看
+
+- 下一章：[Signal Collection & Ingestion](/notes/systems/ads/signal-collection/)，从同一个 purchase 被上报三次开始。
+- 现有笔记：[CTR / CVR 与 ESMM](/notes/ml/recsys/ctr-cvr-esmm/) 讲 CVR 模型本身；[样本与特征拼接](/notes/ml/recsys/sample-feature-join/) 讲 point-in-time 的特征拼接；[消息队列](/notes/systems/design/message-queue/) 和 [数据基础设施](/notes/systems/data/overview/) 是 Kafka、Flink 的前置知识。
