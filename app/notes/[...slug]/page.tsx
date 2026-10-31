@@ -31,6 +31,15 @@ import DesignDataModeling from "@/content/systems/design/data-modeling.mdx";
 import DesignApi from "@/content/systems/design/api.mdx";
 import DesignAbPlatform from "@/content/systems/design/ab-testing-analytics-platform.mdx";
 import Serverless from "@/content/systems/backend/serverless.mdx";
+import AdsOverview from "@/content/systems/ads/overview.mdx";
+import AdsSignalCollection from "@/content/systems/ads/signal-collection.mdx";
+import AdsIdentityResolution from "@/content/systems/ads/identity-resolution.mdx";
+import AdsAttributionLabels from "@/content/systems/ads/attribution-labels.mdx";
+import AdsStreamingArchitecture from "@/content/systems/ads/streaming-architecture.mdx";
+import AdsFlinkStreamingTraining from "@/content/systems/ads/flink-streaming-training.mdx";
+import AdsDedupExactlyOnce from "@/content/systems/ads/dedup-exactly-once.mdx";
+import AdsMultiRegionDr from "@/content/systems/ads/multi-region-dr.mdx";
+import AdsExperimentPlatform from "@/content/systems/ads/experiment-platform.mdx";
 import AgentLoop from "@/content/ai-infra/agent-harness/agent-loop.mdx";
 import ToolsPermissionsHooks from "@/content/ai-infra/agent-harness/tools-permissions-hooks.mdx";
 import SubagentsSkillsMcp from "@/content/ai-infra/agent-harness/subagents-skills-mcp.mdx";
@@ -170,6 +179,15 @@ const noteComponents = {
   "systems/design/api": DesignApi,
   "systems/design/ab-testing-analytics-platform": DesignAbPlatform,
   "systems/backend/serverless": Serverless,
+  "systems/ads/overview": AdsOverview,
+  "systems/ads/signal-collection": AdsSignalCollection,
+  "systems/ads/identity-resolution": AdsIdentityResolution,
+  "systems/ads/attribution-labels": AdsAttributionLabels,
+  "systems/ads/streaming-architecture": AdsStreamingArchitecture,
+  "systems/ads/flink-streaming-training": AdsFlinkStreamingTraining,
+  "systems/ads/dedup-exactly-once": AdsDedupExactlyOnce,
+  "systems/ads/multi-region-dr": AdsMultiRegionDr,
+  "systems/ads/experiment-platform": AdsExperimentPlatform,
   "ai-infra/agent-harness/agent-loop": AgentLoop,
   "ai-infra/agent-harness/tools-permissions-hooks": ToolsPermissionsHooks,
   "ai-infra/agent-harness/subagents-skills-mcp": SubagentsSkillsMcp,

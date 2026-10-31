@@ -1,0 +1,137 @@
+import Callout from "@/components/visualization/sketch/Callout";
+import AttributionTimeline from "@/components/visualization/systems/ads/AttributionTimeline";
+import LabelMaturityViz from "@/components/visualization/systems/ads/LabelMaturityViz";
+
+# Attribution & Label Generation：转化怎么变成 CVR Label
+
+**一句话：** Attribution 按一条规则和一个窗口，把一次转化的功劳（credit）分给之前的触点，服务于报表和计费；Label Generation 按另一条规则，给每个 click 级样本写一个 0 / 1，服务于模型训练。**两者相关但不相等**；而且 label 是随时间成熟的：窗口没结束时的 0 只是 provisional，不能当成最终负样本。
+
+## 为什么需要它
+
+经过前两章，我们已经有了：一个去重后的转化 `event_501`，以及两个匹配上的点击 `click_100`（Ad A）、`click_101`（Ad B）。还剩两个问题：
+
+1. **这次购买算谁的？** 广告主要看每个广告带来了多少转化，平台要据此计费、出报表。这是 attribution。
+2. **训练数据里，这两个 click 的 label 各是几？** CVR 模型要学的是“这次点击之后会不会转化”。这是 label generation。
+
+把这两件事混为一谈，是广告训练数据最常见的概念错误之一。
+
+## 怎么工作：Attribution
+
+### 窗口、规则、credit
+
+- **Attribution Window**：转化发生前多久内的触点才有资格分 credit。常见的是以天计的 click-through 窗口（例如 7 天）和更短的 view-through 窗口。
+- **Attribution Policy**：在合格的触点之间怎么分。
+  - **Last-click**：最后一次点击拿全部 credit。简单、可解释，最常见的默认口径。
+  - **First-click**：第一次点击拿全部 credit，偏向“发现”阶段的广告。
+  - **Multi-touch**：linear 平分、time-decay 按时间衰减、position-based 首尾加权，或者数据驱动的模型。
+- **Credit**：分到的份额。同一个转化在同一条规则下，各触点的 credit 加起来是 1（或者 0：没有触点合格）。
+
+<AttributionTimeline />
+
+### 转化级去重
+
+归因结果的逻辑唯一键是 `(conversion_id, attribution_policy_id)`，例如 `attr:event_501:last_click_7d`。即使 `event_501` 因为重放被处理了三次，这条规则下它也只能有一条归因结果。否则报表里会出现“一次购买、三次转化”。这和第 01 章的事件去重是**两层不同的去重**，第 06 章会把它们放在一起讲。
+
+### Attribution Revision
+
+归因结果不是一次写死的：
+
+- 迟到的触点或转化到达，使得“最后一次点击”变了；
+- identity 模型更新，匹配结果变了；
+- 转化被撤销（退款、欺诈判定）。
+
+所以 `AttributionResult` 带一个 `revision`，下游按“版本更大才覆盖”处理（第 06 章的 version-aware upsert）。
+
+## 怎么工作：Label Generation
+
+### Click 级 CVR label
+
+CVR 的样本粒度通常是**点击**：每个 click 一条样本，特征取**点击那一刻**能看到的值（point-in-time），label 回答“这次点击之后，在 label window 内，是否发生了按 label 规则认可的转化”。
+
+那么，**某次 click 最终为什么得到 label = 1？** 要同时满足：
+
+1. 存在一个转化，与这个 click 被 identity 判断为同一用户；
+2. 转化发生在该 click 之后、label window 之内；
+3. 转化通过了事件去重、consent 和有效性检查（没有被撤销）；
+4. **按当前的 label 规则**，这个 click 被认定为正。label 规则可能是“跟随某种归因结果”，也可能是“窗口内同一用户在同一广告主有转化即为正”，或者别的定义。
+
+上面的 timeline 里切换到“窗口内有转化即为正”，会看到 `click_100` 在报表里 credit 是 0，但训练 label 是 1。哪种 label 规则更好，取决于模型要学什么：
+
+| label 规则 | 好处 | 风险 |
+| --- | --- | --- |
+| 跟随 last-click 归因 | 与报表一致，好解释 | 系统性把较早的 click 标成 0，模型低估“前期”广告的转化概率 |
+| 窗口内有转化即为正 | 更接近“这次点击后会不会转化” | 同一次转化让多个样本为正，正样本率与报表口径不同，需要单独校准 |
+| 跟随 multi-touch credit | 信息更细 | credit 是小数，label 是 0 / 1，需要额外规则或改用加权样本 |
+
+<Callout tone="warn" title="Reporting Credit ≠ Training Label Policy">
+Last-click 是报表的常见口径，但不能推断所有模型的 label 都按 last-click 生成。不同任务（CVR、深度转化、LTV）、不同模型版本可以有不同的 label policy，所以 `sample_id` 里要带上 `label_policy` 版本，例如 `s:cvr:click_101:lp_v3`。
+</Callout>
+
+### Label = 0 是什么意思
+
+label 0 **不是**“我们证明了用户没有购买”。它的含义是：在可观测的信号里、在这个 label window 内、按这个 label 规则，没有看到符合条件的转化。用户可能：
+
+- 在窗口结束后才购买；
+- 购买了，但广告主没有回传，或回传被拦截；
+- 购买了，但没有同意数据用于广告衡量；
+- 购买了，但 identity 没能匹配上。
+
+所以正样本率是“可观测的 CVR”，它系统性地低于真实 CVR。理解这一点，才能理解为什么覆盖率提升（更多回传、更好的匹配）会让模型预测值整体变化。
+
+### Delayed Feedback 与 Label Maturity
+
+点击发生的那一刻，label 还不存在。转化可能几分钟后到，也可能几天后到。下面是独立的 Late Conversion 场景：`click_200` 在第 0 小时被点击，52 小时后才下单，label window 7 天。
+
+<LabelMaturityViz />
+
+有三种常见的处理方式：
+
+1. **等窗口结束再写样本**：label 准确，但模型永远在学一周前的流量，冷启动的新广告要等很久才有数据。
+2. **先写 provisional，之后修正**：点击后不久就写出 label 0（`label_status = provisional`），转化到达时修正为 1（`label_revision + 1`），窗口结束时标为 final。新鲜，但下游必须支持修正，并且要知道哪些 0 还没成熟。
+3. **先写 provisional，训练时显式建模延迟**：把“暂时的负样本”当成可能会变的观测，用延迟反馈模型（如 Chapelle 2014 年在 KDD 发表的 Delayed Feedback Model）或重要性加权来纠偏。
+
+不能做的是第四种：**在很短的截止时间后把没转化的样本定成最终的 0，之后再也不改**。上面切到“1 小时没转化就定成 0”，拖到窗口结束，会看到一个永久错误的负样本。
+
+```python
+def label_for(click, conversions, policy, window, now):
+    """Click 级 CVR label，带 status 与 revision。"""
+    hits = [c for c in conversions
+            if c.user_match(click)                       # identity，第 02 章
+            and click.time <= c.time <= click.time + window
+            and c.is_valid()                             # 去重、consent、未撤销
+            and policy.counts(click, c)]                 # label 规则，可以不同于报表归因
+    if hits:
+        return Label(1, status="final" if now >= click.time + window else "positive")
+    if now >= click.time + window:
+        return Label(0, status="final")
+    return Label(0, status="provisional")                # 还会变，下游不能当成定论
+```
+
+## System Design Trade-offs
+
+**Problem → Naive → Failure → Better → Trade-off**
+
+- **Problem：** 模型要新鲜，但转化会迟到好几天。
+- **Naive：** 点击后 1 小时内没有转化就写 label 0，追加到训练表，转化之后到的再追加一条 label 1。
+- **Failure：** 同一个 click 在表里有两行，一行 0、一行 1：模型既学到它是负样本又学到它是正样本；按行数算的样本量和正样本率都错了。如果改成“同一个 sample_id 已存在就丢弃”，修正又永远写不进去。
+- **Better：** 每个 click 一个 `sample_id`，label 带 `label_status` 和 `label_revision`；写入用 version-aware upsert；训练时要么只读 final 样本，要么对 provisional 样本使用延迟反馈的纠偏方法。
+- **Trade-off：** 存储要支持更新（或者 append + 读时取最新版本），训练读取逻辑更复杂，换来新鲜度和正确性兼得。
+
+| 选择 | 方案 A | 方案 B | 关键考虑 |
+| --- | --- | --- | --- |
+| Label window | 短：样本成熟快 | 长：覆盖更多迟到转化 | 新鲜度 vs label 完整性 |
+| 样本写出时机 | 等窗口结束 | 先 provisional 再修正 | 训练延迟 vs 系统复杂度 |
+| Label 规则 | 跟随报表归因 | 独立定义 | 可解释、一致 vs 训练目标更准确 |
+| 写入方式 | Append-only | Upsert（带版本） | 简单 vs 支持 revision |
+
+## 面试 Follow-up
+
+- **“Attribution 和 label 是一回事吗？”** 不是。前者分功劳，用于报表和计费；后者是监督信号。它们可以有不同的窗口、规则和数据源，样本 ID 要带 label policy 版本。
+- **“last-click 下，click_100 的 label 是几？”** 取决于 label 规则：跟随 last-click 是 0；“窗口内有转化即为正”是 1。先问清楚 label policy，再回答。
+- **“label = 0 能说明用户没买吗？”** 不能，只能说明在观察窗口内、在可观测信号中没看到符合规则的转化。
+- **“迟到的转化是重复吗？”** 不是。它是对同一个 sample 的 label 修正，需要按版本覆盖，而不是按主键去重丢弃。
+
+## 再往下看
+
+- 上一章：[Identity Resolution](/notes/systems/ads/identity-resolution/)；下一章：[Streaming Data Architecture](/notes/systems/ads/streaming-architecture/)。
+- 现有笔记：[CTR / CVR 与 ESMM](/notes/ml/recsys/ctr-cvr-esmm/)（为什么 CVR 只在点击样本上定义）；[Point-in-time 切分](/notes/ml/recsys/point-in-time-split/)（特征只能用点击那一刻之前的数据）。
