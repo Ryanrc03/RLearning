@@ -1,3 +1,5 @@
+import type { NoteTranslation } from "@/lib/i18n";
+
 export type NoteEntry = {
   slug: string;
   title: string;
@@ -15,7 +17,7 @@ export type NoteEntry = {
   /** "case-study" switches the article to the hand-drawn case-study styling (styles/sketch.css). */
   layout?: "case-study";
   /** Present when an English translation exists at content/<slug>.en.mdx. */
-  en?: { title: string; description: string; updated: string };
+  en?: NoteTranslation;
 };
 
 // Published notes share this metadata across navigation, search, and article pages.

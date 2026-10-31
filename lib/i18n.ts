@@ -7,19 +7,22 @@ export const otherLang = (lang: Lang): Lang => (lang === "zh" ? "en" : "zh");
 export const homePath = (lang: Lang) => (lang === "en" ? "/en/" : "/");
 
 /** "/en/notes/x" → "/notes/x"; "/en" → "" (the shell strips trailing slashes before calling). */
-export const stripLang = (pathname: string) => (pathname === "/en" ? "" : pathname.replace(/^\/en(?=\/)/, ""));
+export const stripLang = (pathname: string) => pathname.replace(/^\/en(?=\/|$)/, "");
 
-type Translatable = { slug: string; en?: { title: string; description: string; updated: string } };
+/** The English title, description and last-updated date of a translated note. */
+export type NoteTranslation = { title: string; description: string; updated: string };
+
+type Translatable = { slug: string; en?: NoteTranslation };
 
 /** English readers get the English page when one exists, otherwise the Chinese original. */
 export const notePath = (note: Translatable, lang: Lang) =>
   lang === "en" && note.en ? `/en/notes/${note.slug}/` : `/notes/${note.slug}/`;
 
 export function noteText(note: Translatable & { title: string; description: string }, lang: Lang) {
-  const translated = lang === "en" && Boolean(note.en);
-  return translated
-    ? { title: note.en!.title, description: note.en!.description, translated }
-    : { title: note.title, description: note.description, translated };
+  const en = lang === "en" ? note.en : undefined;
+  return en
+    ? { title: en.title, description: en.description, translated: true }
+    : { title: note.title, description: note.description, translated: false };
 }
 
 const zh = {
@@ -84,8 +87,8 @@ export const dict: Record<Lang, typeof zh> = {
   zh,
   en: {
     skipToContent: "Skip to content",
-    openSidebar: "Open contents",
-    closeSidebar: "Close contents",
+    openSidebar: "Open sidebar",
+    closeSidebar: "Close sidebar",
     sidebarLabel: "Library contents",
     mainNav: "Main navigation",
     searchPlaceholder: "Search notes",
@@ -102,20 +105,20 @@ export const dict: Record<Lang, typeof zh> = {
     stillGrowing: "This note is still growing.",
     backToLibrary: "Back to the library",
     translationBehind: "The Chinese original has been updated since this translation.",
-    heroTitle: "Stay curious, keep collecting",
+    heroTitle: "Stay curious, grow slowly",
     heroTitleEnd: ".",
     roadmapTitle: "Roadmap",
-    roadmapHint: "Arrows point to what comes next · click a node to see its notes",
+    roadmapHint: "Arrows point to what comes next · select a node to see its notes",
     recentTitle: "Recently added",
-    noteCount: "{n} notes",
+    noteCount: "{n} note{s}",
     showAll: "Show all {n}",
     activityTitle: "Every bit of progress counts.",
-    activityBody: "Each square is a day of notes created or updated.",
+    activityBody: "Tracks when notes are created or updated, slowly connecting the dots.",
     activityPeriod: "Last 26 weeks",
     activityAria: "Note updates over the last 26 weeks: {updates} updates on {days} active days. One square per day; darker means more notes updated that day.",
-    activityFuture: "{date} · not yet",
-    activityDay: "{date} · {n} notes updated",
-    activityDayTitles: "{date} · {n} notes updated: {titles}",
+    activityFuture: "{date} · in the future",
+    activityDay: "{date} · {n} note{s} updated",
+    activityDayTitles: "{date} · {n} note{s} updated: {titles}",
     listSeparator: ", ",
     activityLess: "Less",
     activityMore: "More",
@@ -124,26 +127,31 @@ export const dict: Record<Lang, typeof zh> = {
     statUpdates: "note updates",
     avatarAlt: "{name}'s avatar",
     close: "Close",
-    splitPaneLabel: "Side-by-side: {title}",
+    splitPaneLabel: "Side-by-side reading: {title}",
     splitResize: "Drag to resize the panes",
-    splitResizeTitle: "Drag to resize, double-click to reset to half",
+    splitResizeTitle: "Drag to resize, double-click to split evenly",
     splitOpenFull: "Open full page",
     splitClose: "Close side-by-side reading",
     splitCloseTitle: "Close (Esc)",
-    roadmapNotes: "{n} notes",
+    roadmapNotes: "{n} note{s}",
     roadmapLegend: "Color legend",
     roadmapProgress: "Bar = share of stable / growing / seed notes",
     roadmapAria: "Knowledge roadmap: arrows show which to read first",
     roadmapLayer: "Layer {n}",
-    roadmapDrawerNotes: "{n} notes",
-    roadmapBefore: "Before this",
+    roadmapDrawerNotes: "{n} note{s}",
+    roadmapBefore: "Prerequisites",
     roadmapAfter: "Next",
   },
 };
 
 export type DictKey = keyof typeof zh;
 
-/** Look up a UI string and fill {placeholders}. */
+/**
+ * Look up a UI string and fill {placeholders}. `{s}` is reserved for English plurals:
+ * it becomes "" when `vars.n` is 1 and "s" otherwise.
+ */
 export function t(lang: Lang, key: DictKey, vars: Record<string, string | number> = {}): string {
-  return dict[lang][key].replace(/\{(\w+)\}/g, (_, name: string) => String(vars[name] ?? `{${name}}`));
+  return dict[lang][key].replace(/\{(\w+)\}/g, (_, name: string) =>
+    name === "s" ? (Number(vars.n) === 1 ? "" : "s") : String(vars[name] ?? `{${name}}`),
+  );
 }
