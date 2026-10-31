@@ -39,7 +39,7 @@ const zh = {
 const COPY: Record<Lang, typeof zh> = {
   zh,
   en: {
-    problems: { format: "① Sentence in the answer", reasoning: "② One more step", hacked: "③ Hacked to one line", style: "④ Style when all are right" },
+    problems: { format: "① Sentence in the answer field", reasoning: "② Think one more step", hacked: "③ Hacked down to one line", style: "④ Style when all are right" },
     narr: {
       format: "The untrained model reasons correctly and gets 576, but it writes a whole sentence in <answer> and never closes the tag, so no answer can be extracted and it is graded wrong. A large share of the points the untrained model loses go this way. All four trained models write the tags in full; SFT and the first run write the shortest, while the fixed run still reasons step by step like the untrained model, only now it finishes properly.",
       reasoning: "The problem has four conditions: 1 bad, 20% unripe, 2 sour, and the rest good. The untrained model and SFT both miss the “1 bad” and answer 18; the first run at 200 steps and the fixed run list all four conditions one by one before subtracting, and get 17 right; by 500 steps the first run's subtraction has fallen apart. SFT learned the gold solutions' style, not the habit of checking one more step.",

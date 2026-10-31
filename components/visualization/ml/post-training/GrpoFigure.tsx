@@ -51,7 +51,7 @@ const COPY: Record<Lang, typeof zh> = {
   zh,
   en: {
     title: "GRPO: sample G responses to the same problem; standardizing within the group gives the advantage",
-    description: "A GSM8K-style math problem whose verifier looks only at the final answer: 1 if right, 0 if wrong. The top row is each response's reward, and the dashed line is the group mean; the bottom row is (r − mean) / std. Grey slots are responses not sampled yet.",
+    description: "A GSM8K-style math problem whose verifier looks only at the final answer: 1 if right, 0 if wrong. The top row is each response's reward, and the dashed line is the group mean; the bottom row is (r − mean) / std. Gray slots are responses not sampled yet.",
     difficulty: "Problem difficulty",
     reset: "Reset",
     gSlider: "Samples per problem G",
@@ -61,7 +61,7 @@ const COPY: Record<Lang, typeof zh> = {
     groupMean: "Group mean (baseline)",
     groupStd: "Group std",
     zeroTitle: (g) => `Chance a group is all correct or all wrong (G = ${g})`,
-    zeroNote: "pᴳ + (1 − p)ᴳ: the share of groups on such a problem that are sampled for nothing at this step and contribute no gradient.",
+    zeroNote: "pᴳ + (1 − p)ᴳ: the share of groups on problems like this that are sampled for nothing and contribute no gradient at this step.",
     allRight: (g) => `All ${g} responses are correct: group mean 1, std 0, so every advantage is 0. This problem produces no gradient at this step, not because the answers were bad but because the group has nothing to compare against. The problem is too easy: raise G, or filter it out of the training set.`,
     allWrong: (g) => `All ${g} responses are wrong: mean 0, std 0, and every advantage is 0. The model has never solved this problem, so GRPO gets no information about which way to move. Either raise G and hope for a lucky hit, do an SFT cold start first, or build a curriculum from easier problems.`,
     mixed: ({ g, right, mean, std, aRight, aWrong }) => `${right} of ${g} responses correct: mean ${mean.toFixed(2)}, std ${std.toFixed(2)}. Each correct response gets A = ${sign(aRight)}, each wrong one A = ${sign(aWrong)}. The fewer correct responses, the harder each one that got it right is pushed; the baseline is just the group mean, with no critic needed to estimate it.`,

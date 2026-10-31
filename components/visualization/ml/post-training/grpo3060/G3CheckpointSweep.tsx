@@ -51,7 +51,7 @@ const COPY: Record<Lang, typeof zh> = {
     narrAll: ({ instAcc, sftAcc }) => `On the same 300 problems, the untrained model scores ${pct(instAcc)} and SFT ${pct(sftAcc)}. The two GRPO runs track each other for the first 200 steps and split after that: the first run's length keeps falling, while the fixed run's holds. Use the two buttons above to look at each run.`,
     title: "Re-evaluating every checkpoint: a peak, or a plateau",
     description: "Every checkpoint saved by the two runs, re-evaluated on the first 300 problems of GSM8K test. Step 0 is the untrained model.",
-    footnote: "The first run saved a checkpoint every 100 steps, the fixed run every 50. The dashed lines are references on the same 300 problems: grey for the untrained model, green for SFT.",
+    footnote: "The first run saved a checkpoint every 100 steps, the fixed run every 50. The dashed lines are references on the same 300 problems: gray for the untrained model, green for SFT.",
     showBase: "Show first run",
     showFixed: "Show fixed run",
     reset: "Reset",
