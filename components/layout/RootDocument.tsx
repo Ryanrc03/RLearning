@@ -2,7 +2,7 @@ import { Patrick_Hand } from "next/font/google";
 import NotebookShell from "@/components/layout/NotebookShell";
 import LearningActivity from "@/components/layout/LearningActivity";
 import { LangProvider } from "@/components/i18n/LangProvider";
-import type { Lang } from "@/lib/i18n";
+import { htmlLang, type Lang } from "@/lib/i18n";
 import "@/app/globals.css";
 import "@/styles/visualization.css";
 import "@/styles/sketch.css";
@@ -16,7 +16,7 @@ const sketchFont = Patrick_Hand({ weight: "400", subsets: ["latin"], variable: "
 /** The <html> document shared by the Chinese and English root layouts. */
 export default function RootDocument({ lang, children }: { lang: Lang; children: React.ReactNode }) {
   return (
-    <html lang={lang === "en" ? "en" : "zh-CN"} className={sketchFont.variable} suppressHydrationWarning>
+    <html lang={htmlLang(lang)} className={sketchFont.variable} suppressHydrationWarning>
       {/* eslint-disable-next-line @next/next/no-head-element -- App Router root document (rendered by the root layouts), not a Pages Router page. */}
       <head>
         {/* A note opened in the split-reading pane drops the site chrome before first paint. */}

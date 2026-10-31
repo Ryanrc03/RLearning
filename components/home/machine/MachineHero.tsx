@@ -47,8 +47,6 @@ function hasWebGL2() {
   }
 }
 
-// English pages link to a translation when there is one, otherwise to the Chinese original.
-const noteHref = (slug: string, lang: Lang) => notePath({ slug, en: getNote(slug)?.en }, lang);
 const CALLOUT_GAP_PX = 22;
 const EDGE_PX = 6;
 
@@ -229,10 +227,10 @@ export default function MachineHero({ lang = "zh" }: { lang?: Lang }) {
 
   const current = grpoPhases[phase];
   const relatedLinks = (slugs: string[]) => slugs.map((slug, i) => {
+    // English pages link to a translation when there is one, otherwise to the Chinese original.
     const note = getNote(slug);
-    const { title, translated } = note ? noteText(note, lang) : { title: slug, translated: true };
-    const zhOnly = lang === "en" && !translated;
-    return <span key={slug}>{i > 0 && " · "}<Link href={noteHref(slug, lang)} lang={zhOnly ? "zh-CN" : undefined}>{title}{zhOnly && <LangTag lang={lang} />}</Link></span>;
+    const { title, textLang } = note ? noteText(note, lang) : { title: slug, textLang: undefined };
+    return <span key={slug}>{i > 0 && " · "}<Link href={note ? notePath(note, lang) : `/notes/${slug}/`} lang={textLang}>{title}{textLang && <LangTag lang={lang} />}</Link></span>;
   });
 
   return (
@@ -252,7 +250,7 @@ export default function MachineHero({ lang = "zh" }: { lang?: Lang }) {
           const refs = partRefs[i];
           const body = <><b>{part.name}</b> <span className="machine-spec">{part.spec[lang]}</span> <span className="machine-readout" ref={refs.readout} /></>;
           return part.slug
-            ? <Link key={part.id} ref={refs.label} href={noteHref(part.slug, lang)} className="machine-label" data-side={part.side}>{body}</Link>
+            ? <Link key={part.id} ref={refs.label} href={notePath(getNote(part.slug)!, lang)} className="machine-label" data-side={part.side}>{body}</Link>
             : <span key={part.id} ref={refs.label} className="machine-label" data-side={part.side}>{body}</span>;
         })}
       </div>

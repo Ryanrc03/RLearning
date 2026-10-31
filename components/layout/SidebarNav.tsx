@@ -4,11 +4,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { navigation } from "@/content/navigation";
-import { noteEntries, type NoteEntry } from "@/content/notes";
+import { noteEntries } from "@/content/notes";
 import Icon from "@/components/ui/Icon";
-import LangTag from "@/components/i18n/LangTag";
+import NoteTitle from "@/components/i18n/NoteTitle";
 import { useLang } from "@/components/i18n/LangProvider";
-import { homePath, notePath, noteText, stripLang, t, type Lang } from "@/lib/i18n";
+import { homePath, notePath, stripLang, t } from "@/lib/i18n";
 
 type Props = {
   /** The current path without its trailing slash; may carry the "/en" prefix. */
@@ -32,13 +32,6 @@ function Highlight({ text, term }: { text: string; term: string }) {
   const at = term ? text.toLowerCase().indexOf(term) : -1;
   if (at < 0) return <>{text}</>;
   return <>{text.slice(0, at)}<mark>{text.slice(at, at + term.length)}</mark>{text.slice(at + term.length)}</>;
-}
-
-// English pages show an untranslated note under its Chinese title, marked as Chinese-only.
-function NoteTitle({ note, lang, term }: { note: NoteEntry; lang: Lang; term?: string }) {
-  const { title, translated } = noteText(note, lang);
-  const zhOnly = lang === "en" && !translated;
-  return <span lang={zhOnly ? "zh-CN" : undefined}>{term === undefined ? title : <Highlight text={title} term={term} />}{zhOnly && <LangTag lang={lang} />}</span>;
 }
 
 export default function SidebarNav({ pathname, onNavigate, onSearchShortcut }: Props) {
@@ -125,14 +118,14 @@ export default function SidebarNav({ pathname, onNavigate, onSearchShortcut }: P
       <nav className="sidebar-nav" aria-label={t(lang, "mainNav")}>
         {terms.length ? (
           <div className="nav-results" aria-live="polite">
-            <div className="nav-heading"><span>RESULTS</span><span>{results.length} notes</span></div>
+            <div className="nav-heading"><span>RESULTS</span><span>{t(lang, "libraryCount", { n: results.length })}</span></div>
             {resultGroups.length === 0 && <p className="nav-empty">{t(lang, "noResults", { q: query.trim() })}</p>}
             {resultGroups.map((group) => (
               <div className="nav-result-group" key={group.title}>
                 <p className="nav-result-title">{group.title}</p>
                 {group.items.map((item) => (
                   <Link key={item.href} href={item.href} className="note-link" onClick={onNavigate}>
-                    <span className="note-bullet" /><NoteTitle note={item.note} lang={lang} term={terms[0]} />
+                    <span className="note-bullet" /><NoteTitle note={item.note} lang={lang}>{(title) => <Highlight text={title} term={terms[0]} />}</NoteTitle>
                   </Link>
                 ))}
               </div>
@@ -141,7 +134,7 @@ export default function SidebarNav({ pathname, onNavigate, onSearchShortcut }: P
         ) : (
           <>
             <Link href={homePath(lang)} className={`home-link ${path === "" ? "is-active" : ""}`} aria-current={path === "" ? "page" : undefined} onClick={onNavigate}><Icon name="home" /><span>{t(lang, "homeLink")}</span><span className="nav-shortcut">⌂</span></Link>
-            <div className="nav-heading"><span>MY LIBRARY</span><span>{noteEntries.length} notes</span></div>
+            <div className="nav-heading"><span>MY LIBRARY</span><span>{t(lang, "libraryCount", { n: noteEntries.length })}</span></div>
             <div className="nav-groups">
               {navigation.map((group) => {
                 if (!group.count) return <div key={group.id} className="nav-group-empty"><Icon name={group.icon} /><span>{group.title}</span><span className="nav-count">0</span></div>;

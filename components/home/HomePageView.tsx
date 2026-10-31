@@ -5,7 +5,7 @@ import RoadmapGraph from "@/components/home/RoadmapGraph";
 import Avatar from "@/components/layout/Avatar";
 import LearningActivity from "@/components/layout/LearningActivity";
 import MachineHero from "@/components/home/machine/MachineHero";
-import LangTag from "@/components/i18n/LangTag";
+import NoteTitle from "@/components/i18n/NoteTitle";
 import { profile } from "@/content/profile";
 import { notePath, noteText, t, type Lang } from "@/lib/i18n";
 
@@ -17,14 +17,12 @@ export default function HomePageView({ lang }: { lang: Lang }) {
   const recentNotes = [...noteEntries].sort((a, b) => b.updated.localeCompare(a.updated));
 
   const recentRow = (note: NoteEntry) => {
-    const { title, description, translated } = noteText(note, lang);
     // English readers get the Chinese original when there is no translation; mark its language.
-    const zhOnly = lang === "en" && !translated;
-    const textLang = zhOnly ? "zh-CN" : undefined;
+    const { description, textLang } = noteText(note, lang);
     return (
       <Link className="recent-note" key={note.slug} href={notePath(note, lang)}>
         <span className="note-card-icon"><Icon name={note.categoryId === "ml" ? "brain" : note.categoryId === "algorithms" ? "search" : "code"} /></span>
-        <div className="recent-note-copy"><p className="note-category">{note.category} <span>/</span> {note.section}</p><h3 lang={textLang}>{title}{zhOnly && <LangTag lang={lang} />}</h3><p lang={textLang}>{description}</p></div>
+        <div className="recent-note-copy"><p className="note-category">{note.category} <span>/</span> {note.section}</p><NoteTitle note={note} lang={lang} as="h3" /><p lang={textLang}>{description}</p></div>
         <div className="recent-note-end"><span className={`note-status status-${note.status}`}><span />{note.status === "growing" ? "Growing" : note.status === "stable" ? "Stable" : "Seed"}</span><time dateTime={note.updated}>{note.updated.slice(5).replace("-", ".")}</time></div><Icon name="arrow" className="card-arrow" />
       </Link>
     );

@@ -2,7 +2,7 @@ import { noteEntries } from "@/content/notes";
 import { getActivityData } from "@/lib/activity";
 import { noteText, t, type Lang } from "@/lib/i18n";
 
-export default function LearningActivity({ lang = "zh" }: { lang?: Lang }) {
+export default function LearningActivity({ lang }: { lang: Lang }) {
   // Day tooltips list note titles in the page language where a translation exists.
   const activity = getActivityData(noteEntries.map((note) => ({ ...note, title: noteText(note, lang).title })));
 

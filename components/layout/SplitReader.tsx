@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { noteEntries } from "@/content/notes";
 import Icon from "@/components/ui/Icon";
 import { useLang } from "@/components/i18n/LangProvider";
-import { noteText, stripLang, t, type Lang } from "@/lib/i18n";
+import LangTag from "@/components/i18n/LangTag";
+import { htmlLang, noteText, stripLang, t, type Lang } from "@/lib/i18n";
 
 // Below this width there is no room for two articles side by side, so links navigate normally.
 const SPLIT_QUERY = "(min-width: 1081px)";
@@ -17,19 +18,25 @@ const clampRatio = (ratio: number) => Math.min(MAX_RATIO, Math.max(MIN_RATIO, ra
 
 const normalize = (path: string) => path.replace(/\/$/, "");
 
-/** The pane header for a note path (either language); an English page marks a Chinese-only title. */
+/** The pane header for a note path in either language, on a page in `lang`. */
 function titleFor(path: string, lang: Lang) {
-  const note = noteEntries.find((entry) => `/notes/${entry.slug}` === stripLang(normalize(path)));
-  if (!note) return { path, title: "", zhOnly: false };
-  const { title, translated } = noteText(note, lang);
-  return { path, title, zhOnly: lang === "en" && !translated };
+  const bare = stripLang(normalize(path));
+  // The title is in the language of the page the pane shows, not of the page around it.
+  const pathLang: Lang = bare === normalize(path) ? "zh" : "en";
+  const note = noteEntries.find((entry) => `/notes/${entry.slug}` === bare);
+  return {
+    path,
+    title: note ? noteText(note, pathLang).title : "",
+    textLang: pathLang === lang ? undefined : htmlLang(pathLang),
+    zhOnly: lang === "en" && pathLang === "zh",
+  };
 }
 
 /** Opens in-article note links in a right-hand pane instead of navigating away. */
 export default function SplitReader() {
   const lang = useLang();
   const [src, setSrc] = useState<string | null>(null);
-  const [current, setCurrent] = useState({ path: "", title: "", zhOnly: false });
+  const [current, setCurrent] = useState<ReturnType<typeof titleFor>>({ path: "", title: "", textLang: undefined, zhOnly: false });
   // The pane only renders after a click, so reading storage here cannot cause a hydration mismatch.
   const [ratio, setRatio] = useState(() => {
     try {
@@ -132,7 +139,7 @@ export default function SplitReader() {
         onKeyDown={onResizeKey}
       />
       <div className="split-pane-bar">
-        <span className="split-pane-title" lang={current.zhOnly ? "zh-CN" : undefined}>{current.title}</span>
+        <span className="split-pane-title" lang={current.textLang}>{current.title}{current.zhOnly && <LangTag lang={lang} />}</span>
         <a className="split-pane-open" href={current.path}>{t(lang, "splitOpenFull")} <Icon name="arrow" /></a>
         <button className="icon-button" aria-label={t(lang, "splitClose")} title={t(lang, "splitCloseTitle")} onClick={() => setSrc(null)}><Icon name="close" /></button>
       </div>

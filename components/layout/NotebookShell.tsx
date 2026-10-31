@@ -9,7 +9,7 @@ import Avatar from "./Avatar";
 import SidebarNav from "./SidebarNav";
 import Icon from "@/components/ui/Icon";
 import { useLang } from "@/components/i18n/LangProvider";
-import { homePath, notePath, otherLang, stripLang, t } from "@/lib/i18n";
+import { homePath, htmlLang, notePath, otherLang, stripLang, t } from "@/lib/i18n";
 
 export default function NotebookShell({ children, activity }: { children: React.ReactNode; activity: React.ReactNode }) {
   const lang = useLang();
@@ -20,7 +20,7 @@ export default function NotebookShell({ children, activity }: { children: React.
   // The same page in the other language, when there is one.
   const other = otherLang(lang);
   const otherPage = path === "" ? homePath(other) : currentNote?.en ? notePath(currentNote, other) : null;
-  const otherTag = other === "en" ? "en" : "zh-CN";
+  const otherTag = htmlLang(other);
   const [mobileOpen, setMobileOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
   const sidebar = useRef<HTMLElement>(null);

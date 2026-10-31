@@ -5,7 +5,7 @@ import Link from "next/link";
 import { maturity, nextSteps, nodeLabel, notesForNode, prerequisites, roadmapNode, type RoadmapNode } from "@/content/roadmap";
 import { categories } from "@/content/navigation";
 import Icon from "@/components/ui/Icon";
-import LangTag from "@/components/i18n/LangTag";
+import NoteTitle from "@/components/i18n/NoteTitle";
 import { useLang } from "@/components/i18n/LangProvider";
 import { notePath, noteText, t } from "@/lib/i18n";
 
@@ -61,16 +61,14 @@ export default function RoadmapDrawer({ nodeId, onSelect, onClose }: Props) {
         </header>
         <ol className="rm-drawer-notes">
           {notes.map((note, index) => {
-            const { title, description, translated } = noteText(note, lang);
             // English pages list an untranslated note under its Chinese title and description.
-            const zhOnly = lang === "en" && !translated;
-            const textLang = zhOnly ? "zh-CN" : undefined;
+            const { description, textLang } = noteText(note, lang);
             return (
               <li key={note.slug}>
                 <Link href={notePath(note, lang)}>
                   <span className="rm-drawer-index">{index + 1}</span>
                   <span className="rm-drawer-copy">
-                    <strong lang={textLang}>{title}{zhOnly && <LangTag lang={lang} />}</strong>
+                    <NoteTitle note={note} lang={lang} as="strong" />
                     <span lang={textLang}>{description}</span>
                   </span>
                   <span className={`note-status status-${note.status}`}><span />{statusLabel[note.status]}</span>

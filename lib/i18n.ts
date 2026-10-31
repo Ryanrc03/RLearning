@@ -6,6 +6,9 @@ export type Localized = Record<Lang, string>;
 export const otherLang = (lang: Lang): Lang => (lang === "zh" ? "en" : "zh");
 export const homePath = (lang: Lang) => (lang === "en" ? "/en/" : "/");
 
+/** The BCP 47 tag for `lang`, `hreflang` and `<html lang>`. */
+export const htmlLang = (lang: Lang): "en" | "zh-CN" => (lang === "en" ? "en" : "zh-CN");
+
 /** "/en/notes/x" → "/notes/x"; "/en" → "" (the shell strips trailing slashes before calling). */
 export const stripLang = (pathname: string) => pathname.replace(/^\/en(?=\/|$)/, "");
 
@@ -18,11 +21,16 @@ type Translatable = { slug: string; en?: NoteTranslation };
 export const notePath = (note: Translatable, lang: Lang) =>
   lang === "en" && note.en ? `/en/notes/${note.slug}/` : `/notes/${note.slug}/`;
 
+/**
+ * A note's title and description in the page language. `textLang` is "zh-CN" when an English page
+ * falls back to the Chinese original, for the `lang` attribute of the elements that show them.
+ */
 export function noteText(note: Translatable & { title: string; description: string }, lang: Lang) {
   const en = lang === "en" ? note.en : undefined;
+  const textLang = lang === "en" && !en ? ("zh-CN" as const) : undefined;
   return en
-    ? { title: en.title, description: en.description, translated: true }
-    : { title: note.title, description: note.description, translated: false };
+    ? { title: en.title, description: en.description, translated: true, textLang }
+    : { title: note.title, description: note.description, translated: false, textLang };
 }
 
 const zh = {
@@ -83,6 +91,8 @@ const zh = {
   roadmapDrawerNotes: "{n} 篇笔记",
   roadmapBefore: "先修",
   roadmapAfter: "接下来",
+  // The sidebar's headings are English on both sites ("MY LIBRARY", "RESULTS"), so is their count.
+  libraryCount: "{n} note{s}",
 };
 
 export const dict: Record<Lang, typeof zh> = {
@@ -145,6 +155,7 @@ export const dict: Record<Lang, typeof zh> = {
     roadmapDrawerNotes: "{n} note{s}",
     roadmapBefore: "Prerequisites",
     roadmapAfter: "Next",
+    libraryCount: "{n} note{s}",
   },
 };
 

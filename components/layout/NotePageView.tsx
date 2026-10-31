@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getNote, getSeriesNeighbors, type NoteEntry } from "@/content/notes";
+import { getNote, getSeriesNeighbors } from "@/content/notes";
 import { noteComponents, noteComponentsEn, type NoteComponent } from "@/content/noteComponents";
 import { getNoteToc } from "@/lib/content";
 import { homePath, notePath, noteText, t, type Lang } from "@/lib/i18n";
 import TableOfContents from "@/components/layout/TableOfContents";
 import SplitReader from "@/components/layout/SplitReader";
-import LangTag from "@/components/i18n/LangTag";
+import NoteTitle from "@/components/i18n/NoteTitle";
 import Icon from "@/components/ui/Icon";
 
 /** One note page, shared by `/notes/<slug>/` and its English twin `/en/notes/<slug>/`. */
@@ -22,13 +22,6 @@ export default function NotePageView({ slug, lang }: { slug: string; lang: Lang 
   const seriesTitle = (lang === "en" ? note.en?.seriesTitle : undefined) ?? note.series?.title ?? "";
   const toc = getNoteToc(slug, lang);
   const { prev, next } = getSeriesNeighbors(slug);
-
-  // English readers are sent to the Chinese original when a neighbour has no translation.
-  const neighbourTitle = (neighbour: NoteEntry) => {
-    const { title: text, translated } = noteText(neighbour, lang);
-    const zhOnly = lang === "en" && !translated;
-    return <span lang={zhOnly ? "zh-CN" : undefined}>{text}{zhOnly && <LangTag lang={lang} />}</span>;
-  };
 
   return (
     <div className="note-layout">
@@ -53,10 +46,11 @@ export default function NotePageView({ slug, lang }: { slug: string; lang: Lang 
           {lang === "en" && note.en && note.updated > note.en.updated && <p className="translation-behind">{t(lang, "translationBehind")}</p>}
         </header>
         <article className={note.layout === "case-study" ? "prose prose-case" : "prose"}><Content components={{ h1: () => null }} /></article>
+        {/* English readers are sent to the Chinese original when a neighbour has no translation. */}
         {note.series && (prev || next) && (
           <nav className="series-nav" aria-label={t(lang, "seriesLabel", { title: seriesTitle })}>
-            {prev ? <Link className="series-link" href={notePath(prev, lang)}><small>{t(lang, "prevInSeries", { title: seriesTitle })}</small>{neighbourTitle(prev)}</Link> : <span />}
-            {next ? <Link className="series-link is-next" href={notePath(next, lang)}><small>{t(lang, "nextInSeries")}</small>{neighbourTitle(next)}</Link> : <span />}
+            {prev ? <Link className="series-link" href={notePath(prev, lang)}><small>{t(lang, "prevInSeries", { title: seriesTitle })}</small><NoteTitle note={prev} lang={lang} /></Link> : <span />}
+            {next ? <Link className="series-link is-next" href={notePath(next, lang)}><small>{t(lang, "nextInSeries")}</small><NoteTitle note={next} lang={lang} /></Link> : <span />}
           </nav>
         )}
         <div className="note-tags"><span>FILED UNDER</span>{note.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div>
