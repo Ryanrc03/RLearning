@@ -4,6 +4,8 @@
 
 > 2026-10-20 更新：配色从浅黄改为 Obsidian 风格的紫色点缀（`--accent: #7852ee`、`--accent-soft: #efeafd`），灰色改为中性灰；图里的数据配色不变。左侧目录改为「搜索 + 折叠」，首页主体改为知识路线图，详见第 6、9 节。
 
+> 2026-10-30 更新：首页封面改为作者主机的 3D 模型（硬件 = system，跑一步 GRPO = ML），自我介绍放在左侧；新增 /en/ 英文版，按篇选择翻译。
+
 > A personal, evolving knowledge base for Computer Science, Machine Learning, LLMs, and AI Infrastructure.
 
 ## 1. Overview
@@ -451,6 +453,12 @@ and trying to understand how systems actually work.
 > - 节点颜色按分类区分，进度条显示 stable / growing / seed 的比例（目前全站还没有 stable 笔记，所以只看得到 growing）。
 > - 点节点打开右侧抽屉：按阅读顺序列出笔记，下面是「先修」「接下来」。Esc 或点遮罩关闭。
 > - 路线图区域窄于 880px 时（不论是窄屏还是分屏），改为按层分组的列表，避免缩得太小看不清。
+
+> 当前实现（2026-10-30，设计稿 `docs/superpowers/specs/2026-10-30-machine-cover-design.md`、`2026-10-30-english-version-design.md`）：首页从上到下是 hero、学习活动方格、知识路线图、最近记录。
+>
+> - Hero 两栏：左边是标题和一段自我介绍（小头像、两三句话、GitHub 和主页链接，文字在 `content/profile.ts`）；右边是作者主机 Lenovo Legion T5 的 3D 模型（`components/home/machine/`，数据在 `content/machine.ts`）。面板有两个视图：「整机」显示部件规格和模拟读数，部件标签链接到对应章节；「跑一步 GRPO」循环播放一次真实训练 step 的数据流，每个阶段附相关笔记。3D 加载前和没有 WebGL 时显示部件标签列表，减少动态时只画一帧。窄屏上下堆叠。
+> - 学习活动方格在首页放在 hero 下面；其它页面仍在正文最上方。
+> - 英文版在 `/en/` 下，有自己的 root layout（`<html lang="en">`），界面文字来自 `lib/i18n.ts`。笔记按篇选择翻译：有 `.en.mdx` 和 `en` 元数据的笔记才有 `/en/notes/<slug>/`；没翻译的照常出现在英文目录里，标「中文」，链接到中文原文。顶栏的语言入口在两种语言的同一页之间切换；没翻译的中文笔记则指向英文首页。
 
 ---
 

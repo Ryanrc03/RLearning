@@ -70,3 +70,9 @@ app/
 - `tests/i18n.test.ts`：每个有 `en` 的条目都有对应 `.en.mdx` 并在 `noteComponentsEn` 里注册；英文 `generateStaticParams` 正好是这 3 篇；`dict.zh` 和 `dict.en` 的 key 完全一致。
 - `npm test`、`npm run typecheck`、`npm run lint`、`npm run build` 全过；`out/en/index.html` 和 3 篇 `out/en/notes/.../index.html` 存在且 `<html lang="en">`。
 - 内置浏览器预览：`/en/` 和 3 篇英文笔记、语言切换来回跳对、英文版目录里的 `中文` 标记、英文图里没有残留中文、手机宽度无横向溢出。
+
+## 实施与设计的差别（2026-10-30）
+
+- 顶栏语言入口：首页和已翻译的笔记在两种语言的同一页之间切换；没有翻译的中文笔记也显示「English」，指向英文首页（`title` 写明这篇只有中文），让英文读者有路可回。英文版里不存在没翻译的笔记页（它们链接到中文原文），所以没有「This note is in Chinese」的提示。
+- 404：两个 root layout 下只有一个 `app/global-not-found.tsx`，是一张中英双语的静态页（`<html lang="zh-CN">`，英文句子单独标 `lang="en"`）。
+- 共用的外壳仍叫 `NotebookShell`，从 `useLang()` 读语言，没有改名为 `SiteShell`。分类的 `description` 和 `topics` 没有读者，已删除，不进字典。

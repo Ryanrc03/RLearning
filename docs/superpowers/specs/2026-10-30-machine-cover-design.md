@@ -77,3 +77,11 @@ HUD 显示当前阶段、`step n / 500` 和相关笔记链接（表中是笔记 
 - `tests/machine-sim.test.ts`：阶段按时长推进并循环、step 到 500 后回到 1、读数缓动不越界、减少动态时不推进。
 - `npm test`、`npm run typecheck`、`npm run lint`、`npm run build` 全过。
 - 内置浏览器预览：桌面和手机宽度、两个 tab、列表兜底和减少动态、标签点击能跳转、无横向溢出、控制台无报错。
+
+## 实施与设计的差别（2026-10-30）
+
+- 整机视角的 HUD 没有 `ml/overview` 和项目笔记的入口，只有一句机器规格、一句提示去点「跑一步 GRPO」，和「读数为模拟值」。ML 的入口是「跑一步 GRPO」tab 和它 HUD 里各阶段的相关笔记链接（第一阶段就是项目笔记）。
+- 部件标签不叠在部件上，而是放在部件左右两侧的 callout，用一条引线连回部件；窄面板上隐藏次要部件（HDD、电源）的标签。
+- 不用海报图（见上文「首屏与兜底」）：加载前和没有 WebGL 时显示标签列表。
+- 相机按面板尺寸取景：保证机箱和两侧标签都在画面内，面板变窄时相机后退，而不是裁掉机箱。
+- 场景接口实际是 `createMachineScene(canvas, options) → { render, partScreenPosition, resize, orbitBy, dispose }`；`dispose()` 会主动释放 WebGL context，客户端跳转离开首页时不占着 context。
