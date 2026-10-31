@@ -393,6 +393,10 @@ html.is-embedded .note-layout { display: block; max-width: 780px; margin-left: a
   .site-footer { margin-top: 35px; padding: 18px 0; font-size: 8px; }
   .site-footer > span:last-child { display: none; }
 }
+/* The narrowest phones: the language link takes the GitHub icon's place so the breadcrumb stays on one line. */
+@media (max-width: 359px) {
+  .topbar-profile:has(.lang-link) .github-link { display: none; }
+}
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after { transition: none !important; }
