@@ -8,6 +8,7 @@ import { profile } from "@/content/profile";
 import Avatar from "./Avatar";
 import SidebarNav from "./SidebarNav";
 import Icon from "@/components/ui/Icon";
+import { stripLang } from "@/lib/i18n";
 
 export default function NotebookShell({ children, activity }: { children: React.ReactNode; activity: React.ReactNode }) {
   const pathname = usePathname().replace(/\/$/, "");
@@ -67,7 +68,7 @@ export default function NotebookShell({ children, activity }: { children: React.
           <div className="topbar-profile"><span className="public-label"><span className="status-dot" /> Personal knowledge garden</span>{profile.githubUrl && <a className="icon-button github-link" href={profile.githubUrl} aria-label={`${profile.name} on GitHub`} target="_blank" rel="noreferrer"><Icon name="github" /></a>}<Avatar size="small" /></div>
         </header>
         <main id="main-content" className="workspace-content" tabIndex={-1}>
-          {pathname === "" ? null : activity}{children}
+          {stripLang(pathname) === "" ? null : activity}{children}
           <footer className="site-footer"><span>RLearning<span className="brand-dot">.</span> <span className="footer-separator">/</span> Notes, connections & small discoveries.</span><span>Always a work in progress <Icon name="sun" /></span></footer>
         </main>
       </div>

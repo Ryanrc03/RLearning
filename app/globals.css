@@ -125,6 +125,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
 .note-status > span { width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
 .note-status.status-growing { color: #7f69e0; background: #f3f3fc; }
 .note-status.status-stable { color: #647c51; background: #eff4e8; }
+.lang-tag { display: inline-block; margin-left: 6px; padding: 0 5px; border: 1px solid #e3e3e3; border-radius: 4px; font-size: 10px; font-weight: 400; color: #8a8a8a; vertical-align: 1px; }
 .prose { font-size: 15px; line-height: 1.95; color: #5d5d5d; overflow-wrap: anywhere; }
 .prose p { margin: 17px 0; }
 .prose > p:first-child { margin-top: 0; }
