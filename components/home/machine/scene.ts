@@ -350,6 +350,8 @@ export function createMachineScene(canvas: HTMLCanvasElement, options: SceneOpti
         }
       });
       for (const resource of [...geometries, ...materials, ...textures]) resource.dispose();
+      // Give the WebGL context back now: a client-side navigation away leaves the canvas to the GC, which may be too late for the browser's context limit.
+      renderer.forceContextLoss();
       renderer.dispose();
     },
   };

@@ -190,7 +190,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
 .intro-links a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
 .home-page > .activity-panel { margin-bottom: 39px; }
 @media (max-width: 1100px) { .home-hero { grid-template-columns: minmax(0, 1fr); gap: 22px; } }
-.page-description { margin-top: 17px; font-size: 13px; line-height: 1.95; color: #949494; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 17px; }
 .section-heading h2 { font-size: 15px; font-weight: 600; }
 .section-heading h2 > span { font-size: 10px; color: #9f9f9f; font-weight: 400; margin-left: 12px; }
@@ -350,6 +349,7 @@ html.is-embedded .note-layout { display: block; max-width: 780px; margin-left: a
   .series-link.is-next { text-align: left; }
   .topbar { padding: 0 15px; height: 62px; }
   .topbar-path { gap: 9px; min-width: 0; }
+  .topbar-profile { gap: 9px; }
   .breadcrumb-home svg { display: none; }
   .breadcrumb-home, .breadcrumb-current { font-size: 11px; }
   /* A long category gives way to the topbar buttons instead of wrapping. */
@@ -382,7 +382,6 @@ html.is-embedded .note-layout { display: block; max-width: 780px; margin-left: a
   .article-end { font-size: 10px; }
   .home-page { padding-top: 30px; }
   .page-intro h1 { font-size: 24px; }
-  .page-description { font-size: 12px; }
   .section-heading h2 { font-size: 14px; }
   .section-heading h2 > span { font-size: 9px; margin-left: 7px; }
   .recent-note { padding: 18px 15px; gap: 12px; align-items: flex-start; }

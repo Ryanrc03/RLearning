@@ -19,7 +19,10 @@ export default function NotebookShell({ children, activity }: { children: React.
   const currentNote = noteEntries.find((note) => path === `/notes/${note.slug}`);
   // The same page in the other language, when there is one.
   const other = otherLang(lang);
-  const otherPage = path === "" ? homePath(other) : currentNote?.en ? notePath(currentNote, other) : null;
+  const samePage = path === "" ? homePath(other) : currentNote?.en ? notePath(currentNote, other) : null;
+  // A Chinese-only note still gives English readers a way back: the English home.
+  const englishHome = !samePage && Boolean(currentNote) && lang === "zh";
+  const otherPage = samePage ?? (englishHome ? homePath("en") : null);
   const otherTag = htmlLang(other);
   const [mobileOpen, setMobileOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
@@ -76,7 +79,10 @@ export default function NotebookShell({ children, activity }: { children: React.
           <div className="topbar-profile">
             <span className="public-label"><span className="status-dot" /> {t(lang, "publicLabel")}</span>
             {/* A plain link: each language has its own root layout, so switching is a full page load anyway. */}
-            {otherPage && <a className="lang-link" href={otherPage} hrefLang={otherTag} lang={otherTag}>{t(lang, "switchToOther")}</a>}
+            {otherPage && (englishHome
+              // The title is in the page language, so only the link text is marked as English.
+              ? <a className="lang-link" href={otherPage} hrefLang={otherTag} title={t(lang, "englishSiteTitle")}><span lang={otherTag}>{t(lang, "switchToOther")}</span></a>
+              : <a className="lang-link" href={otherPage} hrefLang={otherTag} lang={otherTag}>{t(lang, "switchToOther")}</a>)}
             {profile.githubUrl && <a className="icon-button github-link" href={profile.githubUrl} aria-label={`${profile.name} on GitHub`} target="_blank" rel="noreferrer"><Icon name="github" /></a>}<Avatar size="small" />
           </div>
         </header>

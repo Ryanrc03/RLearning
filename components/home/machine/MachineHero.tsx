@@ -5,7 +5,8 @@ import Link from "next/link";
 import { GRPO_TOTAL_STEPS, grpoPhases, machineModel, machineParts, type PartId } from "@/content/machine";
 import { getNote } from "@/content/notes";
 import LangTag from "@/components/i18n/LangTag";
-import { notePath, noteText, type Lang } from "@/lib/i18n";
+import { useLang } from "@/components/i18n/LangProvider";
+import { notePath, noteText } from "@/lib/i18n";
 import { advance, initialState, readout, withMode, type Mode, type SimState } from "./sim";
 import type { MachineScene } from "./scene";
 
@@ -47,12 +48,16 @@ function hasWebGL2() {
   }
 }
 
+// tests/machine-sim.test.ts checks that every part and phase slug is a published note.
+const slugNote = (slug: string) => getNote(slug)!;
+
 const CALLOUT_GAP_PX = 22;
 const EDGE_PX = 6;
 
 type NodeRef = (node: HTMLElement | null) => void;
 
-export default function MachineHero({ lang = "zh" }: { lang?: Lang }) {
+export default function MachineHero() {
+  const lang = useLang();
   const copy = COPY[lang];
   const panel = useRef<HTMLElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -228,9 +233,9 @@ export default function MachineHero({ lang = "zh" }: { lang?: Lang }) {
   const current = grpoPhases[phase];
   const relatedLinks = (slugs: string[]) => slugs.map((slug, i) => {
     // English pages link to a translation when there is one, otherwise to the Chinese original.
-    const note = getNote(slug);
-    const { title, textLang } = note ? noteText(note, lang) : { title: slug, textLang: undefined };
-    return <span key={slug}>{i > 0 && " · "}<Link href={note ? notePath(note, lang) : `/notes/${slug}/`} lang={textLang}>{title}{textLang && <LangTag lang={lang} />}</Link></span>;
+    const note = slugNote(slug);
+    const { title, textLang } = noteText(note, lang);
+    return <span key={slug}>{i > 0 && " · "}<Link href={notePath(note, lang)} lang={textLang}>{title}{textLang && <LangTag lang={lang} />}</Link></span>;
   });
 
   return (
@@ -250,7 +255,7 @@ export default function MachineHero({ lang = "zh" }: { lang?: Lang }) {
           const refs = partRefs[i];
           const body = <><b>{part.name}</b> <span className="machine-spec">{part.spec[lang]}</span> <span className="machine-readout" ref={refs.readout} /></>;
           return part.slug
-            ? <Link key={part.id} ref={refs.label} href={notePath(getNote(part.slug)!, lang)} className="machine-label" data-side={part.side}>{body}</Link>
+            ? <Link key={part.id} ref={refs.label} href={notePath(slugNote(part.slug), lang)} className="machine-label" data-side={part.side}>{body}</Link>
             : <span key={part.id} ref={refs.label} className="machine-label" data-side={part.side}>{body}</span>;
         })}
       </div>

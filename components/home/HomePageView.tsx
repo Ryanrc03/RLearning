@@ -43,7 +43,7 @@ export default function HomePageView({ lang }: { lang: Lang }) {
             {profile.homepageUrl && <a href={profile.homepageUrl} target="_blank" rel="noreferrer">Homepage</a>}
           </p>
         </div>
-        <MachineHero lang={lang} />
+        <MachineHero />
       </section>
       <LearningActivity lang={lang} />
       <section className="roadmap-section" aria-labelledby="roadmap-title">

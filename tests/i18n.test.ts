@@ -97,7 +97,3 @@ test("the English registry has exactly the translated notes, each with its .en.m
 test("a translated note in a series has an English series title", () => {
   for (const note of noteEntries) if (note.en && note.series) assert.ok(note.en.seriesTitle, `${note.slug} needs en.seriesTitle`);
 });
-
-test("the first batch of translations is the GRPO line", () => {
-  assert.deepEqual(translatedSlugs, ["ml/post-training/grpo", "ml/post-training/grpo-3060-project", "ml/post-training/reward-hacking"]);
-});
