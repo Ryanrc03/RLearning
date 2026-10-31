@@ -118,12 +118,13 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
 .note-breadcrumb > span:last-child { color: #7f72cc; }
 .article-header h1 { font-family: Georgia, "Times New Roman", serif; font-size: clamp(30px, 2.7vw, 42px); font-weight: 400; line-height: 1.22; letter-spacing: -1.3px; color: #333333; text-wrap: balance; }
 .article-description { margin-top: 14px; font-size: 13px; color: #8f8f8f; line-height: 1.7; max-width: 650px; }
-.article-meta { display: flex; align-items: center; gap: 20px; margin-top: 21px; }
+.article-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 20px; row-gap: 8px; margin-top: 21px; }
 .article-meta > span { display: inline-flex; align-items: center; gap: 6px; color: #999999; font-size: 10px; }
 .article-meta svg { width: 13px; height: 13px; color: #a3a3a3; }
 .lang-switch { display: inline-flex; gap: 6px; align-items: center; }
 .lang-switch b { font-weight: 600; color: var(--accent); }
-.lang-switch a { color: inherit; }
+.lang-switch a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.lang-switch a:hover { color: var(--accent); }
 .translation-behind { margin-top: 10px; font-size: 12px; color: #8a6d1f; background: #fff8e6; border: 1px solid #f3e2b3; border-radius: 6px; padding: 6px 10px; }
 .note-status { display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 4px 8px; font-size: 9px; line-height: 1.3; background: #f0f0f0; color: #7d79a3; border-radius: 4px; }
 .note-status > span { width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
@@ -165,7 +166,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
 .series-link { display: flex; flex-direction: column; gap: 4px; padding: 13px 16px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); text-decoration: none; }
 .series-link:hover { border-color: #b6adfd; background: #fdfdfd; }
 .series-link small { font-size: 11px; color: #929292; }
-.series-link span { font-size: 13.5px; font-weight: 600; color: #3f3f3f; }
+.series-link > span { font-size: 13.5px; font-weight: 600; color: #3f3f3f; }
 .series-link.is-next { text-align: right; }
 .note-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; border-top: 1px solid var(--line); margin-top: 41px; padding-top: 22px; }
 .note-tags > span:first-child { font-size: 8px; letter-spacing: 1.1px; color: #9f9f9f; margin-right: 8px; }
@@ -369,7 +370,7 @@ html.is-embedded .note-layout { display: block; max-width: 780px; margin-left: a
   .note-breadcrumb { font-size: 9px; margin-bottom: 15px; gap: 6px; }
   .article-header h1 { font-size: 33px; letter-spacing: -.8px; text-wrap: pretty; }
   .article-description { font-size: 12px; margin-top: 14px; }
-  .article-meta { gap: 14px; margin-top: 17px; }
+  .article-meta { column-gap: 14px; margin-top: 17px; }
   .article-meta > span { font-size: 9px; }
   .prose { font-size: 14px; line-height: 1.95; }
   .prose h2 { font-size: 21px; margin-top: 31px; }

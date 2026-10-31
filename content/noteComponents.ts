@@ -1,3 +1,5 @@
+import type { ComponentType } from "react";
+import type { MDXComponents } from "mdx/types";
 import FundamentalsOverview from "@/content/cs/fundamentals/overview.mdx";
 import NetworkingOverview from "@/content/cs/networking/overview.mdx";
 import OsOverview from "@/content/cs/os/overview.mdx";
@@ -134,6 +136,9 @@ import GrpoEn from "@/content/ml/post-training/grpo.en.mdx";
 import RewardHackingEn from "@/content/ml/post-training/reward-hacking.en.mdx";
 import Grpo3060ProjectEn from "@/content/ml/post-training/grpo-3060-project.en.mdx";
 
+/** An MDX page as typed by mdx.d.ts. */
+export type NoteComponent = ComponentType<{ components?: MDXComponents }>;
+
 /** Chinese pages, one per entry in content/notes.ts. */
 export const noteComponents = {
   "cs/fundamentals/overview": FundamentalsOverview,
@@ -268,11 +273,11 @@ export const noteComponents = {
   "ml/causal-inference/linear-regression": LinearRegression,
   "ml/causal-inference/difference-in-differences": DifferenceInDifferences,
   "ml/causal-inference/minimum-wage-example": MinimumWageExample,
-};
+} satisfies Record<string, NoteComponent>;
 
 /** English pages; keys must match the notes that carry an `en` entry in content/notes.ts. */
 export const noteComponentsEn = {
   "ml/post-training/grpo": GrpoEn,
   "ml/post-training/reward-hacking": RewardHackingEn,
   "ml/post-training/grpo-3060-project": Grpo3060ProjectEn,
-};
+} satisfies Record<string, NoteComponent>;

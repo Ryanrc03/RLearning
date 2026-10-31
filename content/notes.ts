@@ -1758,6 +1758,7 @@ export const noteEntries: NoteEntry[] = [
       description:
         "Starting from how policy gradient updates the parameters: baseline, actor-critic, TRPO and PPO all the way to GRPO; a hand-computed single update of a three-token toy policy, then why groups that are all correct or all wrong give no gradient.",
       updated: "2026-10-30",
+      seriesTitle: "Post-training: teaching a pretrained model to follow instructions",
     },
   },
   {
@@ -1778,6 +1779,7 @@ export const noteEntries: NoteEntry[] = [
       title: "Reward design and reward hacking",
       description: "A length reward gets farmed by padding: whatever the reward is, that is what the policy learns.",
       updated: "2026-10-30",
+      seriesTitle: "Post-training: teaching a pretrained model to follow instructions",
     },
   },
   {
@@ -1814,6 +1816,7 @@ export const noteEntries: NoteEntry[] = [
       description:
         "A real Qwen2.5-3B + GRPO experiment and handoff on GSM8K: reward rises while accuracy falls from 62.1% to 56.9% and responses shrink to 90 tokens; the definition of reward hacking, training curves, checkpoints and verbatim outputs, four causes, four changes, and a fixed run at 77.3%.",
       updated: "2026-10-30",
+      seriesTitle: "Post-training: teaching a pretrained model to follow instructions",
     },
   },
   {

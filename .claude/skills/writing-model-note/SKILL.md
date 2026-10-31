@@ -61,11 +61,11 @@ Dashed is reserved for that last row; a paper's own dotted notation (ResNet's pr
 
 ## Registration checklist
 
-1. `content/ml/<chapter>/<model>.mdx` importing the components; the path equals the slug (`getNoteToc` reads `content/${slug}.mdx`).
+1. `content/ml/<chapter>/<model>.mdx` importing the components; the path equals the slug (`getNoteToc` reads `content/${slug}.mdx`; an English translation sits beside it as `content/${slug}.en.mdx`).
 2. `content/ml/tree.ts`: a `ready` node in that chapter, after the nodes it builds on, with the model name as `short`; an edge (one-line `why`) to any node in another chapter that depends on this model. A new chapter only when no chapter's question fits.
 3. `content/notes.ts`: the chapter's `section`, `status: "growing"`, tags with the model name, the chapter id and `"interactive"`, and the chapter's `series` (`ml-<chapter>`) with the order after its predecessor; place the entry right after the predecessor's.
 4. Stitch it into the chain: the chapter overview (page count, one sentence for the new page) and its `description` in `notes.ts`; one sentence in the predecessor's `再往下看` and in the node that computes its loss, linking here.
-5. `app/notes/[...slug]/page.tsx`: import + `noteComponents` entry.
+5. `content/noteComponents.ts`: import + `noteComponents` entry.
 6. `docs/superpowers/specs/YYYY-MM-DD-<model>-note-design.md`: a table of figures (component, section, what it shows).
 7. `npm test && npm run typecheck && npm run lint && npm run build`; stop the `dev` preview before building, they share `.next` manifests.
 8. Preview with the `dev` launch config: click every button, check desktop and 375 px (`scrollWidth === innerWidth`; scroll with `scrollIntoView({behavior:'instant'})` before clicking refs, the site smooth-scrolls); open the chapter overview and see the node in the tree.

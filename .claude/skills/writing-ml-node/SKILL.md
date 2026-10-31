@@ -43,7 +43,7 @@ Under the figure, one `viz-narr` sentence or two that changes with the state and
 1. `content/ml/<chapter>/<slug>.mdx` and the figure component.
 2. `content/ml/tree.ts`: the node already exists as `planned`; flip it to `ready`. New chapters add a chapter object and, when needed, an edge with a one-line `why`.
 3. `content/notes.ts`: entry with `categoryId: "ml"`, the chapter's `section`, `status: "seed"`, `readingMinutes` 4–7, tags including `"ml-fundamentals"` and the chapter name, and `series: { id: "ml-<chapter>", title: "<Chapter>：<question>", order: n }` matching the chain order. Keep ML entries grouped in tree order.
-4. `app/notes/[...slug]/page.tsx`: import + `noteComponents` entry. Navigation derives from the registry.
+4. `content/noteComponents.ts`: import + `noteComponents` entry. Navigation derives from the registry.
 5. `npm test && npm run typecheck && npm run lint && npm run build`, then open the page with the `dev` launch config, drag the control end to end, check the narr at every state, and confirm no NaN appears.
 
 ## Common mistakes

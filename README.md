@@ -21,6 +21,6 @@ The [design document](docs/design.md) records the handoff. See [NEXT_STEPS.md](N
 
 ## Content
 
-Notes live under `content/`. Current examples are `content/cs/os/virtual-memory.mdx` and `content/ml/reinforcement-learning/ucb.mdx`. Register a note in `content/notes.ts` and import its MDX component in `app/notes/[...slug]/page.tsx`. Navigation, homepage entries, static route parameters, and activity counts use this shared metadata. `content/navigation.ts` controls category order; article headings generate the table of contents at build time.
+Notes live under `content/`. Current examples are `content/cs/os/virtual-memory.mdx` and `content/ml/reinforcement-learning/ucb.mdx`. Register a note in `content/notes.ts` and import its MDX component in `content/noteComponents.ts` (an import plus a `noteComponents` entry). An English translation sits beside the original as `content/<slug>.en.mdx`, gets a `noteComponentsEn` entry in the same file and an `en` block (`title`, `description`, `updated`, `seriesTitle`) on the note's entry in `content/notes.ts`, and is served at `/en/notes/<slug>/`. Navigation, homepage entries, static route parameters, and activity counts use this shared metadata. `content/navigation.ts` controls category order; article headings generate the table of contents at build time.
 
 Static routes use trailing slashes. For a local production preview, run `python -m http.server 4173 --directory out` after building, then open <http://localhost:4173/>.

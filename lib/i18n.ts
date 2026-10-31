@@ -9,8 +9,8 @@ export const homePath = (lang: Lang) => (lang === "en" ? "/en/" : "/");
 /** "/en/notes/x" → "/notes/x"; "/en" → "" (the shell strips trailing slashes before calling). */
 export const stripLang = (pathname: string) => pathname.replace(/^\/en(?=\/|$)/, "");
 
-/** The English title, description and last-updated date of a translated note. */
-export type NoteTranslation = { title: string; description: string; updated: string };
+/** The English title, description and last-updated date of a translated note, plus its series title when it is in one. */
+export type NoteTranslation = { title: string; description: string; updated: string; seriesTitle?: string };
 
 type Translatable = { slug: string; en?: NoteTranslation };
 
@@ -37,6 +37,8 @@ const zh = {
   overview: "Overview",
   publicLabel: "Personal knowledge garden",
   chineseOnly: "中文",
+  chineseOnlyTitle: "仅中文",
+  languageLabel: "语言",
   switchToOther: "English",
   readingMinutes: "约 {n} 分钟",
   seriesLabel: "系列：{title}",
@@ -97,6 +99,8 @@ export const dict: Record<Lang, typeof zh> = {
     overview: "Overview",
     publicLabel: "Personal knowledge garden",
     chineseOnly: "中文",
+    chineseOnlyTitle: "Chinese only",
+    languageLabel: "Language",
     switchToOther: "中文",
     readingMinutes: "{n} min read",
     seriesLabel: "Series: {title}",

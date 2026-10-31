@@ -16,11 +16,14 @@ export default function HomePageView({ lang }: { lang: Lang }) {
   const recentNotes = [...noteEntries].sort((a, b) => b.updated.localeCompare(a.updated));
 
   const recentRow = (note: NoteEntry) => {
-    const { title, description } = noteText(note, lang);
+    const { title, description, translated } = noteText(note, lang);
+    // English readers get the Chinese original when there is no translation; mark its language.
+    const zhOnly = lang === "en" && !translated;
+    const textLang = zhOnly ? "zh-CN" : undefined;
     return (
       <Link className="recent-note" key={note.slug} href={notePath(note, lang)}>
         <span className="note-card-icon"><Icon name={note.categoryId === "ml" ? "brain" : note.categoryId === "algorithms" ? "search" : "code"} /></span>
-        <div className="recent-note-copy"><p className="note-category">{note.category} <span>/</span> {note.section}</p><h3>{title}{lang === "en" && !note.en && <span className="lang-tag" title="Chinese only">{t(lang, "chineseOnly")}</span>}</h3><p>{description}</p></div>
+        <div className="recent-note-copy"><p className="note-category">{note.category} <span>/</span> {note.section}</p><h3 lang={textLang}>{title}{zhOnly && <span className="lang-tag" title={t(lang, "chineseOnlyTitle")}>{t(lang, "chineseOnly")}</span>}</h3><p lang={textLang}>{description}</p></div>
         <div className="recent-note-end"><span className={`note-status status-${note.status}`}><span />{note.status === "growing" ? "Growing" : note.status === "stable" ? "Stable" : "Seed"}</span><time dateTime={note.updated}>{note.updated.slice(5).replace("-", ".")}</time></div><Icon name="arrow" className="card-arrow" />
       </Link>
     );
