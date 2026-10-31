@@ -5,6 +5,7 @@ import RoadmapGraph from "@/components/home/RoadmapGraph";
 import Avatar from "@/components/layout/Avatar";
 import LearningActivity from "@/components/layout/LearningActivity";
 import MachineHero from "@/components/home/machine/MachineHero";
+import LangTag from "@/components/i18n/LangTag";
 import { profile } from "@/content/profile";
 import { notePath, noteText, t, type Lang } from "@/lib/i18n";
 
@@ -23,7 +24,7 @@ export default function HomePageView({ lang }: { lang: Lang }) {
     return (
       <Link className="recent-note" key={note.slug} href={notePath(note, lang)}>
         <span className="note-card-icon"><Icon name={note.categoryId === "ml" ? "brain" : note.categoryId === "algorithms" ? "search" : "code"} /></span>
-        <div className="recent-note-copy"><p className="note-category">{note.category} <span>/</span> {note.section}</p><h3 lang={textLang}>{title}{zhOnly && <span className="lang-tag" title={t(lang, "chineseOnlyTitle")}>{t(lang, "chineseOnly")}</span>}</h3><p lang={textLang}>{description}</p></div>
+        <div className="recent-note-copy"><p className="note-category">{note.category} <span>/</span> {note.section}</p><h3 lang={textLang}>{title}{zhOnly && <LangTag lang={lang} />}</h3><p lang={textLang}>{description}</p></div>
         <div className="recent-note-end"><span className={`note-status status-${note.status}`}><span />{note.status === "growing" ? "Growing" : note.status === "stable" ? "Stable" : "Seed"}</span><time dateTime={note.updated}>{note.updated.slice(5).replace("-", ".")}</time></div><Icon name="arrow" className="card-arrow" />
       </Link>
     );
@@ -46,7 +47,7 @@ export default function HomePageView({ lang }: { lang: Lang }) {
         </div>
         <MachineHero lang={lang} />
       </section>
-      <LearningActivity />
+      <LearningActivity lang={lang} />
       <section className="roadmap-section" aria-labelledby="roadmap-title">
         {/* The Chinese headings keep their English gloss; the English page would only repeat itself. */}
         <div className="section-heading"><h2 id="roadmap-title">{t(lang, "roadmapTitle")}{lang === "zh" && <> <span>Roadmap</span></>}</h2><span className="subtle-text">{t(lang, "roadmapHint")}</span></div>

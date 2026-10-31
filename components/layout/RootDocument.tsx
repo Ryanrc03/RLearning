@@ -24,7 +24,7 @@ export default function RootDocument({ lang, children }: { lang: Lang; children:
       </head>
       <body>
         <LangProvider lang={lang}>
-          <NotebookShell activity={<LearningActivity />}>{children}</NotebookShell>
+          <NotebookShell activity={<LearningActivity lang={lang} />}>{children}</NotebookShell>
         </LangProvider>
       </body>
     </html>

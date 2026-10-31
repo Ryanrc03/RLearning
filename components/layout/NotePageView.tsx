@@ -6,6 +6,7 @@ import { getNoteToc } from "@/lib/content";
 import { homePath, notePath, noteText, t, type Lang } from "@/lib/i18n";
 import TableOfContents from "@/components/layout/TableOfContents";
 import SplitReader from "@/components/layout/SplitReader";
+import LangTag from "@/components/i18n/LangTag";
 import Icon from "@/components/ui/Icon";
 
 /** One note page, shared by `/notes/<slug>/` and its English twin `/en/notes/<slug>/`. */
@@ -26,7 +27,7 @@ export default function NotePageView({ slug, lang }: { slug: string; lang: Lang 
   const neighbourTitle = (neighbour: NoteEntry) => {
     const { title: text, translated } = noteText(neighbour, lang);
     const zhOnly = lang === "en" && !translated;
-    return <span lang={zhOnly ? "zh-CN" : undefined}>{text}{zhOnly && <span className="lang-tag" title={t(lang, "chineseOnlyTitle")}>{t(lang, "chineseOnly")}</span>}</span>;
+    return <span lang={zhOnly ? "zh-CN" : undefined}>{text}{zhOnly && <LangTag lang={lang} />}</span>;
   };
 
   return (

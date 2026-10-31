@@ -1,18 +1,20 @@
 import { noteEntries } from "@/content/notes";
 import { getActivityData } from "@/lib/activity";
+import { noteText, t, type Lang } from "@/lib/i18n";
 
-export default function LearningActivity() {
-  const activity = getActivityData(noteEntries);
+export default function LearningActivity({ lang = "zh" }: { lang?: Lang }) {
+  // Day tooltips list note titles in the page language where a translation exists.
+  const activity = getActivityData(noteEntries.map((note) => ({ ...note, title: noteText(note, lang).title })));
 
   return (
     <section className="activity-panel" aria-labelledby="learning-activity-heading">
       <div className="activity-intro">
         <div>
           <p className="activity-eyebrow">LEARNING ACTIVITY</p>
-          <h2 id="learning-activity-heading">每一点积累，都算数。</h2>
-          <p>记录笔记的创建与最近更新，慢慢把知识连成线。</p>
+          <h2 id="learning-activity-heading">{t(lang, "activityTitle")}</h2>
+          <p>{t(lang, "activityBody")}</p>
         </div>
-        <span className="activity-period">过去 26 周</span>
+        <span className="activity-period">{t(lang, "activityPeriod")}</span>
       </div>
 
       <div className="activity-graph">
@@ -26,7 +28,7 @@ export default function LearningActivity() {
         <div
           className="activity-grid"
           role="img"
-          aria-label={`过去 26 周的笔记更新：${activity.totalUpdates} 次更新，${activity.activeDays} 个活跃日。每天一个方格，颜色越深表示当天更新的笔记越多。`}
+          aria-label={t(lang, "activityAria", { updates: activity.totalUpdates, days: activity.activeDays })}
         >
           {activity.days.map((day) => (
             <span
@@ -35,32 +37,34 @@ export default function LearningActivity() {
               data-level={day.level}
               title={
                 day.isFuture
-                  ? `${day.date} · 尚未到来`
-                  : `${day.date} · ${day.count} 篇笔记更新${day.titles.length ? `：${day.titles.join("、")}` : ""}`
+                  ? t(lang, "activityFuture", { date: day.date })
+                  : day.titles.length
+                    ? t(lang, "activityDayTitles", { date: day.date, n: day.count, titles: day.titles.join(t(lang, "listSeparator")) })
+                    : t(lang, "activityDay", { date: day.date, n: day.count })
               }
             />
           ))}
         </div>
         <div className="activity-legend" aria-hidden="true">
-          <span>少</span>
+          <span>{t(lang, "activityLess")}</span>
           {[0, 1, 2, 3, 4].map((level) => (
             <span key={level} className="activity-cell" data-level={level} />
           ))}
-          <span>多</span>
+          <span>{t(lang, "activityMore")}</span>
         </div>
       </div>
 
       <dl className="activity-stats">
         <div className="activity-stat">
-          <dt>篇公开笔记</dt>
+          <dt>{t(lang, "statNotes")}</dt>
           <dd>{activity.totalNotes.toString().padStart(2, "0")}</dd>
         </div>
         <div className="activity-stat">
-          <dt>个活跃日</dt>
+          <dt>{t(lang, "statDays")}</dt>
           <dd>{activity.activeDays.toString().padStart(2, "0")}</dd>
         </div>
         <div className="activity-stat">
-          <dt>次笔记更新</dt>
+          <dt>{t(lang, "statUpdates")}</dt>
           <dd>{activity.totalUpdates.toString().padStart(2, "0")}</dd>
         </div>
       </dl>
