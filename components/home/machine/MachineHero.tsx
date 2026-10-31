@@ -47,6 +47,8 @@ function hasWebGL2() {
 }
 
 const noteHref = (slug: string) => `/notes/${slug}/`;
+const CALLOUT_GAP_PX = 22;
+const EDGE_PX = 6;
 
 type NodeRef = (node: HTMLElement | null) => void;
 
@@ -87,13 +89,22 @@ export default function MachineHero({ lang = "zh" }: { lang?: Lang }) {
 
     const placeLabels = (now: number) => {
       if (!scene) return;
-      const narrow = el.clientWidth < 520;
+      const panelWidth = el.clientWidth;
+      const narrow = panelWidth < 520;
       for (const part of machineParts) {
         const node = labels.current[part.id];
         if (!node) continue;
         const p = scene.partScreenPosition(part.id);
-        node.style.transform = `translate(${p.x}px, ${p.y}px) translate(-50%, -100%)`;
         node.hidden = !p.visible || (narrow && Boolean(part.minor));
+        if (node.hidden) continue;
+        // Callout: the label sits beside its part, kept inside the panel; the leader line spans the gap.
+        const w = node.offsetWidth;
+        const x = part.side === "left"
+          ? Math.max(EDGE_PX, p.x - CALLOUT_GAP_PX - w)
+          : Math.min(panelWidth - EDGE_PX - w, p.x + CALLOUT_GAP_PX);
+        const lead = part.side === "left" ? p.x - (x + w) : x - p.x;
+        node.style.transform = `translate(${x}px, ${p.y}px) translate(0, -50%)`;
+        node.style.setProperty("--lead", `${Math.max(0, lead)}px`);
       }
       if (now - lastText < 250) return;
       lastText = now;
@@ -174,22 +185,28 @@ export default function MachineHero({ lang = "zh" }: { lang?: Lang }) {
         if (disposed) return;
         try {
           scene = createMachineScene(cv, { pixelRatio: Math.min(window.devicePixelRatio || 1, el.clientWidth < 640 ? 1.5 : 2), animate });
+          width = el.clientWidth;
+          height = el.clientHeight;
+          scene.resize(width, height);
+          setStatus(animate ? "live" : "still");
+          io.observe(el);
+          ro.observe(el);
+          document.addEventListener("visibilitychange", onVisibility);
+          cv.addEventListener("pointerdown", onDown);
+          cv.addEventListener("pointermove", onMove);
+          cv.addEventListener("pointerup", onUp);
+          cv.addEventListener("pointercancel", onUp);
+          cv.addEventListener("lostpointercapture", onUp);
+          kick();
         } catch {
+          // No usable WebGL2 after all: drop the scene; every handler above is a no-op without one.
+          cancelAnimationFrame(raf);
+          io.disconnect();
+          ro.disconnect();
+          scene?.dispose();
+          scene = null;
           setStatus("list");
-          return;
         }
-        width = el.clientWidth;
-        height = el.clientHeight;
-        scene.resize(width, height);
-        setStatus(animate ? "live" : "still");
-        io.observe(el);
-        ro.observe(el);
-        document.addEventListener("visibilitychange", onVisibility);
-        cv.addEventListener("pointerdown", onDown);
-        cv.addEventListener("pointermove", onMove);
-        cv.addEventListener("pointerup", onUp);
-        cv.addEventListener("pointercancel", onUp);
-        kick();
       }).catch(() => { if (!disposed) setStatus("list"); });
     }
 
@@ -203,6 +220,7 @@ export default function MachineHero({ lang = "zh" }: { lang?: Lang }) {
       cv.removeEventListener("pointermove", onMove);
       cv.removeEventListener("pointerup", onUp);
       cv.removeEventListener("pointercancel", onUp);
+      cv.removeEventListener("lostpointercapture", onUp);
       scene?.dispose();
     };
   }, []);
@@ -227,10 +245,10 @@ export default function MachineHero({ lang = "zh" }: { lang?: Lang }) {
       <div className="machine-labels">
         {machineParts.map((part, i) => {
           const refs = partRefs[i];
-          const body = <><b>{part.name}</b> {part.spec[lang]} <span className="machine-readout" ref={refs.readout} /></>;
+          const body = <><b>{part.name}</b> <span className="machine-spec">{part.spec[lang]}</span> <span className="machine-readout" ref={refs.readout} /></>;
           return part.slug
-            ? <Link key={part.id} ref={refs.label} href={noteHref(part.slug)} className="machine-label">{body}</Link>
-            : <span key={part.id} ref={refs.label} className="machine-label">{body}</span>;
+            ? <Link key={part.id} ref={refs.label} href={noteHref(part.slug)} className="machine-label" data-side={part.side}>{body}</Link>
+            : <span key={part.id} ref={refs.label} className="machine-label" data-side={part.side}>{body}</span>;
         })}
       </div>
       <div className="machine-hud">

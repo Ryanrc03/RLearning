@@ -10,6 +10,13 @@
 .machine-labels { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
 .machine-label { position: absolute; left: 0; top: 0; pointer-events: auto; font: 11px/1.35 ui-monospace, Menlo, monospace; color: #cfe3ff; background: rgba(10, 16, 32, .82); border: 1px solid rgba(120, 160, 255, .35); border-radius: 6px; padding: 3px 7px; white-space: nowrap; text-decoration: none; will-change: transform; }
 a.machine-label:hover, a.machine-label:focus-visible { border-color: #9a87fe; color: #fff; }
+/* Leader line from the label to its part, ending in a dot on the part. */
+.machine-label::after { content: ""; position: absolute; top: 50%; width: var(--lead, 0px); border-top: 1px solid rgba(154, 135, 254, .55); }
+.machine-label::before { content: ""; position: absolute; top: calc(50% - 2.5px); width: 5px; height: 5px; border-radius: 50%; background: #9a87fe; }
+.machine-label[data-side="left"]::after { left: 100%; }
+.machine-label[data-side="right"]::after { right: 100%; }
+.machine-label[data-side="left"]::before { left: calc(100% + var(--lead, 0px) - 2.5px); }
+.machine-label[data-side="right"]::before { right: calc(100% + var(--lead, 0px) - 2.5px); }
 .machine-label b { color: #fff; font-weight: 500; }
 .machine-readout { color: #ffb86b; }
 .machine-readout:empty { display: none; }
@@ -25,6 +32,8 @@ a.machine-label:hover, a.machine-label:focus-visible { border-color: #9a87fe; co
 .machine-panel[data-status="list"] .machine-labels { position: static; display: flex; flex-direction: column; gap: 8px; padding: 56px 14px 0; }
 .machine-panel[data-status="loading"] .machine-label,
 .machine-panel[data-status="list"] .machine-label { position: static; transform: none !important; align-self: flex-start; }
+.machine-panel[data-status="loading"] .machine-label::before, .machine-panel[data-status="loading"] .machine-label::after,
+.machine-panel[data-status="list"] .machine-label::before, .machine-panel[data-status="list"] .machine-label::after { display: none; }
 .machine-panel[data-status="list"] .machine-canvas { display: none; }
 /* Without WebGL the panel grows to fit: label list, then the HUD in normal flow, so neither covers the other. */
 .machine-panel[data-status="list"] { height: auto; padding-bottom: 12px; }
@@ -34,10 +43,9 @@ a.machine-label:hover, a.machine-label:focus-visible { border-color: #9a87fe; co
 
 @media (max-width: 640px) {
   .machine-panel { height: 400px; border-radius: 10px; }
-  /* Below the tabs, so the two don't collide on narrow phones. */
-  .machine-model { top: 44px; }
-  .machine-panel[data-status="loading"] .machine-labels,
-  .machine-panel[data-status="list"] .machine-labels { padding-top: 84px; }
+  /* No room beside the tabs and callouts on a phone; the HUD already names the machine. */
+  .machine-model { display: none; }
   .machine-label { font-size: 10px; padding: 2px 6px; }
+  .machine-panel:not([data-status="loading"]):not([data-status="list"]) .machine-spec { display: none; }
   .machine-hud { font-size: 11px; }
 }

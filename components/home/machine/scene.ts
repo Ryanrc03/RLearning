@@ -23,13 +23,17 @@ export type MachineScene = {
 // three r155+ measures light in physical units; × π reproduces the r128 prototype's intensities. Tune by eye.
 const AMBIENT_INTENSITY = 0.55 * Math.PI;
 const DIRECTIONAL_INTENSITY = 0.55 * Math.PI;
-const CYAN_POINT_INTENSITY = 1.6 * Math.PI;
-const VIOLET_POINT_INTENSITY = 1.2 * Math.PI;
+const CYAN_POINT_INTENSITY = 0.8 * Math.PI;
+const VIOLET_POINT_INTENSITY = 0.35 * Math.PI;
 const POINT_DECAY = 0;
 
 const BACKGROUND = 0x05070d;
-const TARGET = new Vector3(0, -3, 0);
-const RADIUS = 100;
+// Aimed below the case's center so the case sits above the HUD strip at the bottom of the panel.
+const TARGET = new Vector3(0, -7, 0);
+const FOV = 35;
+/** Half-extents (scene units) that must stay in view, labels included; the camera backs off to fit narrow panels. */
+const FIT_HALF_HEIGHT = 40;
+const FIT_HALF_WIDTH = 34;
 const IDLE_AZ = 0.62;
 const IDLE_EL = 0.3;
 const IDLE_AFTER_MS = 2500;
@@ -42,12 +46,12 @@ const PACKET_POOL = 44;
 const PCB_SEED = 0x7e5;
 
 const partAnchors: Record<PartId, Vector3> = {
-  cpu: new Vector3(-2, 19.4, -4),
-  ram: new Vector3(13, 20, -8),
-  gpu: new Vector3(-14, 2.6, 2.6),
-  ssd: new Vector3(2, 5.7, -9.4),
-  psu: new Vector3(-11, -12.4, 6),
-  hdd: new Vector3(11, -12.4, 6),
+  cpu: new Vector3(-14, 12, -3.4),
+  ram: new Vector3(13.6, 18.8, -6.5),
+  gpu: new Vector3(-16.5, 0.5, 2.4),
+  ssd: new Vector3(6, 4.2, -9.4),
+  psu: new Vector3(-13, -16, 10),
+  hdd: new Vector3(13, -16, 10),
 };
 
 const curve = (...points: [number, number, number][]) =>
@@ -78,7 +82,7 @@ export function createMachineScene(canvas: HTMLCanvasElement, options: SceneOpti
   renderer.setPixelRatio(options.pixelRatio);
   const scene = new Scene();
   scene.background = new Color(BACKGROUND);
-  const camera = new PerspectiveCamera(35, 1, 0.1, 500);
+  const camera = new PerspectiveCamera(FOV, 1, 0.1, 500);
 
   scene.add(new AmbientLight(0x8090c0, AMBIENT_INTENSITY));
   const sun = new DirectionalLight(0xffffff, DIRECTIONAL_INTENSITY);
@@ -252,13 +256,13 @@ export function createMachineScene(canvas: HTMLCanvasElement, options: SceneOpti
   let az = IDLE_AZ, el = IDLE_EL, orbited = false, lastOrbitMs = -Infinity;
   // animMs only advances while animating, so RGB, sway and spawns pick up where they paused.
   let lastNow = -1, animMs = 0, lastSpawn = -Infinity;
-  let width = 0, height = 0;
+  let width = 0, height = 0, radius = 100;
   const scratch = new Vector3();
   const placeCamera = () => {
     camera.position.set(
-      TARGET.x + RADIUS * Math.sin(az) * Math.cos(el),
-      TARGET.y + RADIUS * Math.sin(el),
-      TARGET.z + RADIUS * Math.cos(az) * Math.cos(el),
+      TARGET.x + radius * Math.sin(az) * Math.cos(el),
+      TARGET.y + radius * Math.sin(el),
+      TARGET.z + radius * Math.cos(az) * Math.cos(el),
     );
     camera.lookAt(TARGET);
     camera.updateMatrixWorld();
@@ -324,6 +328,9 @@ export function createMachineScene(canvas: HTMLCanvasElement, options: SceneOpti
       renderer.setSize(w, h, false);
       camera.aspect = w / Math.max(1, h);
       camera.updateProjectionMatrix();
+      const tanHalf = Math.tan(((FOV / 2) * Math.PI) / 180);
+      radius = Math.max(FIT_HALF_HEIGHT, FIT_HALF_WIDTH / camera.aspect) / tanHalf;
+      placeCamera();
     },
     orbitBy(dx, dy) {
       az -= dx * 0.006;

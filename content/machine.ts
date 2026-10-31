@@ -11,6 +11,8 @@ export type MachinePart = {
   slug?: string;
   /** Dropped from the 3D overlay on narrow panels to keep it readable. */
   minor?: boolean;
+  /** Which side of the case the callout label sits on. */
+  side: "left" | "right";
 };
 
 export type GrpoPhase = {
@@ -28,12 +30,12 @@ export type GrpoPhase = {
 export const machineModel = "Lenovo Legion T5 26IAB7";
 
 export const machineParts: MachinePart[] = [
-  { id: "cpu", name: "CPU", spec: { zh: "i7-12700 · 12 核 20 线程", en: "i7-12700 · 12 cores / 20 threads" }, slug: "cs/fundamentals/overview" },
-  { id: "ram", name: "DRAM", spec: { zh: "16 GB DDR5-4800", en: "16 GB DDR5-4800" }, slug: "cs/fundamentals/memory-hierarchy" },
-  { id: "gpu", name: "GPU", spec: { zh: "RTX 3060 12 GB", en: "RTX 3060 12 GB" }, slug: "ai-infra/gpu/overview" },
-  { id: "ssd", name: "SSD", spec: { zh: "KIOXIA 256 GB NVMe", en: "KIOXIA 256 GB NVMe" }, slug: "systems/data/overview" },
-  { id: "hdd", name: "HDD", spec: { zh: "WD 1 TB", en: "WD 1 TB" }, slug: "systems/data/overview", minor: true },
-  { id: "psu", name: "PSU", spec: { zh: "整机功耗", en: "system power" }, minor: true },
+  { id: "cpu", name: "CPU", spec: { zh: "i7-12700 · 12 核 20 线程", en: "i7-12700 · 12 cores / 20 threads" }, slug: "cs/fundamentals/overview", side: "left" },
+  { id: "ram", name: "DRAM", spec: { zh: "16 GB DDR5-4800", en: "16 GB DDR5-4800" }, slug: "cs/fundamentals/memory-hierarchy", side: "right" },
+  { id: "gpu", name: "GPU", spec: { zh: "RTX 3060 12 GB", en: "RTX 3060 12 GB" }, slug: "ai-infra/gpu/overview", side: "left" },
+  { id: "ssd", name: "SSD", spec: { zh: "KIOXIA 256 GB NVMe", en: "KIOXIA 256 GB NVMe" }, slug: "systems/data/overview", side: "right" },
+  { id: "hdd", name: "HDD", spec: { zh: "WD 1 TB", en: "WD 1 TB" }, slug: "systems/data/overview", minor: true, side: "right" },
+  { id: "psu", name: "PSU", spec: { zh: "整机功耗", en: "system power" }, minor: true, side: "left" },
 ];
 
 // Phase text (G = 6, 30 ms vs 7 ms, 63% / 37%, LoRA r = 32) comes from content/ml/post-training/grpo-3060-project.mdx; gpuUtil and cpuTemp are illustrative animation targets.
