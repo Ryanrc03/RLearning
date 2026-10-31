@@ -97,7 +97,7 @@ export default function G3CheckpointSweep() {
         <button type="button" className="viz-btn" onClick={() => setFocus("all")}>{copy.reset}</button>
       </div>
       <Figure width={W} height={H} label={copy.figureLabel(sweeps)}>
-        <Plot box={{ x: 0, y: 0, w: W / 2, h: H }} xDomain={[0, 500]} yDomain={[0.55, 0.8]} xTicks={[0, 100, 200, 300, 400, 500]} yTicks={[0.55, 0.6, 0.65, 0.7, 0.75, 0.8]} xLabel={copy.stepAxis} yLabel={copy.accuracyAxis} title={copy.accuracyTitle} format={(t) => `${Math.round(t * 100)}%`}>
+        <Plot box={{ x: 0, y: 0, w: W / 2, h: H }} xDomain={[0, 500]} yDomain={[0.55, 0.8]} xTicks={[0, 100, 200, 300, 400, 500]} yTicks={[0.55, 0.6, 0.65, 0.7, 0.75, 0.8]} xLabel={copy.stepAxis} yLabel={copy.accuracyAxis} title={copy.accuracyTitle} format={(t) => `${Math.round(t * 100)}%`} xFormat={(v) => String(v)}>
           {(f) => (
             <>
               <line x1={f.x0} x2={f.x1} y1={f.y(instAcc)} y2={f.y(instAcc)} stroke={MODEL_COLOR.instruct} strokeWidth={1.4} strokeDasharray="5 4" />

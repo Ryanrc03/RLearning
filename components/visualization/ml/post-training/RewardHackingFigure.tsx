@@ -120,7 +120,7 @@ export default function RewardHackingFigure() {
             </>
           )}
         </Plot>
-        <Plot box={{ x: W / 2, y: 0, w: W / 2, h: H }} xDomain={[0, HACK.steps]} yDomain={[0, 1]} xTicks={[0, 100, 200, 300]} yTicks={[0, 0.25, 0.5, 0.75, 1]} xLabel={copy.stepAxis} yLabel={copy.accuracyAxis} title={copy.accuracyTitle} format={(v) => pct(v)}>
+        <Plot box={{ x: W / 2, y: 0, w: W / 2, h: H }} xDomain={[0, HACK.steps]} yDomain={[0, 1]} xTicks={[0, 100, 200, 300]} yTicks={[0, 0.25, 0.5, 0.75, 1]} xLabel={copy.stepAxis} yLabel={copy.accuracyAxis} title={copy.accuracyTitle} format={(v) => pct(v)} xFormat={(v) => String(v)}>
           {(f) => (
             <>
               {SCHEMES.map((s) => (
