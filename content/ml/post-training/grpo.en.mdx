@@ -1,0 +1,81 @@
+import GrpoFigure from "@/components/visualization/ml/post-training/GrpoFigure";
+import PolicyGradientStepFigure from "@/components/visualization/ml/post-training/PolicyGradientStepFigure";
+
+# GRPO: group comparison in place of a critic
+
+## In one sentence
+
+**GRPO samples G responses to the same prompt and scores each one, then uses the group mean as the baseline and the group standard deviation as the scale to get each response's advantage, so it no longer needs a critic.**
+
+It is the latest stop on the policy-gradient line (REINFORCE → baseline → actor-critic → TRPO → PPO). It comes from DeepSeekMath, and DeepSeek-R1 uses it for reasoning RL. Its most common pairing is a verifiable reward: is the math answer right, do the code tests pass.
+
+Read [PPO: from actor–critic to reinforcement learning for LLMs](/notes/ml/post-training/ppo/) first to understand the critic, GAE, and how the old policy differs from the reference; this page concentrates on the group baseline and the actual parameter update.
+
+## Why it exists
+
+RL on an LLM is a loop: feed a problem to the LLM as the prompt, generate a response, score it to get a reward, update the LLM with that reward, then repeat with the next problem. PPO and GRPO use this online sampling loop; standard DPO usually trains directly on offline preference pairs and does not need a rollout every round.
+
+Reinforcement learning has two routes. In a **policy-based** method the network directly outputs a probability distribution over actions: state → NN → action. An LLM is itself such a policy: context → NN → distribution over the next token. In a **value-based** method the network outputs how good the state is: state → NN → good / bad, like a judge estimating the odds of winning. PPO needs both: besides the policy, a critic (value network) estimates state values, which adds training cost; the critic can be deployed as a separate model or share a backbone with the actor. And an LLM's reward arrives only once, at the end of the response, so per-token values are hard to estimate accurately. GRPO keeps only the policy: answer the same problem several times, and the average score is itself a good baseline.
+
+## How it works
+
+### How the parameters actually update: from SFT to policy gradient
+
+In SFT and pretraining the update is $\theta \leftarrow \theta - \eta\,\nabla_\theta L$, where $L = -\log \pi_\theta(y \mid x)$. This is the same as climbing along $\nabla \log \pi$ to make the demonstration answer $y$ more likely. RL has no demonstration answer, only a response $o$ that the model sampled itself and that response's score $R$, so it multiplies the same gradient by the reward:
+
+$$
+\theta \leftarrow \theta + \eta \cdot R \cdot \nabla_\theta \log \pi_\theta(o \mid q),\qquad
+\log \pi_\theta(o \mid q) = \sum_t \log \pi_\theta(o_t \mid q, o_{<t})
+$$
+
+The gradient supplies the **direction** (make this response more likely); the reward supplies the **strength and sign**: a high score pushes harder, and a negative score pushes the opposite way. Every token in the response shares this one $R$. So RL can be read as “SFT on your own samples, each weighted by its score.” For a softmax policy, $\nabla_{\text{logits}} \log \pi(a) = \text{onehot}(a) - \pi$: the sampled token's logit goes up, the others go down in proportion to their probabilities, the total is 0, and probability only moves between answers.
+
+The trouble is that the reward is sparse and high-variance. Think of a racing game: in a run with a good time, most of the moves were actually ordinary, yet they all get the same reward; and since every score is positive, whatever was sampled gets pushed up. Each step that follows is a treatment for this problem:
+
+1. **Baseline**: use $R - b$ instead of $R$. The example from the notes: this run scores 95 and the average is 92, so push by only +3. Subtracting a constant does not change the expected gradient; it only lowers the variance, so training becomes more stable.
+2. **Actor-critic (A2C)**: let a critic network estimate the average score of this state, $V(s)$, and use it as the baseline. $A = R - V(s)$ is called the advantage: how much better this action is than average.
+3. **TRPO**: when updating the new policy with samples drawn by the old policy, multiply by the probability ratio $\rho = \pi_{\text{new}} / \pi_{\text{old}}$, which measures how much this step changed; then add a hard constraint $\mathrm{KL}(\pi_{\text{old}} \,\|\, \pi_{\text{new}}) \le \delta$ to keep $\rho$ from going too far. Constrained optimization needs a second-order approximation, which is expensive.
+4. **PPO**: use the clipped surrogate objective. For a positive advantage the gain is capped once $\rho > 1+\epsilon$; for a negative advantage the gain is capped once $\rho < 1-\epsilon$. It does not guarantee that every ratio stays inside the interval; the full derivation is in [PPO](/notes/ml/post-training/ppo/).
+5. **GRPO**: drop the value model. Sample G CoTs for the same problem $q$, score them $r_1 \dots r_G$, and use the group's statistics as the baseline:
+
+$$
+A_i = \frac{r_i - \operatorname{mean}(r_1,\dots,r_G)}{\operatorname{std}(r_1,\dots,r_G)}
+$$
+
+$$
+J(\theta) = \frac{1}{G}\sum_{i=1}^{G}\frac{1}{|o_i|}\sum_{t}\min\!\big(\rho_{i,t}A_i,\ \operatorname{clip}(\rho_{i,t},1-\epsilon,1+\epsilon)\,A_i\big) - \beta\,D_{\mathrm{KL}}\!\left(\pi_\theta \,\|\, \pi_{\mathrm{ref}}\right)
+$$
+
+Say a group's average score is 60: responses below 60 get $A < 0$ and are pushed down, and those above 60 are pushed up. Apart from where $A_i$ comes from, everything in $J$ is PPO: $\rho_{i,t}$ is the per-token ratio of new to old probabilities, and the KL term holds the policy near the reference, added directly to the loss instead of being subtracted from the reward.
+
+### A worked example by hand
+
+<PolicyGradientStepFigure />
+
+Shrink the LLM down to three tokens that can only answer “2 + 3 = ?”. The parameters are three logits, all starting at 0, so each of the three answers has 33.3%. Sample 4 responses: 5 ✓, 6 ✗, 5 ✓, 4 ✗; the 0 / 1 rewards are 1, 0, 1, 0.
+
+- **Compute the advantages**: mean 0.5, std 0.5, so $A = (+1, -1, +1, -1)$.
+- **Compute each sample's push**: sample 1 gives $+1 \times \big((1,0,0) - (\tfrac13,\tfrac13,\tfrac13)\big) = (+0.67, -0.33, -0.33)$. Sample 2 answered 6 with $A = -1$, so its push is $(+0.33, -0.67, +0.33)$: pushing a wrong answer down amounts to handing its probability back to the other two.
+- **Average into a gradient and take a step**: $g = (+0.5, -0.25, -0.25)$. With lr = 1, θ becomes $(0.5, -0.25, -0.25)$, and π(5) rises from 33.3% to 51.4%.
+- **Clip**: after this step $\rho(5) = 0.514 / 0.333 = 1.54$, already past 1.2; when the same batch of samples is trained on for another pass, the clip cuts its gradient to 0. In real training the lr is much smaller, but you still need to monitor the actual KL and the size of each update: clipping does not provide a hard trust-region guarantee.
+
+Switch to “Scored reward” and pick “① Raw reward”: all four scores are around 90, so even the wrong answers get pushed up, and a single step has ‖Δθ‖ ≈ 20. That is what high variance and instability look like. Pick “② Subtract the mean” and the 95-point response is pushed by only +3; pick “③ GRPO” and the step size stays on the same order whether the reward is 0 / 1 or out of 100.
+
+### No signal when a group is all right or all wrong
+
+<GrpoFigure />
+
+The default is a problem the model solves 50% of the time, with G = 6: correct responses get a positive $A$, wrong ones a negative one, and they sum to exactly 0. This is an outcome-level reward; it does not try to tell which reasoning step earned the credit. That is the critic's job, one it struggles to do well, and GRPO simply does not attempt it.
+
+Switch to the easy problem with G = 4: all four are correct, std = 0, and every $A$ is 0; on the hard problem they are all wrong, and the result is again 0. This means the reward-driven advantage term has no signal to tell responses apart; other terms, such as the reference KL, can still have gradients. The probability of a wasted group is $p^G + (1-p)^G$: on a problem solved 85% of the time, 52% of groups have no gradient at G = 4, falling to 27% at G = 8. Raise G to 8 on the hard problem and the first correct response appears; its $A$ jumps straight to +2.65. The rare success is pushed hardest. This shows that standardization amplifies rare successes within a group, but this toy example alone is not enough to infer why new reasoning behaviors emerge in real models.
+
+## Costs and trade-offs
+
+- **Why drop the critic**: it removes the critic role and its value-regression training (the exact memory saved depends on whether the backbone is shared), and it sidesteps the hard problem of estimating per-token values from a sparse reward given at the end. The cost is generating G times per prompt: compute moves from “training a critic” to rollouts.
+- **What if all G are right, or all wrong**: the group's advantages are all 0, so the samples are wasted. Common remedies are raising G, filtering out groups with std = 0 and sampling replacements (DAPO's dynamic sampling), or building a curriculum of medium-difficulty problems picked by the current pass rate.
+- **Dividing by std amplifies differences in difficulty**: with 1 correct out of 8, that one gets +2.65; with 7 correct out of 8, each correct one gets only +0.38. Dr. GRPO argues this introduces a problem-difficulty bias, and it only subtracts the mean without dividing by std. The $1/|o_i|$ length normalization also penalizes a long wrong answer less per token, quietly encouraging longer outputs.
+- **Rewards must be comparable, and ideally verifiable**: the group carries only relative information, so answer correctness, unit tests and format checks are the most robust. A learned reward model also works, but it is easier to exploit.
+
+## Where to go next
+
+GRPO only governs how the reward is used, not whether the reward is written correctly. [Reward design and reward hacking](/en/notes/ml/post-training/reward-hacking/) covers how a policy exploits gaps in the reward, for example padding its answers to farm points once a length reward is added. The previous stop, [PPO](/notes/ml/post-training/ppo/), explains the critic, GAE, clipping and the training procedure in detail; for background on preference data and DPO, see [RLHF](/notes/ml/post-training/rlhf/).
