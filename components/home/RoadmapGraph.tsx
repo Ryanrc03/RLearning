@@ -1,8 +1,10 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { maturity, roadmapEdges, roadmapNodes, type RoadmapNode } from "@/content/roadmap";
+import { maturity, nodeLabel, roadmapEdges, roadmapNodes, type RoadmapNode } from "@/content/roadmap";
 import { categories } from "@/content/navigation";
+import { useLang } from "@/components/i18n/LangProvider";
+import { t } from "@/lib/i18n";
 import RoadmapDrawer from "./RoadmapDrawer";
 
 // Grid geometry in SVG units; the SVG scales down with its container.
@@ -45,6 +47,7 @@ function lineage(id: string) {
 const rows = Array.from({ length: maxRow + 1 }, (_, row) => roadmapNodes.filter((node) => node.row === row).sort((a, b) => a.col - b.col));
 
 export default function RoadmapGraph() {
+  const lang = useLang();
   const [hovered, setHovered] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   // The element that opened the drawer gets focus back when it closes.
@@ -65,8 +68,8 @@ export default function RoadmapGraph() {
     const { stable, growing, total } = maturity(node.id);
     return (
       <>
-        <span className="rm-node-label">{node.label ?? node.section}</span>
-        <span className="rm-node-meta">{total} 篇{stable ? ` · ${stable} stable` : ""}{growing ? ` · ${growing} growing` : ""}</span>
+        <span className="rm-node-label">{nodeLabel(node, lang)}</span>
+        <span className="rm-node-meta">{t(lang, "roadmapNotes", { n: total })}{stable ? ` · ${stable} stable` : ""}{growing ? ` · ${growing} growing` : ""}</span>
         <span className="rm-node-bar" aria-hidden="true">
           <span className="is-stable" style={{ width: `${(stable / total) * 100}%` }} />
           <span className="is-growing" style={{ width: `${(growing / total) * 100}%` }} />
@@ -77,13 +80,13 @@ export default function RoadmapGraph() {
 
   return (
     <div className="roadmap">
-      <ul className="rm-legend" aria-label="颜色图例">
+      <ul className="rm-legend" aria-label={t(lang, "roadmapLegend")}>
         {categories.map((category) => <li key={category.id} className={`rm-cat-${category.id}`}><span />{category.title}</li>)}
-        <li className="rm-legend-bar"><span />进度条 = stable / growing / seed 的比例</li>
+        <li className="rm-legend-bar"><span />{t(lang, "roadmapProgress")}</li>
       </ul>
 
       <div className="rm-canvas">
-        <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="group" aria-label="知识路线图：箭头表示先读哪个" onMouseLeave={() => setHovered(null)}>
+        <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="group" aria-label={t(lang, "roadmapAria")} onMouseLeave={() => setHovered(null)}>
           <defs>
             <marker id="rm-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
               <path d="M0 0 8 4 0 8z" fill="context-stroke" />
@@ -122,7 +125,7 @@ export default function RoadmapGraph() {
       <ol className="rm-list">
         {rows.map((nodes, row) => (
           <li key={row}>
-            <p className="rm-list-layer">第 {row + 1} 层</p>
+            <p className="rm-list-layer">{t(lang, "roadmapLayer", { n: row + 1 })}</p>
             <div className="rm-list-items">
               {nodes.map((node) => (
                 <button key={node.id} type="button" className={`rm-node rm-cat-${node.categoryId}`} aria-haspopup="dialog" onClick={(event) => open(node.id, event.currentTarget)}>

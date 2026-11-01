@@ -21,13 +21,15 @@
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
-    "roughjs": "^4.6.6"
+    "roughjs": "^4.6.6",
+    "three": "0.187.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "latest",
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "@types/three": "0.187.0",
     "eslint": "latest",
     "eslint-config-next": "latest",
     "tailwindcss": "latest",

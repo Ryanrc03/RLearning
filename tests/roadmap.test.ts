@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { roadmapNodes, roadmapEdges, roadmapNode, notesForNode, prerequisites, nextSteps, deriveMlEdges } from "@/content/roadmap";
+import { roadmapNodes, roadmapEdges, roadmapNode, notesForNode, prerequisites, nextSteps, deriveMlEdges, nodeLabel } from "@/content/roadmap";
 import { noteEntries } from "@/content/notes";
 
 test("every node's section exists in notes.ts with the same category", () => {
@@ -67,4 +67,9 @@ test("prerequisites and next steps follow the drawn edges", () => {
   assert.ok(prerequisites("ml-llms").some((node) => node.id === "ml-dl-blocks"));
   assert.ok(nextSteps("ml-dl-blocks").some((node) => node.id === "ml-llms"));
   assert.equal(prerequisites("cs-fundamentals").length, 0);
+});
+
+test("English card labels have no Chinese", () => {
+  for (const node of roadmapNodes) assert.ok(!/[一-鿿]/.test(nodeLabel(node, "en")), `${node.id}: ${nodeLabel(node, "en")}`);
+  assert.equal(nodeLabel(roadmapNode("ml-tree")!, "zh"), "ML 知识树");
 });

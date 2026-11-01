@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { getNote } from "@/content/notes";
 import { createHeadingId, type TocItem } from "@/lib/headings";
+import type { Lang } from "@/lib/i18n";
 
 function headingText(markdown: string): string {
   return markdown
@@ -13,11 +14,12 @@ function headingText(markdown: string): string {
 }
 
 // Read only published local content at build time; no runtime service is needed.
-export function getNoteToc(slug: string): TocItem[] {
+// English pages live beside the original as content/<slug>.en.mdx.
+export function getNoteToc(slug: string, lang: Lang = "zh"): TocItem[] {
   if (!getNote(slug)) return [];
 
   const source = readFileSync(
-    path.join(process.cwd(), "content", `${slug}.mdx`),
+    path.join(process.cwd(), "content", `${slug}${lang === "en" ? ".en" : ""}.mdx`),
     "utf8",
   );
   const nextId = createHeadingId();

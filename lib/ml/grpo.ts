@@ -2,6 +2,7 @@
 // with a verifiable 0/1 reward, and centre/scale the rewards inside the group.
 // No React here; see tests/grpo.test.ts.
 
+import type { Localized } from "@/lib/i18n";
 import { createRng } from "./random";
 
 export type GroupStats = { mean: number; std: number; advantages: number[] };
@@ -30,10 +31,10 @@ export type Difficulty = "easy" | "medium" | "hard";
 // Per-difficulty solve rate and seed. The seeds are chosen (see the tests) so
 // the first few answers of the easy prompt are all correct and of the hard
 // prompt all wrong; a larger G then has to rescue the signal.
-export const GRPO_PROMPTS: Record<Difficulty, { p: number; seed: number; label: string }> = {
-  easy: { p: 0.85, seed: 8, label: "简单题（会做 85%）" },
-  medium: { p: 0.5, seed: 2, label: "中等题（会做 50%）" },
-  hard: { p: 0.12, seed: 9, label: "难题（会做 12%）" },
+export const GRPO_PROMPTS: Record<Difficulty, { p: number; seed: number; label: Localized }> = {
+  easy: { p: 0.85, seed: 8, label: { zh: "简单题（会做 85%）", en: "Easy problem (85% solved)" } },
+  medium: { p: 0.5, seed: 2, label: { zh: "中等题（会做 50%）", en: "Medium problem (50% solved)" } },
+  hard: { p: 0.12, seed: 9, label: { zh: "难题（会做 12%）", en: "Hard problem (12% solved)" } },
 };
 
 export const G_MAX = 16;

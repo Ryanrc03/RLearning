@@ -1,13 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { navigation } from "@/content/navigation";
 import { noteEntries } from "@/content/notes";
 import Icon from "@/components/ui/Icon";
+import NoteTitle from "@/components/i18n/NoteTitle";
+import { useLang } from "@/components/i18n/LangProvider";
+import { homePath, notePath, stripLang, t } from "@/lib/i18n";
 
 type Props = {
+  /** The current path without its trailing slash; may carry the "/en" prefix. */
   pathname: string;
   /** Called when a link is followed (closes the mobile drawer). */
   onNavigate: () => void;
@@ -19,15 +23,10 @@ const sectionKey = (categoryId: string, section: string) => `${categoryId}/${sec
 
 // Only the current note's category and section start open; everything else is one line.
 function openFor(pathname: string) {
-  const note = noteEntries.find((entry) => pathname === `/notes/${entry.slug}`);
+  const path = stripLang(pathname);
+  const note = noteEntries.find((entry) => path === `/notes/${entry.slug}`);
   return new Set(note ? [note.categoryId, sectionKey(note.categoryId, note.section)] : []);
 }
-
-const searchIndex = noteEntries.map((note) => ({
-  note,
-  href: `/notes/${note.slug}/`,
-  haystack: `${note.title} ${note.section} ${note.category} ${note.tags.join(" ")}`.toLowerCase(),
-}));
 
 function Highlight({ text, term }: { text: string; term: string }) {
   const at = term ? text.toLowerCase().indexOf(term) : -1;
@@ -36,6 +35,8 @@ function Highlight({ text, term }: { text: string; term: string }) {
 }
 
 export default function SidebarNav({ pathname, onNavigate, onSearchShortcut }: Props) {
+  const lang = useLang();
+  const path = stripLang(pathname);
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
@@ -47,6 +48,13 @@ export default function SidebarNav({ pathname, onNavigate, onSearchShortcut }: P
     setOpen(openFor(pathname));
     setQuery("");
   }
+
+  // Both titles are searchable in either language; results link to the page in the reader's language.
+  const searchIndex = useMemo(() => noteEntries.map((note) => ({
+    note,
+    href: notePath(note, lang),
+    haystack: `${note.en?.title ?? ""} ${note.title} ${note.section} ${note.category} ${note.tags.join(" ")}`.toLowerCase(),
+  })), [lang]);
 
   const toggle = (key: string) => setOpen((prev) => {
     const next = new Set(prev);
@@ -100,24 +108,24 @@ export default function SidebarNav({ pathname, onNavigate, onSearchShortcut }: P
           ref={input}
           type="search"
           value={query}
-          placeholder="搜索笔记"
-          aria-label="搜索笔记"
+          placeholder={t(lang, "searchPlaceholder")}
+          aria-label={t(lang, "searchPlaceholder")}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={onSearchKey}
         />
         <kbd>⌘K</kbd>
       </label>
-      <nav className="sidebar-nav" aria-label="主导航">
+      <nav className="sidebar-nav" aria-label={t(lang, "mainNav")}>
         {terms.length ? (
           <div className="nav-results" aria-live="polite">
-            <div className="nav-heading"><span>RESULTS</span><span>{results.length} notes</span></div>
-            {resultGroups.length === 0 && <p className="nav-empty">没有匹配「{query.trim()}」的笔记</p>}
+            <div className="nav-heading"><span>RESULTS</span><span>{t(lang, "libraryCount", { n: results.length })}</span></div>
+            {resultGroups.length === 0 && <p className="nav-empty">{t(lang, "noResults", { q: query.trim() })}</p>}
             {resultGroups.map((group) => (
               <div className="nav-result-group" key={group.title}>
                 <p className="nav-result-title">{group.title}</p>
                 {group.items.map((item) => (
                   <Link key={item.href} href={item.href} className="note-link" onClick={onNavigate}>
-                    <span className="note-bullet" /><span><Highlight text={item.note.title} term={terms[0]} /></span>
+                    <span className="note-bullet" /><NoteTitle note={item.note} lang={lang}>{(title) => <Highlight text={title} term={terms[0]} />}</NoteTitle>
                   </Link>
                 ))}
               </div>
@@ -125,8 +133,8 @@ export default function SidebarNav({ pathname, onNavigate, onSearchShortcut }: P
           </div>
         ) : (
           <>
-            <Link href="/" className={`home-link ${pathname === "" ? "is-active" : ""}`} aria-current={pathname === "" ? "page" : undefined} onClick={onNavigate}><Icon name="home" /><span>知识库首页</span><span className="nav-shortcut">⌂</span></Link>
-            <div className="nav-heading"><span>MY LIBRARY</span><span>{noteEntries.length} notes</span></div>
+            <Link href={homePath(lang)} className={`home-link ${path === "" ? "is-active" : ""}`} aria-current={path === "" ? "page" : undefined} onClick={onNavigate}><Icon name="home" /><span>{t(lang, "homeLink")}</span><span className="nav-shortcut">⌂</span></Link>
+            <div className="nav-heading"><span>MY LIBRARY</span><span>{t(lang, "libraryCount", { n: noteEntries.length })}</span></div>
             <div className="nav-groups">
               {navigation.map((group) => {
                 if (!group.count) return <div key={group.id} className="nav-group-empty"><Icon name={group.icon} /><span>{group.title}</span><span className="nav-count">0</span></div>;
@@ -147,8 +155,8 @@ export default function SidebarNav({ pathname, onNavigate, onSearchShortcut }: P
                                 <Icon name="chevron" className="nav-chevron" /><span>{section.title}</span><span className="nav-count">{section.children.length}</span>
                               </button>
                               {sectionOpen && section.children.map((note) => {
-                                const active = pathname === note.href.replace(/\/$/, "");
-                                return <Link key={note.href} href={note.href} className={`note-link ${active ? "is-active" : ""}`} aria-current={active ? "page" : undefined} onClick={onNavigate}><span className="note-bullet" /><span>{note.title}</span></Link>;
+                                const active = path === `/notes/${note.slug}`;
+                                return <Link key={note.slug} href={notePath(note, lang)} className={`note-link ${active ? "is-active" : ""}`} aria-current={active ? "page" : undefined} onClick={onNavigate}><span className="note-bullet" /><NoteTitle note={note} lang={lang} /></Link>;
                               })}
                             </div>
                           );

@@ -8,10 +8,22 @@ import { profile } from "@/content/profile";
 import Avatar from "./Avatar";
 import SidebarNav from "./SidebarNav";
 import Icon from "@/components/ui/Icon";
+import { useLang } from "@/components/i18n/LangProvider";
+import { homePath, htmlLang, notePath, otherLang, stripLang, t } from "@/lib/i18n";
 
 export default function NotebookShell({ children, activity }: { children: React.ReactNode; activity: React.ReactNode }) {
+  const lang = useLang();
   const pathname = usePathname().replace(/\/$/, "");
-  const currentNote = noteEntries.find((note) => pathname === `/notes/${note.slug}`);
+  // The page's place in the library, the same for both languages: "" is the homepage.
+  const path = stripLang(pathname);
+  const currentNote = noteEntries.find((note) => path === `/notes/${note.slug}`);
+  // The same page in the other language, when there is one.
+  const other = otherLang(lang);
+  const samePage = path === "" ? homePath(other) : currentNote?.en ? notePath(currentNote, other) : null;
+  // A Chinese-only note still gives English readers a way back: the English home.
+  const englishHome = !samePage && Boolean(currentNote) && lang === "zh";
+  const otherPage = samePage ?? (englishHome ? homePath("en") : null);
+  const otherTag = htmlLang(other);
   const [mobileOpen, setMobileOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
   const sidebar = useRef<HTMLElement>(null);
@@ -44,13 +56,13 @@ export default function NotebookShell({ children, activity }: { children: React.
 
   return (
     <div className="notebook-shell">
-      <a className="skip-link" href="#main-content">跳到正文</a>
-      {mobileOpen && <button className="sidebar-overlay" aria-label="关闭目录" onClick={() => setMobileOpen(false)} />}
+      <a className="skip-link" href="#main-content">{t(lang, "skipToContent")}</a>
+      {mobileOpen && <button className="sidebar-overlay" aria-label={t(lang, "closeSidebar")} onClick={() => setMobileOpen(false)} />}
       <div className="sidebar-hotzone" aria-hidden="true" />
-      <aside id="notebook-sidebar" ref={sidebar} className={`sidebar ${mobileOpen ? "is-open" : ""}`} aria-label="知识库目录">
+      <aside id="notebook-sidebar" ref={sidebar} className={`sidebar ${mobileOpen ? "is-open" : ""}`} aria-label={t(lang, "sidebarLabel")}>
         <div className="sidebar-heading">
-          <Link href="/" className="brand" onClick={() => setMobileOpen(false)}><span className="brand-mark"><Icon name="book" /></span><span>RLearning<span className="brand-dot">.</span></span></Link>
-          <button className="icon-button mobile-close" aria-label="关闭目录" onClick={() => setMobileOpen(false)}><Icon name="close" /></button>
+          <Link href={homePath(lang)} className="brand" onClick={() => setMobileOpen(false)}><span className="brand-mark"><Icon name="book" /></span><span>RLearning<span className="brand-dot">.</span></span></Link>
+          <button className="icon-button mobile-close" aria-label={t(lang, "closeSidebar")} onClick={() => setMobileOpen(false)}><Icon name="close" /></button>
         </div>
         <p className="brand-caption">A little wiser, every day.</p>
         <SidebarNav pathname={pathname} onNavigate={closeMobile} onSearchShortcut={openForSearch} />
@@ -61,13 +73,21 @@ export default function NotebookShell({ children, activity }: { children: React.
       <div className="workspace">
         <header className="topbar">
           <div className="topbar-path">
-            <button ref={menuButton} className="icon-button mobile-menu" aria-label="打开目录" aria-expanded={mobileOpen} aria-controls="notebook-sidebar" onClick={() => setMobileOpen(true)}><Icon name="menu" /></button>
-            <Link href="/" className="breadcrumb-home"><Icon name="book" /><span>Notebook</span></Link><span className="breadcrumb-divider">/</span><span className="breadcrumb-current">{currentNote?.category ?? "Overview"}</span>
+            <button ref={menuButton} className="icon-button mobile-menu" aria-label={t(lang, "openSidebar")} aria-expanded={mobileOpen} aria-controls="notebook-sidebar" onClick={() => setMobileOpen(true)}><Icon name="menu" /></button>
+            <Link href={homePath(lang)} className="breadcrumb-home"><Icon name="book" /><span>Notebook</span></Link><span className="breadcrumb-divider">/</span><span className="breadcrumb-current">{currentNote?.category ?? t(lang, "overview")}</span>
           </div>
-          <div className="topbar-profile"><span className="public-label"><span className="status-dot" /> Personal knowledge garden</span>{profile.githubUrl && <a className="icon-button github-link" href={profile.githubUrl} aria-label={`${profile.name} on GitHub`} target="_blank" rel="noreferrer"><Icon name="github" /></a>}<Avatar size="small" /></div>
+          <div className="topbar-profile">
+            <span className="public-label"><span className="status-dot" /> {t(lang, "publicLabel")}</span>
+            {/* A plain link: each language has its own root layout, so switching is a full page load anyway. */}
+            {otherPage && (englishHome
+              // The title is in the page language, so only the link text is marked as English.
+              ? <a className="lang-link" href={otherPage} hrefLang={otherTag} title={t(lang, "englishSiteTitle")}><span lang={otherTag}>{t(lang, "switchToOther")}</span></a>
+              : <a className="lang-link" href={otherPage} hrefLang={otherTag} lang={otherTag}>{t(lang, "switchToOther")}</a>)}
+            {profile.githubUrl && <a className="icon-button github-link" href={profile.githubUrl} aria-label={`${profile.name} on GitHub`} target="_blank" rel="noreferrer"><Icon name="github" /></a>}<Avatar size="small" />
+          </div>
         </header>
         <main id="main-content" className="workspace-content" tabIndex={-1}>
-          {activity}{children}
+          {path === "" ? null : activity}{children}
           <footer className="site-footer"><span>RLearning<span className="brand-dot">.</span> <span className="footer-separator">/</span> Notes, connections & small discoveries.</span><span>Always a work in progress <Icon name="sun" /></span></footer>
         </main>
       </div>
