@@ -1,0 +1,129 @@
+import Callout from "@/components/visualization/sketch/Callout";
+import FailoverSimulator from "@/components/visualization/systems/ads/FailoverSimulator";
+
+# Multi-region Disaster Recovery：双机房 Failover 不重不丢
+
+**一句话：** 两个 Region 都有能力处理同一份事件时，“谁的写入算数”必须由**最终 commit 的地方**来裁决：用单调递增的 epoch（fencing token）拒绝过期的 writer，用按逻辑唯一键的幂等写入吸收接管后的重放。两个独立 Flink 作业的 checkpoint 不会协调跨 Region 的写入，两个独立的本地去重也不构成全局去重。
+
+## 为什么需要它
+
+训练样本的生产是持续的：一个 Region 整体故障几个小时，模型就几个小时学不到新数据，在线效果会逐渐下降。所以链路通常要跨 Region 部署。但只要两个 Region 都“能写”，就会出现第 06 章没有覆盖的重复和丢失：
+
+- 主 Region 处理到一半宕机，备 Region 接管，从哪里开始读？早了会重复，晚了会丢。
+- 主 Region 恢复后，不知道自己已经被取代，继续提交手里的结果（“僵尸 writer”）。
+- 网络分区时，两个 Region 都以为对方挂了，都当 writer（split brain）。
+
+## 怎么工作
+
+### Active-Passive vs Active-Active
+
+| | Active-Passive | Active-Active |
+| --- | --- | --- |
+| 正常时 | 一个 Region 处理并写入，另一个复制数据、待命 | 两个 Region 都处理，各自负责一部分 key，或都处理全部 |
+| 故障时 | 备 Region 接管，需要选主和追数据 | 另一个 Region 已在运行，接管更快 |
+| 单写者 | 天然容易保证 | 需要按 key 划分 ownership，或在最终存储处合并 |
+| 成本 | 备 Region 资源闲置 | 两份计算一直在跑 |
+| 一致性风险 | 切换瞬间 | 持续存在（两份结果如何合并） |
+
+对“每个 sample_id 只能有一行、label 按版本修正”的训练样本表来说，**逻辑上的单一写入者**（single logical writer）最容易推理：可以是 active-passive，也可以是 active-active 但每个 key 只归一个 Region 写。
+
+### Cross-region Replication
+
+要让备 Region 能接管，需要复制三样东西：
+
+1. **输入数据**：Kafka topic 跨 Region 镜像（例如 MirrorMaker 2 一类的工具）。镜像是异步的，有延迟；offset 在两个集群里不同，需要 offset 映射。
+2. **处理状态**：checkpoint / savepoint 复制到备 Region 的存储。也是异步的，所以备 Region 能拿到的“最近 checkpoint”通常**比主 Region 实际处理到的位置更早**。
+3. **去重与写入状态**：如果去重状态只在主 Region 的 Flink 作业里，备 Region 接管后看不到它。
+
+### Leader Election、Split Brain、Fencing
+
+- **Leader election**：用一个强一致的协调服务（ZooKeeper、etcd 或数据库里的租约）决定当前谁是 writer。每次换主，**epoch 加 1**。
+- **Split brain**：网络分区时旧 leader 还在运行、还在写。租约过期不能完全解决它：旧 leader 可能刚好在 GC 停顿，醒来后以为租约还有效。
+- **Fencing token / epoch**：每次写入都带上 writer 的 epoch；**最终存储**记录见过的最大 epoch，拒绝更小的。这样即使旧 leader 不知道自己被取代，它的写入也进不来。
+
+<Callout tone="warn" title="Fencing 必须在最终 Commit Authority 生效">
+只在 writer 进程里检查“我还是不是 leader”是不够的：检查和写入之间总有时间差。只有让**接收写入的那一方**比较 epoch，才能可靠地拒绝僵尸。Kafka 的事务 producer 就是这样做的：broker 记住每个 `transactional.id` 的 producer epoch，旧 epoch 的 producer 会被 fence 掉。
+</Callout>
+
+### Disaster Recovery Simulation
+
+先保持默认（没有 fencing、append-only、从复制来的 checkpoint 重放），一步一步走到最后，看最终表；再逐个打开 fencing 和唯一键，比较四种组合；最后试试“B 从最新 offset 开始”，看 RTO 更短的代价。
+
+<FailoverSimulator />
+
+四种组合的结论：
+
+| Fencing | 唯一键 upsert | 结果 |
+| --- | --- | --- |
+| ✕ | ✕ | 重复（B 重放了 A 已提交的样本），而且接受了僵尸的写入 |
+| ✓ | ✕ | 僵尸被挡住，但 B 的重放仍然造成重复 |
+| ✕ | ✓ | 行数对了，但僵尸用旧模型算的结果覆盖了 B 的结果 |
+| ✓ | ✓ | 不重、不丢、没有过期写入 |
+
+这就是为什么两样都要：**fencing 解决“谁可以写”，幂等解决“写了几次”**。
+
+### 为什么两个独立 checkpoint 不够
+
+Region A 和 Region B 的 Flink 作业各自做 checkpoint，各自保证“我的状态和我的 offset 一致”。但：
+
+- A 的 checkpoint 不知道 B 写过什么，B 的也不知道 A 写过什么；
+- A 已经提交到外部的结果，不在 B 的状态里；
+- 两个 Kafka 集群的 offset 互不相同。
+
+所以 checkpoint 解决的是**单作业内**的恢复，跨 Region 的一致性要靠外部的协调（epoch）和最终存储的约束（唯一键 + 版本）。同理，第 06 章演示过：**两个 Region 各自的本地 dedup store 加起来不等于全局去重**。要么有一个全局的 dedup authority（一个跨 Region 强一致的存储，代价是每次去重都要跨 Region 往返），要么把最终的唯一性交给最终存储。
+
+### Global Dedup Authority vs Idempotent Final Sink
+
+| | Global Dedup Authority | Idempotent Final Sink |
+| --- | --- | --- |
+| 在哪去重 | 处理之前，查一个全局存储 | 写入时，按唯一键 upsert |
+| 延迟 | 每条事件一次跨 Region 访问 | 只在写入时 |
+| 可用性 | authority 不可用时整条链路停 | 写入方各自可用 |
+| 省什么 | 省掉下游的重复计算 | 不省计算，但正确性最终有保证 |
+
+实践中常常是：本地去重省计算、最终 sink 幂等保正确、再加 fencing 防僵尸。
+
+### Replay Consistency
+
+接管后的重放要得到**和原来一样的结果**，否则“幂等覆盖”就变成了“用另一个结果覆盖”。这要求：
+
+- 处理逻辑是确定性的（不依赖墙钟时间、随机数、外部服务的当前状态）；
+- 依赖的外部数据（identity 模型、特征版本）是带版本的，重放时用同一个版本，或者把版本写进结果里让下游可以判断；
+- 输出带 revision，“新版本覆盖旧版本”的规则在两个 Region 里一致。
+
+### RPO / RTO 与“重复 vs 丢失”
+
+- **RPO（Recovery Point Objective）**：最多能接受丢多少数据（时间量）。异步复制的延迟就是 RPO 的下限。
+- **RTO（Recovery Time Objective）**：最多能接受停多久。选主、恢复状态、追上积压都算在内。
+
+两者和“重复 vs 丢失”直接相关：B 从一个**较早**的点开始读，RPO 好（不丢），但要重放更多数据（重复多、追数据慢、RTO 变长）；B 从**最新**开始读，RTO 短，但 A 没提交的数据就丢了。对训练样本，通常选择**宁可重放、靠幂等吸收重复**，因为重复可以被消掉，丢掉的 label 很难再找回来。
+
+## System Design Trade-offs
+
+**Problem → Naive → Failure → Better → Trade-off**
+
+- **Problem：** 主 Region 故障后要快速恢复样本生产。
+- **Naive：** 两个 Region 同时跑一样的作业、都往样本表 append，下游按 `sample_id` 取一行。
+- **Failure：** 两份结果用的 identity 模型版本不同，“取一行”取到哪份不确定；样本表行数翻倍，存储和训练读取成本翻倍；任何一个 Region 的 bug 都会污染样本表。
+- **Better：** 逻辑单写者 + epoch fencing + 按 `sample_id` 的 version-aware upsert；备 Region 从复制来的 checkpoint 重放，接受重复、靠幂等吸收；定期对账两个 Region 的输出。
+- **Trade-off：** 需要协调服务、带条件写入的存储，以及更长一点的 RTO；换来不重、不丢、可推理。
+
+| 选择 | 方案 A | 方案 B | 关键考虑 |
+| --- | --- | --- | --- |
+| 部署 | Active-Passive | Active-Active | 单写者的简单 vs 恢复速度与资源利用 |
+| 接管起点 | 较早的 checkpoint | 最新 offset | RPO（不丢）vs RTO（快） |
+| 跨 Region 去重 | 全局 authority | 最终 sink 幂等 | 延迟与可用性 vs 重复计算 |
+| 复制 | 同步 | 异步 | 写入延迟 vs RPO |
+
+## 面试 Follow-up
+
+- **“两个 Region Failover 时怎么保证不重复落表？”** 单一逻辑写者（epoch fencing，在最终存储处检查）+ 按逻辑唯一键幂等写入（version-aware upsert）。只有其中一个都不够。
+- **“Split brain 怎么处理？”** 租约不够，必须 fencing；最终存储拒绝旧 epoch。
+- **“为什么不在每个 Region 各自去重？”** 本地状态看不到另一个 Region 处理过什么；重放、切换时的重复会穿透。
+- **“RPO 和 RTO 你会怎么定？”** 对训练样本，倾向 RPO 接近 0（宁可重放），RTO 按模型新鲜度要求定，例如小时级；对在线服务则 RTO 优先。
+
+## 再往下看
+
+- 上一章：[Deduplication & Exactly-once](/notes/systems/ads/dedup-exactly-once/)；下一章：[Identity Experiment Platform](/notes/systems/ads/experiment-platform/)。
+- 现有笔记：[分布式系统：CAP、幂等、checkpoint](/notes/systems/distributed/core/)；[分片：跨分片一致性](/notes/systems/design/sharding/)。
+- 官方文档：[Apache Kafka：Transactions 与 Geo-Replication](https://kafka.apache.org/documentation/)；[Apache Flink：Checkpoints 与 Savepoints](https://nightlies.apache.org/flink/flink-docs-stable/)。

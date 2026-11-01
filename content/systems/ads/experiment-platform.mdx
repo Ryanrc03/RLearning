@@ -1,0 +1,166 @@
+import Callout from "@/components/visualization/sketch/Callout";
+import ReconciliationDashboard from "@/components/visualization/systems/ads/ReconciliationDashboard";
+
+# Identity Experiment Platform：Shadow、A/A、A/B 与逐层对账
+
+**一句话：** 改动 identity 匹配、归因规则或样本管道之前，要先证明“新管道在不该变的地方没变”：**Shadow** 用同一份输入跑两条管道，逐层对账找出差异第一次出现的地方；**A/A** 估计两个等价管道之间的自然波动；**A/B** 在随机分组上衡量真实效果。三种实验回答的是三个不同的问题，指标口径不能混用。
+
+## 为什么需要它
+
+前面七章的每一个参数（匹配阈值、归因窗口、label 规则、dedup TTL、join TTL、特征版本）都会改变训练数据，进而改变模型。改动它们是常态：新 identity 模型、更长的窗口、新的去重键。
+
+风险在于，训练数据的错误通常**不报错**：样本照样产出、模型照样训练、AUC 也许只差 0.5%。等到线上出价出了问题再回头查，已经分不清是哪一层、哪一次改动造成的。所以要有一套平台，在上线前用实验把问题拦住，并在出问题时快速定位。
+
+## 怎么工作
+
+### 三种实验
+
+| | Shadow | A/A | A/B |
+| --- | --- | --- | --- |
+| 输入 | 同一份流量，复制给两条管道 | 随机分成两组，两组用**相同**配置 | 随机分成两组，一组用新配置 |
+| 回答的问题 | 新管道和旧管道在每一层的输出差在哪？ | 两条等价管道之间的自然差异有多大？平台本身可信吗？ | 新配置在线上是否更好？ |
+| 能比较 sample ID 集合吗 | 能，这正是它的用途 | 不能（两组用户不同） | 不能 |
+| 影响线上吗 | 不影响（只写影子表） | 影响（但两组相同） | 影响 |
+
+### Stable Experiment Assignment
+
+分组必须**稳定**（同一个用户每次都进同一组）和**独立**（与用户特征无关、与其它实验的分组正交）：
+
+```python
+import hashlib
+
+def bucket(unit_id: str, experiment_salt: str, buckets: int = 10_000) -> int:
+    # 不用 Python 内置 hash()：它在不同进程之间会加随机盐，结果不稳定
+    digest = hashlib.sha256(f"{experiment_salt}:{unit_id}".encode()).digest()
+    return int.from_bytes(digest[:8], "big") % buckets
+
+def assign(unit_id: str) -> str:
+    return "treatment" if bucket(unit_id, "idm_v2_2026_10") < 5_000 else "control"
+```
+
+要提前想清楚**分组单位**：按用户分，同一个用户的点击和转化落在同一组；如果按请求分，一个用户的点击在 A 组、转化却在 B 组的管道里被处理，两组的 label 都不对。
+
+### Sample Ratio Mismatch（SRM）
+
+设计 50/50，实际 48/52，是运气还是 bug？用卡方检验（或等价的二项检验）看实际比例偏离设计比例的程度。SRM 显著，说明分组或者分组之后的某一步**有选择性地丢了数据**（例如一组的日志上报更容易失败），下游的任何指标比较都不可信，必须先修复。
+
+### Shadow 的逐层对账指标
+
+对 Shadow 实验，两条管道看到的是同一批事件，所以可以在每一层直接比较集合：
+
+$$
+D_{\mathrm{sample}} = \frac{|S_A \,\triangle\, S_B|}{|S_A \cup S_B|}
+$$
+
+$S_A$、$S_B$ 是两条管道在同一层输出的逻辑记录 ID 集合，$\triangle$ 是对称差。$D_{\mathrm{sample}} = 0$ 表示两边的记录完全相同。
+
+$$
+D_{\mathrm{label}} = \frac{\#\{\, i \in S_A \cap S_B : y_i^A \ne y_i^B \,\}}{|S_A \cap S_B|}
+$$
+
+在两边都有的样本里，label 不一样的比例。
+
+<Callout tone="warn" title="这两个公式只适用于同输入的成对对账">
+$D_{\mathrm{sample}}$ 和 $D_{\mathrm{label}}$ 要求两边处理的是**同一批输入**（Shadow、或同一份数据的重算）。随机 A/B 的两组本来就是不同的用户，sample ID 集合不可能一样，用这两个指标要求它们一致是错误的。同样，**不同算法的 A/B 也不能强行要求输出 label 数量相同**：新的 identity 模型匹配上更多转化、产生更多正样本，可能正是它的效果。
+</Callout>
+
+另外几个常用指标：
+
+- **Sample Count Diff**：每层的数量差。最便宜，但**数量一样不代表集合一样**：一个 bug 丢了 100 条、另一个 bug 多出 100 条，count 完全相等。
+- **Label Mismatch**：即 $D_{\mathrm{label}}$，按 label 规则、匹配方式分层看。
+- **Feature Distribution Drift**：样本和 label 都一样，特征分布却变了（例如读错了特征版本）。用 PSI、KS 或简单的均值 / 分位数对比。
+- **AUC Diff**：最终模型的离线指标差。它是**结果**，不是诊断：知道 AUC 差了，不知道差在哪一层。
+
+### Stage-by-stage Reconciliation
+
+**如果两个等价 Pipeline 训练出来的模型 AUC 差异很大，该如何定位？** 从上往下逐层对账，找到差异**第一次**出现的地方：
+
+```text
+Experiment Assignment     用户集合一样吗？SRM？
+        │
+Event Collection          收到的消息集合一样吗？
+        │
+Deduplication             逻辑事件集合一样吗？重复率一样吗？
+        │
+Identity Matching         匹配上的转化集合一样吗？
+        │
+Attribution               归因结果一样吗？
+        │
+Flink Join                写出的正样本一样吗？迟到 / 过期比例？
+        │
+Training Sample Table     样本集合、label 一样吗？
+        │
+Model Training            特征分布、训练配置一样吗？
+        │
+AUC Evaluation            差值是否超出 A/A 波动？
+```
+
+第一处出现差异的层就是嫌疑最大的地方；它下游的每一层都会**继承**这个差异，所以不要从 AUC 往上猜。
+
+<ReconciliationDashboard />
+
+在看板里可以观察到几个典型现象：
+
+- **“candidate 的 identity 模型”**：匹配数量只差 1，但集合差接近 40%，AUC 差还在 A/A 波动范围内。只看 count 或只看 AUC，都会以为没问题。
+- **“join TTL 只有 30 分钟”**：样本表行数完全一样，$D_{\mathrm{sample}} = 0$，但 $D_{\mathrm{label}} > 0$：一批 label 从 1 变成了 0。
+- **“读了旧版特征”**：所有数据层都一致，差异只在训练阶段的特征分布上。
+- 切到 **A/B 模式**：集合指标全部“不适用”，只有 SRM 能直接判断分组是否坏了；其余差异要回到 Shadow 才能定位。
+
+点“开始排查挑战”，场景会被隐藏，只根据表里的指标判断问题出在哪一层。
+
+### A/A：AUC Diff 不要求为零
+
+两个配置完全相同的管道，训练出的模型 AUC 也不会完全相等：参数初始化、数据读取顺序、评估集的抽样都会带来波动。正确的做法是：
+
+1. 多次运行 A/A（或对评估集做 bootstrap），得到 AUC 差的经验分布；
+2. 用它的分位数作为“正常波动范围”；
+3. 新管道的 AUC 差落在范围内，不能说明“完全没变”，只能说明“这个指标上看不出变化”；结合逐层对账一起判断。
+
+### Versioning、Rollback 与 Quality Gates
+
+- **版本**：identity 模型、归因规则、label policy、dedup 配置、特征版本、样本表 schema 都要有版本，并写进每条样本（`label_policy`、`feature_version`、`model_version`）。否则出了问题无法知道一条样本是用哪套配置产出的。
+- **Rollback**：配置回滚要能重新产出旧版本的样本；因为样本表按 `sample_id` 幂等写入，可以用旧配置重算一段时间、覆盖写回。
+- **Quality Gates**：上线流程里的自动检查，例如：
+  - Shadow 对账：每层 $D_{\mathrm{sample}}$ 小于阈值，或差异全部能被预期的改动解释；
+  - 无 SRM；
+  - 重复率、未匹配率、迟到率在历史范围内；
+  - 离线 AUC 差不劣于 A/A 波动下界；
+  - 小流量 A/B 的线上指标（花费、转化、校准）没有显著变差。
+
+### Shared vs Isolated Pipelines
+
+Shadow 管道要不要和生产共享 Kafka、Flink 集群、状态存储？
+
+- **共享**：省资源，但 shadow 作业的负载会拖慢生产，影子表写错了也可能污染生产数据；两条管道共享某个有 bug 的组件时，对账会“一致地错”，看不出来。
+- **隔离**：独立的 consumer group、独立的作业、独立的输出表，干扰小、结果可信，成本高。
+
+一般至少做到：独立的 consumer group 和输出位置，生产表对 shadow 作业只读。
+
+## System Design Trade-offs
+
+**Problem → Naive → Failure → Better → Trade-off**
+
+- **Problem：** 新的 identity 模型要上线，怎么证明它没把训练数据弄坏？
+- **Naive：** 直接 A/B，看线上转化和离线 AUC。
+- **Failure：** AUC 涨了一点、线上转化也涨了，上线。两周后发现新模型的正样本里混入了大量错配，模型学会了给某类流量高估 CVR，花费上涨、广告主 ROI 下降。A/B 无法告诉你数据层面哪里变了。
+- **Better：** 先 Shadow 跑一周，逐层对账，解释每一处差异（预期的、非预期的）；跑 A/A 确认平台波动；再小流量 A/B，配合校准与花费等护栏指标；全程带版本，可回滚。
+- **Trade-off：** 上线更慢、多一倍的计算和存储；换来可解释、可回滚的变更。
+
+| 选择 | 方案 A | 方案 B | 关键考虑 |
+| --- | --- | --- | --- |
+| 验证方式 | 只做 A/B | Shadow → A/A → A/B | 速度 vs 可定位性 |
+| 对账粒度 | 只比 count | 比集合与 label | 便宜 vs 能发现“数量相同、内容不同” |
+| 管道资源 | 共享 | 隔离 | 成本 vs 实验可信度 |
+| AUC 判断 | 要求差为 0 | 对比 A/A 波动 | 不可能达到 vs 统计上合理 |
+
+## 面试 Follow-up
+
+- **“两个等价 pipeline 的 AUC 差很大，你怎么查？”** 先确认是不是超出 A/A 波动；再从 assignment 开始逐层对账，比 count、集合差、label 差、特征分布，找第一处差异；然后看那一层的配置和版本差异。
+- **“为什么 sample count 一样还不够？”** 不同的 bug 可以互相抵消；要比集合（$D_{\mathrm{sample}}$）和 label（$D_{\mathrm{label}}$）。
+- **“A/B 里能用 D_sample 吗？”** 不能，两组用户不同。A/B 用 SRM 检查分组，用 rate 和线上指标衡量效果；定位数据问题用 Shadow。
+- **“A/A 的 AUC 差应该是 0 吗？”** 不是，训练和评估都有随机性；用多次 A/A 或 bootstrap 估计正常波动范围。
+
+## 再往下看
+
+- 上一章：[Multi-region Disaster Recovery](/notes/systems/ads/multi-region-dr/)；回到 [系列总览](/notes/systems/ads/overview/)。
+- 现有笔记：[A/B Testing：差异是真的还是运气](/notes/ml/ab-testing/overview/)；[ROC 与 AUC](/notes/ml/evaluation/roc-auc/)；[GAUC 与 paired bootstrap](/notes/ml/recsys/gauc-paired-bootstrap/)；[A/B 实验分析平台（SRM 检查）](/notes/systems/design/ab-testing-analytics-platform/)。

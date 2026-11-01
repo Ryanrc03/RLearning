@@ -1,0 +1,97 @@
+import Callout from "@/components/visualization/sketch/Callout";
+import SignalMergeViz from "@/components/visualization/systems/ads/SignalMergeViz";
+
+# Signal Collection & Ingestion：转化信号从哪里来
+
+**一句话：** Signal Collection 把来自浏览器、服务器、App 和第三方的广告事件，校验、过滤（consent）、规范化之后，以“至少一次”的语义可靠地写进消息队列；它最重要的认知是 **两条 message 不一定是两个业务 event**，判断依据是广告主在各渠道传入的同一个稳定 `event_id`。
+
+## 为什么需要它
+
+广告平台要学 CVR，需要两类信号：
+
+- **平台内的触点**：impression（曝光）、click（点击）。平台自己产生，自己记录，相对干净。
+- **平台外的转化**：purchase、add to cart、注册、App 安装、付费……发生在广告主那边，必须由广告主“回传”。
+
+转化回传之所以要单独做成一层系统，是因为它天然具有四个问题：**来源多**（同一转化从几条路进来）、**不可靠**（浏览器拦截、网络失败、重试）、**格式乱**（不同版本的 SDK、不同广告主的字段习惯）、**受限制**（不是所有数据都允许用于广告衡量）。
+
+## 四类数据来源
+
+| 来源 | 在哪运行 | 优点 | 典型问题 |
+| --- | --- | --- | --- |
+| **Pixel**（JS 代码） | 用户浏览器 | 接入简单，能直接拿到落地页 URL 上带回的 click_id | 被广告拦截插件、浏览器隐私策略拦截；页面没加载完就关掉 |
+| **Events API**（服务器回传） | 广告主服务器 | 不依赖浏览器，可靠；能带订单金额、经同意的哈希邮箱等服务端字段 | 需要广告主工程接入；延迟可能更高；字段质量取决于广告主 |
+| **SDK** | 广告主 App | App 内事件、设备层面信息 | 版本碎片化，批量上报导致延迟 |
+| **MMP**（Mobile Measurement Partner） | 第三方归因平台 | 帮广告主统一对接多个广告平台 | 又多一跳；口径由第三方决定 |
+
+客户端（Pixel、SDK）覆盖面广但不可靠；服务端（Events API）可靠但需要接入成本。所以很多广告平台都**建议广告主同时接 Pixel 和 Events API**，再由平台按事件 ID 去重。TikTok、Meta 等的公开文档都描述了这种“双路上报 + 去重”的做法；具体的去重键、窗口和保留规则以各自官方文档为准。
+
+## 怎么工作：同一次购买，从两条路进来
+
+<SignalMergeViz />
+
+看这个例子时，把注意力放在 **dedup key 从哪里来**。Pixel 和 Events API 是两套独立代码，平台没法从“两条消息长得像”来推断它们是同一次购买（同一个人可能真的在 10:30 下了两单同样的订单）。唯一可靠的办法是：**广告主在生成订单时就产生一个 `event_id`，并在两条路径上都传同一个值。**
+
+### 三个时间
+
+每条事件至少要区分三个时间：
+
+| 字段 | 含义 | 谁决定 | 用途 |
+| --- | --- | --- | --- |
+| `event_time` | 业务事件真正发生的时间 | 客户端 / 广告主 | 归因窗口、label window、按事件时间 join |
+| `receive_time` | 平台 collector 收到的时间 | 平台 | 监控上报延迟、检测时钟异常 |
+| processing time | 下游算子处理它的时间 | 运行时 | 只用于系统内部（超时、TTL） |
+
+`event_time` 来自客户端，可能被设错时区、被篡改、或远在未来。collector 通常会做合理性检查：比 `receive_time` 晚太多、或早于可接受范围的事件要么修正、要么标记、要么拒绝。
+
+### Collector 的流水线
+
+1. **Authentication & rate limiting**：确认是哪个广告主的哪个 pixel / app，防滥用。
+2. **Schema validation**：必填字段、类型、枚举值；按 `schema_version` 兼容旧格式。坏数据进 dead letter，不阻塞主流。
+3. **Consent & privacy eligibility**：用户是否同意、所在地区的规则、广告主的数据使用限制。不合格的事件**在这里**就不进入匹配、归因和训练，因为下游每一层都可能复制、缓存这条数据。
+4. **Normalization**：时间统一 UTC、货币代码大写、邮箱 trim + lowercase 后再哈希、URL 参数解析出 click_id。
+5. **Data minimization**：下游不需要的字段在入口就丢掉，而不是“先存着说不定有用”。
+6. **Dedup key 生成**：例如 `{pixel_id}:{event_name}:{event_id}`。
+7. **可靠写入消息队列**。
+
+<Callout tone="warn" title="哈希不是匿名化">
+把邮箱做 SHA-256 只是让原文不以明文流转。它仍然是能关联到个人的标识符，使用范围必须受 consent 和平台政策约束。
+</Callout>
+
+### 可靠写入 Kafka / ByteMQ
+
+collector 给客户端返回 200 的时机决定了丢数据的风险：
+
+- **先回 200，再异步写队列**：响应快，但 collector 进程崩了，内存里没写出去的事件就丢了。
+- **写入队列并确认后再回 200**：在 Kafka 里通常意味着 `acks=all` 加合适的 `min.insync.replicas`，代价是多一点延迟。
+
+客户端收到超时会**重试**，于是同一条事件可能被写入两次。所以 ingestion 的现实语义是 **at-least-once**：宁可重复，也不丢，重复留给后面按 `event_id` 去重。Kafka 的 idempotent producer 只能消除“同一个 producer 会话内、因 broker 确认丢失导致的重复写入”，挡不住客户端重新发起的请求，也挡不住 Pixel 和 Events API 这种两条完全独立的路径。
+
+## System Design Trade-offs
+
+**Problem → Naive → Failure → Better → Trade-off**
+
+- **Problem：** 同一转化从 Pixel 和 Events API 各来一次，怎么不数两遍？
+- **Naive：** 按 `(user, advertiser, event_name, value)` 在一分钟内去重。
+- **Failure：** 用户 10:30 真的连下两单同样金额的订单，第二单被误删；而 Pixel 晚到 90 秒的那条又没被去掉。业务字段相似 ≠ 同一事件。
+- **Better：** 要求广告主在两条路径传同一个 `event_id`，dedup key 用 `{pixel_id}:{event_name}:{event_id}`，并规定去重窗口（例如 48 小时）。缺 `event_id` 的事件单独计数、告警，推动广告主修复接入。
+- **Trade-off：** 正确性依赖广告主的接入质量；去重窗口越长状态越大。
+
+| 选择 | 方案 A | 方案 B | 关键考虑 |
+| --- | --- | --- | --- |
+| 回 200 的时机 | 先回再写：低延迟 | 写入确认后再回：不丢 | 客户端会重试，所以 B 的重复可以被下游吸收 |
+| 坏数据 | 直接丢 | 进 DLQ + 指标 | DLQ 要有人看、有告警，否则只是慢一点地丢 |
+| Consent 检查位置 | 训练前过滤 | 入口过滤 | 越晚过滤，副本越多，合规风险越大 |
+| 字段保留 | 全存 | 最小化 | 数据最小化是隐私原则，也降低存储成本 |
+
+## 面试 Follow-up
+
+- **“Pixel 和 Events API 为什么会发送同一事件？”** 因为平台建议广告主两路都接：客户端覆盖面广但会被拦截，服务端可靠但接入成本高；两路互为备份，再靠同一个 `event_id` 去重。
+- **“没有 event_id 怎么办？”** 不要用模糊规则硬猜，计入“不可去重”的指标，可能单独标记降权，并推动接入修复。猜错的代价是删掉真实订单或重复计数。
+- **“event_time 能信吗？”** 只能有限地信：做合理性检查，同时保留 `receive_time`；下游按事件时间处理时要能容忍乱序和迟到（第 05 章的 watermark）。
+- **“为什么 ingestion 不做 exactly-once？”** 客户端重试和多路上报让入口天然是 at-least-once；exactly-once 是在下游按业务键去重和幂等写入实现的（第 06 章）。
+
+## 再往下看
+
+- 上一章：[Ads Backend Overview](/notes/systems/ads/overview/)；下一章：[Identity Resolution](/notes/systems/ads/identity-resolution/)。
+- 现有笔记：[消息队列：至多一次、至少一次、恰好一次](/notes/systems/design/message-queue/)；[分布式系统：带请求 ID 的安全重试](/notes/systems/distributed/core/)。
+- 官方文档：[Apache Kafka Documentation](https://kafka.apache.org/documentation/)（producer `acks`、idempotence）；TikTok for Business 的 Events API 与 Event Deduplication 公开文档。

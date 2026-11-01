@@ -1,0 +1,112 @@
+import Callout from "@/components/visualization/sketch/Callout";
+import MatchingPlayground from "@/components/visualization/systems/ads/MatchingPlayground";
+
+# Identity Resolution：两个事件是不是同一个人
+
+**一句话：** Identity Resolution 回答“这次转化和那个广告触点，是不是同一个人做的”；确定性匹配靠共享的标识（click_id 回传、经同意的哈希邮箱）给出近似确定的答案，概率匹配给出一个带置信度的**判断**而不是身份证明；阈值决定了 precision 和 coverage 之间的取舍，而错配和漏配会直接变成错误的归因和错误的 label。
+
+<Callout tone="warn" title="隐私边界">
+本章讨论的所有匹配信号，都假定在用户同意、当地法律和平台政策允许的范围内使用。很多平台明确禁止用设备指纹等手段跨应用追踪用户（例如 Apple 的 App Tracking Transparency 政策）。“技术上能匹配”不等于“允许匹配”。
+</Callout>
+
+## 为什么需要它
+
+第 01 章收到的 `event_501` 来自广告主网站，它带的是广告主侧的信息：订单号、也许有落地页 URL 上带回的 click_id、也许有经同意的哈希邮箱。平台侧的 `click_101` 记录的是平台用户和广告。两边**没有天然共享的主键**。
+
+不做匹配，转化就挂不到任何点击上：报表里没有转化，CVR 训练数据里也全是 0。匹配做错，问题更隐蔽：转化挂到了错误的点击上，报表和 label 都看起来“正常”，只是错的。
+
+## 怎么工作
+
+### 确定性匹配 vs 概率匹配
+
+| | Deterministic Matching | Probabilistic Matching |
+| --- | --- | --- |
+| 依据 | 双方共享的标识：click_id 回传、经同意的登录态或哈希邮箱 / 手机号 | 多个弱信号的组合：时间接近、同一落地页、粗粒度地区、浏览器家族…… |
+| 输出 | “是同一个” | “是同一个”的概率 / 分数 |
+| 典型 precision | 很高（但也会错：共享设备、填错邮箱） | 取决于阈值 |
+| 覆盖率 | 受接入质量限制 | 能覆盖更多转化 |
+| 风险 | 标识被复用、泄露 | 错配、隐私与政策风险 |
+
+实际系统一般**确定性优先**：能确定性匹配的就不跑概率模型；概率匹配只作为补充，并且记录 `match_method`、`confidence`、`model_version`，让下游知道这个结论有多可靠。
+
+### Candidate Generation / Blocking
+
+一个转化不可能和全平台所有点击两两比较。先用便宜的条件筛出少量候选（blocking）：
+
+- 同一广告主；
+- 转化前的一段时间内（例如归因窗口）；
+- 其它能大幅缩小范围、且允许使用的条件。
+
+blocking 太紧会漏掉真实的候选（召回上限就被锁死了），太松会让打分阶段的计算量爆炸。
+
+### 打分与阈值
+
+对每个候选算一个分数，分数 ≥ 阈值才接受。下面的 playground 里，8 个转化、12 个候选，拖动阈值观察三个指标：
+
+- **Precision**：接受的匹配里有多少是对的。
+- **Recall**：所有真匹配里找回了多少。
+- **Coverage**：有至少一个匹配的转化占比。这是业务方最常看的数字，但它高不代表对。
+
+<MatchingPlayground />
+
+<Callout tone="note" title="toy 里的“真值”在现实中拿不到">
+playground 可以直接算 precision，是因为数据是编的、真值已知。真实系统里，precision 只能用抽样人工核验、带确定性标识的子集做“留出验证”、或对照实验来估计。这也是为什么第 08 章需要 Shadow 和 A/A 实验来验证 identity 模型的改动。
+</Callout>
+
+### 错误怎样流到下游
+
+| 错误 | 对归因的影响 | 对 CVR label 的影响 |
+| --- | --- | --- |
+| **False Positive**（错配） | 功劳记给了无关的广告，报表虚高；广告主可能为没带来转化的广告付费 | 一个没带来转化的 click 得到 label 1：正样本被污染 |
+| **False Negative**（漏配） | 真实转化不归因，报表偏低，出价系统低估广告价值 | 带来转化的 click 得到 label 0：模型系统性低估 CVR |
+
+两种错误的代价不对称，所以阈值不是一个纯技术参数，而是一个业务决策：计费相关的报表更怕错配；而训练数据有时可以接受稍低的 precision 换覆盖率，但必须**按 confidence 分层监控**，不能把概率匹配和确定性匹配的 label 混在一起看不出来源。
+
+### Identity Graph
+
+把多次确定性匹配的结果连起来，就得到一张图：节点是各种标识（平台账号、哈希邮箱、设备、广告主侧用户 ID），边是“曾经被确定性地关联过”。查询时沿着图找候选。
+
+图带来的新问题：
+
+- **传递错误**：A–B 对、B–C 错，A 和 C 就被错误地连在一起。大连通分量（一个“超级节点”连着成千上万个标识）通常意味着共享设备、测试账号或脏数据，需要拆分或截断。
+- **时效与删除**：用户撤回同意或要求删除时，相关边要能被删除并传播到下游。
+- **版本**：图在变化，同一个转化今天和明天的匹配结果可能不同，所以 `IdentityMatch` 要带 `model_version`，下游的 attribution 要能被 revision。
+
+```json
+{
+  "conversion_id": "event_501",
+  "candidate_touchpoint_id": "click_101",
+  "match_method": "deterministic:click_id",
+  "confidence": 1.0,
+  "model_version": "idm_2026_10"
+}
+```
+
+## System Design Trade-offs
+
+**Problem → Naive → Failure → Better → Trade-off**
+
+- **Problem：** 很多转化没有 click_id，怎么提高匹配覆盖率？
+- **Naive：** 上一个概率模型，阈值调低，coverage 从 40% 涨到 85%，看板一片绿。
+- **Failure：** 新增的匹配里有相当一部分是错配。报表转化数虚高；CVR 模型的正样本被污染，线上出价偏高。因为没有真值，问题很久之后才被广告主投诉发现。
+- **Better：** 确定性优先；概率匹配单独标记 `match_method` 和 `confidence`；用确定性子集做留出验证估计 precision；新模型先 Shadow 跑、再 A/A、再 A/B（第 08 章）；对 label 按匹配方式分层监控。
+- **Trade-off：** 更慢上线、更多基础设施，换来可度量、可回滚的匹配质量。
+
+| 选择 | 方案 A | 方案 B | 关键考虑 |
+| --- | --- | --- | --- |
+| 阈值 | 高：precision 高 | 低：coverage 高 | 错配与漏配谁更贵 |
+| 匹配粒度 | 每个转化只取最佳候选 | 保留多个候选及置信度 | 后者给归因更多信息，但下游更复杂 |
+| 图的构建 | 激进地传递合并 | 只用直接的确定性边 | 召回 vs 错误传播 |
+| 结果存储 | 只存最终匹配 | 存候选 + 版本 | 可回溯、可 revision vs 存储成本 |
+
+## 面试 Follow-up
+
+- **“如何判断两个事件属于同一个用户？”** 先确定性（共享标识），再概率（多信号打分 + 阈值），并说明 blocking、置信度、版本，以及都要在 consent 和平台政策范围内。
+- **“你怎么知道概率匹配的 precision？”** 用确定性匹配的子集当留出集（隐藏标识后看模型能否找回）、人工抽样核验、以及 Shadow 实验对比新旧模型差异；明确说这些都是估计。
+- **“Coverage 提高了 20%，是好事吗？”** 不一定：要看新增匹配的 precision；还要看对下游 label 分布、模型校准和广告主报表的影响。
+- **“用户撤回同意怎么办？”** 匹配图、归因结果、训练样本都要能定位并删除或停止使用相关数据，这要求各层都保存可追溯的键和版本。
+
+## 再往下看
+
+- 上一章：[Signal Collection](/notes/systems/ads/signal-collection/)；下一章：[Attribution & Label Generation](/notes/systems/ads/attribution-labels/)。
+- 现有笔记：[Precision、Recall 与 F1](/notes/ml/evaluation/precision-recall-f1/)：阈值移动时两者为什么此消彼长。

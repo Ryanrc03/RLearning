@@ -1,0 +1,118 @@
+import Callout from "@/components/visualization/sketch/Callout";
+import PartitionViz from "@/components/visualization/systems/ads/PartitionViz";
+
+# Streaming Data Architecture：Kafka / ByteMQ 与 Joiner
+
+**一句话：** Kafka 一类的分区日志把 click、conversion、特征快照这些**来自不同 topic、速度不同**的事件持久化下来，并保证同一个 key 在同一个 partition 内有序、可以按 offset 重放；Streaming Joiner 按业务 key 和时间约束把它们拼在一起。partition key 决定了 join 能不能在本地完成，consumer lag 则直接变成训练数据的延迟。
+
+<Callout tone="note" title="关于 ByteMQ">
+本章按 Apache Kafka 公开文档的语义来讲。ByteMQ 在这里只作为“同类的分区日志型消息队列”的例子出现，不描述它的任何内部实现。
+</Callout>
+
+## 为什么需要它
+
+到这一步，系统里有好几股数据流：
+
+- **clicks**：平台自己产生，量最大；
+- **conversions**：第 01 章去重后的转化，量小但会迟到；
+- **attribution results**：第 02、03 章的产出，会被修正；
+- **feature snapshots**：点击那一刻的用户、广告、上下文特征。
+
+它们由不同的系统、以不同的速度产生。如果让 identity、attribution、样本构建、监控、报表这些下游直接互相调用，任何一个慢了或者挂了都会拖垮上游。中间放一层持久化的消息队列，换来三件事：**解耦**（下游各读各的）、**缓冲**（下游慢了先积压，不丢）、**重放**（下游出 bug 修好后可以从某个 offset 重新算）。
+
+## 怎么工作
+
+### Topic、Partition、Offset、Consumer Group
+
+- **Topic**：一类消息，例如 `ads.clicks`、`ads.conversions`。
+- **Partition**：topic 被切成多个有序的日志分片，是并行和有序的单位。**Kafka 只保证单个 partition 内的顺序**，不保证跨 partition。
+- **Offset**：消息在 partition 里的位置。consumer 记录自己读到哪个 offset；回退 offset 就是重放。
+- **Consumer Group**：一组 consumer 共同消费一个 topic，每个 partition 同一时刻只分给组里的一个 consumer。所以**分区数是一个组的并行度上限**。不同的组（训练、监控、报表）各记各的 offset，互不影响。
+- **Retention**：消息按时间或大小保留，不因被读过而删除。重放的上限就是 retention。
+
+### Partition Key：决定了 join 在哪里发生
+
+producer 按 key 的哈希选 partition，相同 key 永远进同一个 partition。key 怎么选，直接决定 Joiner 好不好做。
+
+<PartitionViz />
+
+三种 key 的对比：
+
+| Partition key | 负载 | 同一用户的事件 | 对 Joiner 的影响 |
+| --- | --- | --- | --- |
+| `user_id` | 一般均匀（除非有超级用户 / 机器人） | 同一 partition、有序 | 若 clicks 与 conversions 两个 topic 用同样的 key、分区数和分区函数，同号 partition 可以交给同一个 join 实例，本地完成（co-partitioning） |
+| `event_id` | 最均匀 | 打散到各处 | join 前必须按 user 重新分区（Flink 的 `keyBy`，一次网络 shuffle） |
+| `advertiser_id` | 大广告主形成热点 | 同一广告主的在一起 | 热 partition 只能被一个 consumer 读，lag 堆积 |
+
+<Callout tone="warn" title="分区数不要随便改">
+默认分区器是 `hash(key) mod 分区数`。给 topic 加 partition 会改变 key 到 partition 的映射：扩容那一刻前后，同一个 key 的消息可能落在两个 partition，顺序和 co-partitioning 都会被打破。需要提前规划分区数，或者用迁移方案。
+</Callout>
+
+### Ordering Guarantees
+
+即使在一个 partition 内，producer 端的重试也可能打乱顺序，除非开启 idempotent producer（它在保证不重复的同时也保持单 partition 内的顺序）。更重要的是：**消息到达顺序不等于业务发生顺序**。转化可能比它对应的点击先到 Joiner（点击日志走了另一条更慢的路），所以 Joiner 不能假设“先来的就是先发生的”，而要按 `event_time` 处理（第 05 章）。
+
+### Consumer Lag 与训练数据新鲜度
+
+**Consumer lag** = partition 最新 offset − consumer 已提交的 offset。lag 持续增长说明处理速度跟不上写入速度。上面的图里有两个容易忽略的点：
+
+1. **总容量够，不代表每个 partition 都够。** 按广告主分区时，热 partition 一个 consumer 处理不过来，别的 consumer 再闲也帮不上忙。
+2. **一个慢 partition 拖住所有人。** 下游按事件时间推进时（watermark），一个算子的进度取它所有输入里**最慢**的那个。于是一个热 partition 的积压，会让整条 join 的输出都变旧。
+
+Pipeline 的 **Data Freshness SLA** 通常定义为“事件发生到对应样本可被训练读取”的延迟分位数，例如 p99 小于 30 分钟（provisional 样本）。consumer lag、join 等待和 checkpoint 间隔都会计入这个延迟。
+
+### Backpressure、Retry、Replay、DLQ
+
+- **Backpressure**：下游慢时，Flink 会通过有限的网络缓冲让上游自然减速；对 Kafka source 来说表现为读取变慢、lag 增长，而不是丢数据。lag 是告警和扩容的信号。
+- **Retry**：处理失败的消息原地重试几次。要注意不能无限重试卡住整个 partition 的后续消息。
+- **Dead Letter Queue**：重试 n 次仍失败（格式坏、引用的数据已删除），移到 DLQ，主流继续；DLQ 必须有告警和处理流程。
+- **Replay**：修复 bug 后把 consumer group 的 offset 回退到出问题之前，重算。前提是**下游写入是幂等的**，否则重放会产生重复（第 06 章）。
+
+### Streaming Joiner 的输入和输出
+
+```text
+输入：
+  ads.clicks           key=user_id   {click_id, user, ad, event_time, ...}
+  ads.conversions      key=user_id   {event_id, user, advertiser, event_time, value, ...}
+  ads.attribution      key=user_id   {conversion_id, touchpoint_id, policy, credit, revision}
+  features.snapshots   key=click_id  点击时刻的特征（或在 join 时查询 point-in-time 特征服务）
+
+Join 条件：
+  同一 user（或 attribution 给出的 touchpoint_id = click_id）
+  click.event_time <= conversion.event_time <= click.event_time + label_window
+
+输出：
+  ads.cvr_samples      key=sample_id {sample_id, click_id, features, label, label_status, label_revision}
+```
+
+为什么要做 Streaming Join，而不是每天跑一次批处理？因为新广告、新流量每小时都在变，模型越早学到越好；批处理可以作为兜底，周期性地重算成熟的样本，修正流式结果（第 05 章的 backfill）。
+
+## System Design Trade-offs
+
+**Problem → Naive → Failure → Better → Trade-off**
+
+- **Problem：** clicks 和 conversions 两个 topic 要按用户 join。
+- **Naive：** 两个 topic 都按 `event_id` 分区，负载最均匀；join 时每条转化去一个外部 KV 里查这个用户的点击。
+- **Failure：** 每条转化一次远程查询，峰值时 KV 被打爆；查询结果和流里的点击不在同一个一致的时间点上，迟到的点击查不到；故障重放时外部 KV 的状态和 offset 不一致。
+- **Better：** 两个 topic 按 `user_id` co-partition，或者在 Flink 里 `keyBy(user_id)` 后用 keyed state 保存点击，状态随 checkpoint 一起快照，和 offset 一致。
+- **Trade-off：** 状态大小、热点用户、分区数难改；换来 join 局部化、恢复一致。
+
+| 选择 | 方案 A | 方案 B | 关键考虑 |
+| --- | --- | --- | --- |
+| 分区数 | 少：开销低 | 多：并行度上限高 | 改分区数会打乱 key 映射 |
+| Partition key | 业务 key（user） | 随机 / event_id | join 局部性 vs 负载均衡 |
+| 处理失败 | 原地重试 | 进 DLQ | 顺序 vs 不阻塞 |
+| Retention | 短：省存储 | 长：可重放更久 | 重放窗口要覆盖“发现 bug 需要的时间” |
+
+## 面试 Follow-up
+
+- **“为什么要 Streaming Join？”** click、conversion、特征来自不同 topic、不同速度；要按业务 key 和时间约束关联，并且足够快地产生训练样本。
+- **“Partition key 怎么选？”** 按 join key 选，并检查热点；说出 co-partitioning 的三个条件（同 key、同分区数、同分区函数）。
+- **“consumer lag 怎么影响模型？”** lag → 样本延迟 → 模型学的是旧流量；而且 watermark 取最慢输入，一个慢 partition 拖累整体。
+- **“热点怎么办？”** 加 salt 拆热 key（join 时要能合并）、对超大广告主单独路由、提高该 partition 的处理能力，或者在热点之前先做预聚合。
+
+## 再往下看
+
+- 上一章：[Attribution & Label Generation](/notes/systems/ads/attribution-labels/)；下一章：[Flink & Streaming Training](/notes/systems/ads/flink-streaming-training/)。
+- 现有笔记：[消息队列](/notes/systems/design/message-queue/)；[数据基础设施：Kafka vs 消息队列、Spark vs Flink](/notes/systems/data/overview/)；[分布式系统：背压](/notes/systems/distributed/core/)。
+- 官方文档：[Apache Kafka Documentation](https://kafka.apache.org/documentation/)（topics、partitions、consumer groups、delivery semantics）。

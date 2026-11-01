@@ -1,0 +1,138 @@
+import Callout from "@/components/visualization/sketch/Callout";
+import DedupSimulator from "@/components/visualization/systems/ads/DedupSimulator";
+import RevisionSinkViz from "@/components/visualization/systems/ads/RevisionSinkViz";
+
+# Deduplication & Exactly-once：重复从哪来、在哪挡
+
+**一句话：** 广告链路里有四种不同的重复：事件重复、处理重复、归因重复、训练样本重复。每一种都要用**它那一层的业务唯一键**和**明确的时间范围**来挡；Flink 的 exactly-once 只覆盖它自己的状态，**不自动覆盖外部 sink**；而 label 修正不是重复，不能用“主键冲突就丢”来处理。
+
+## 为什么需要它
+
+回到统一案例：`event_501` 被 Pixel 报了一次、被 Events API 报了一次、又被 Region B 重放了一次。如果每一次都一路流到底：
+
+- 报表里一次购买变成三次转化，广告主被多收费；
+- 训练表里 `click_101` 的正样本出现三行，模型把它学了三遍，正样本率虚高，预测值偏高；
+- 出价系统根据偏高的 pCVR 多出价，花掉更多预算。
+
+而且这些重复是**必然**的：第 01 章的客户端重试、第 05 章的 checkpoint 恢复、第 07 章的跨 Region 重放，都是 at-least-once 系统的正常行为。问题不是“如何不产生重复”，而是“在哪一层、用什么键把它吸收掉”。
+
+## 怎么工作
+
+### 四种重复
+
+| 重复类型 | 来源 | 逻辑唯一键（示例） | 在哪挡 |
+| --- | --- | --- | --- |
+| **Event Duplicate** | 多路上报、客户端重试、producer 重试 | `px_7:Purchase:event_501` | ingestion 后的 stateful dedup |
+| **Processing Duplicate** | 作业从 checkpoint 恢复后重放；跨 Region 重放 | 同一条输入的处理结果 | 事务性 sink 或幂等 sink |
+| **Attribution Duplicate** | 同一转化在同一规则下被归因多次 | `attr:event_501:last_click_7d` | 归因结果表的唯一键 |
+| **Training Sample Duplicate** | 上面任何一层漏过来的重复；同一 click 被写多行 | `s:cvr:click_101:lp_v3` | 样本表的唯一键 + 版本 |
+
+<Callout tone="warn" title="三个 ID 不能混用">
+`event_id` 是转化级的；归因键是“转化 × 规则”；`sample_id` 是“点击 × 任务 × label 规则”。用 `event_id` 给样本去重，会把同一转化在 multi-touch 下给两个点击的两条样本误删一条；用 `sample_id` 给事件去重，则同一个点击上两次真实的不同购买会被误判成重复。唯一键必须按每一层的业务语义定义。
+</Callout>
+
+### Dedup Simulator
+
+四条消息依次到达。默认设置是“每个 Region 各自去重 + append-only 写入”：Region A 挡住了 Events API 的重试，但 Region B 的重放漏了过去。试着分别打开“全局 dedup authority”和“唯一键 upsert”，看哪一层把重复吸收了；再把 TTL 拉到 20 分钟以下，看即使是全局状态也挡不住 29 分钟后才到的重放。
+
+<DedupSimulator />
+
+### Stable Event ID 与 Business Dedup Key
+
+去重的前提是**稳定**的 ID：同一个业务事实，无论从哪条路、第几次到达，ID 都一样。
+
+- 由**事件的产生方**在事件发生时生成（广告主下单时生成 `event_id`），而不是由收到它的服务器生成（那样每次重试都是新 ID）。
+- 业务 dedup key 通常还要带上**作用域**：`{pixel_id}:{event_name}:{event_id}`。同一个 `event_id` 在两个广告主之间不应该互相去重。
+- 去重必须有明确的**时间范围**：“48 小时内唯一”。超过范围的重复要么接受、要么由下游的幂等写入兜底。
+
+### Flink Stateful Dedup + TTL
+
+第 05 章的 keyed state 去重：`keyBy(dedup_key)`，状态里记“见过”，TTL 等于去重窗口。它简单高效，但保证范围只有**本作业 × TTL 内**。状态大小约等于“去重窗口内的不同 key 数 × 每个 key 的开销”。
+
+### Bloom Filter 的适用范围
+
+Bloom filter 用很少的内存回答“这个 key 是否**可能**见过”：没有 false negative，但有 false positive。
+
+- 当成**最终判定**来去重时，false positive 意味着一个**真实的新事件被当成重复丢掉**：这是数据丢失，不是数据重复。对计费、转化这类数据通常不可接受。
+- 合适的用法是**快速预过滤**：Bloom 说“没见过”的直接放行；说“可能见过”的再去精确存储里确认。也可以用在允许极少量误丢的场景（例如曝光去重的近似统计），并且要能估计误判率。
+- 标准 Bloom filter 不支持删除，需要按时间分桶轮换来实现“TTL”。
+
+### Kafka：Idempotent Producer 与 Transaction
+
+- **Idempotent producer**：broker 按 (producer id, partition, sequence number) 识别并丢弃 producer 重试造成的重复写入。范围：**同一个 producer 会话、单个 partition**。它挡不住应用层重新发起的请求。
+- **Transactions**：一组跨 partition 的写入，以及 consumer offset 的提交，原子地生效或不生效。配合 consumer 端 `isolation.level=read_committed`，可以实现 Kafka 到 Kafka 的 read-process-write exactly-once。`transactional.id` 加 producer epoch 还会**屏蔽（fence）旧的僵尸 producer**，这和第 07 章的思路一样。
+
+### At-least-once vs Exactly-once
+
+| 语义 | 含义 | 代价 |
+| --- | --- | --- |
+| At-most-once | 先确认后处理，可能丢 | 最便宜，适合可丢的监控数据 |
+| At-least-once | 先处理后确认，可能重复 | 吞吐高、实现简单，**需要下游幂等** |
+| Exactly-once（effectively-once） | 每条输入对最终结果的影响恰好一次 | 需要可重放的 source + 一致的状态快照 + 事务性或幂等的 sink |
+
+“Exactly-once” 几乎从来不是“每条消息只被处理一次”，而是“**处理可以发生多次，但对外可见的结果等价于一次**”。
+
+### Flink Checkpoint 的保证范围
+
+Flink 的 checkpoint 让**内部状态**和 **source offset** 在故障恢复后保持一致：恢复后，状态就像 checkpoint 之后的数据从没被处理过一样，然后重新处理它们。这叫 Flink 内部的 exactly-once state consistency。
+
+但 checkpoint 之后、故障之前，作业**已经把一些结果写到了外部系统**。恢复后这些结果会被再写一次。所以：
+
+<Callout tone="warn" title="Flink Internal Exactly-once ≠ External Sink Exactly-once">
+端到端 exactly-once 需要 sink 配合，二选一：
+- **Transactional sink**（两阶段提交）：在 checkpoint 期间预提交，checkpoint 完成后才正式提交，例如 Kafka sink 的 exactly-once 模式。下游只能看到已提交的数据，所以**可见延迟至少是一个 checkpoint 间隔**；事务超时要大于最长的 checkpoint 加恢复时间。
+- **Idempotent sink**：按业务唯一键 upsert，同一结果写多少次都一样。适合有主键的存储（KV、支持 upsert 的表）。
+
+两者都没有的 sink（例如 append-only 的文件、普通的 INSERT），在恢复后就会出现重复。
+</Callout>
+
+### Unique Constraint、Conditional Upsert 与 Label Revision
+
+样本表的最后一道防线是唯一键。但“唯一键冲突时怎么办”有三种选择，在 label 会被修正的场景下，只有一种是对的。下面接着第 03 章的迟到转化：`click_200` 的样本先写 provisional 0，52 小时后修正为 1，之后一次故障恢复又把旧版本重放了一遍。
+
+<RevisionSinkViz />
+
+```sql
+-- Version-aware upsert：只有更新的 revision 才能覆盖
+INSERT INTO cvr_samples (sample_id, label, label_status, label_revision, feature_version)
+VALUES (:sample_id, :label, :label_status, :label_revision, :feature_version)
+ON CONFLICT (sample_id) DO UPDATE
+SET label          = EXCLUDED.label,
+    label_status   = EXCLUDED.label_status,
+    label_revision = EXCLUDED.label_revision
+WHERE cvr_samples.label_revision < EXCLUDED.label_revision;
+```
+
+在流处理的语境下，同样的问题叫做 **Retract / Update vs Drop**：Flink 的动态表在结果变化时会发出撤回（retract）旧值、插入新值的变更流，或者按主键发出 upsert。下游如果只认 insert、把所有后续变更当成重复丢掉，就永远看不到修正。
+
+**Revision 和 Duplicate 的区别**：重复是“同一个版本来了多次”，应该吸收；修正是“同一个对象有了新版本”，必须生效。区分它们的不是主键，而是**版本号**。版本号要由产生修正的那一方单调递增地分配（例如 label 修正链路），而不是用到达时间，因为重放和跨 Region 复制会打乱到达顺序。
+
+## System Design Trade-offs
+
+**Problem → Naive → Failure → Better → Trade-off**
+
+- **Problem：** 训练表里出现了重复正样本。
+- **Naive：** 在 Flink 里加一个按 `event_id` 的 dedup，TTL 1 小时；样本表写入时 `ON CONFLICT DO NOTHING`。
+- **Failure：** 跨 Region 的重放晚于 1 小时到达，照样重复；更糟的是，迟到转化的修正因为 `DO NOTHING` 永远写不进去，正样本被永久定成 0。
+- **Better：** 分层：入口按业务 dedup key 去重（省计算）；归因和样本表按各自的逻辑唯一键做 version-aware upsert（保证正确）；跨 Region 由单一的最终写入者 + fencing 保证（第 07 章）。
+- **Trade-off：** 存储需要支持条件更新；版本号要被正确地生成和传递。
+
+| 选择 | 方案 A | 方案 B | 关键考虑 |
+| --- | --- | --- | --- |
+| 投递语义 | At-least-once + 幂等 sink | Exactly-once 事务 sink | 吞吐与延迟 vs 通用性 |
+| 去重状态 | 精确（KV / keyed state） | Bloom filter | 内存 vs 误删真实事件 |
+| 去重 TTL | 短：状态小 | 长：覆盖晚到的重放 | 必须覆盖最长的重试 / 重放间隔 |
+| 冲突处理 | DROP | Version-aware upsert | 简单 vs 支持 label revision |
+
+## 面试 Follow-up
+
+- **“如何设计 Event ID、Attribution Key、Sample ID？”** 按语义分别定义：事件由产生方生成、带作用域；归因键是转化 × 规则；样本键是点击 × 任务 × label 规则。说明每个键的去重时间范围。
+- **“开了 Flink exactly-once 还会重复吗？”** 会，如果 sink 既不是事务性的也不是幂等的。checkpoint 只保证内部状态和 offset 一致。
+- **“为什么不能对所有相同的 sample_id 直接 DROP？”** 因为同一个 sample 会有合法的新版本（迟到转化、归因修正）。要按 revision 判断。
+- **“Bloom filter 去重有什么风险？”** false positive 导致真实事件被丢；适合当预过滤，或用在可容忍少量误丢的场景。
+
+## 再往下看
+
+- 上一章：[Flink & Streaming Training](/notes/systems/ads/flink-streaming-training/)；下一章：[Multi-region Disaster Recovery](/notes/systems/ads/multi-region-dr/)。
+- 现有笔记：[消息队列：三种投递语义](/notes/systems/design/message-queue/)；[分布式系统：幂等与安全重试](/notes/systems/distributed/core/)。
+- 官方文档：[Apache Flink：Checkpointing 与 Fault Tolerance Guarantees](https://nightlies.apache.org/flink/flink-docs-stable/)；[Apache Kafka：Idempotence 与 Transactions](https://kafka.apache.org/documentation/)。

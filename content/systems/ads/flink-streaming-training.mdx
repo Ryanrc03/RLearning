@@ -1,0 +1,152 @@
+import Callout from "@/components/visualization/sketch/Callout";
+import WatermarkSimulator from "@/components/visualization/systems/ads/WatermarkSimulator";
+
+# Flink & Streaming Training：Join、迟到事件与训练样本
+
+**一句话：** Flink 用 keyed state 把点击按用户存起来，等转化到达时 join；用 **watermark** 判断“事件时间推进到哪了”，从而决定谁算迟到、什么时候可以关窗；用 **state TTL** 控制状态能存多久；用 **checkpoint** 让状态和 Kafka offset 一起快照，故障后一致地恢复。迟到和过期都不是异常，而是要设计好修正路径的常态。
+
+## 为什么需要它
+
+第 04 章把数据按 user 分好区送了过来。Joiner 要做的事听起来简单：“转化来了，找到这个用户之前的点击，打上 label”。但它必须同时处理：
+
+- 点击和转化**乱序**到达；
+- 有的转化**几天后**才来，状态不可能无限存；
+- 每秒几十万次点击，状态**很大**，还会有**热点用户**；
+- 机器会挂，挂了之后**不能丢、不能重**。
+
+Flink 的 stateful stream processing 提供了处理这些问题的基本构件。下面逐个讲，然后用一个模拟器把它们放在一起。
+
+## 怎么工作
+
+### Keyed Stream 与 Stateful Processing
+
+`keyBy(user_id)` 之后，同一个用户的所有事件被路由到同一个并行实例，该实例可以为这个 key 维护私有状态（`ValueState`、`ListState`、`MapState`）。这些状态由 Flink 管理：存在内存或 RocksDB 里，随 checkpoint 持久化，扩缩容时按 key group 重新分配。
+
+```java
+clicks.keyBy(c -> c.user)
+      .intervalJoin(conversions.keyBy(v -> v.user))
+      .between(Time.minutes(0), Time.days(1))      // conversion 在 click 之后 0 ~ 24 h 内
+      .process(new LastClickLabeler());             // 只给最后一个合格的 click 打 1
+```
+
+### Event Time vs Processing Time
+
+- **Processing time**：算子看到这条记录时的墙钟时间。简单、低延迟，但结果取决于“数据什么时候到”：同样的数据重放一遍，结果可能不同。
+- **Event time**：记录自带的业务时间（第 01 章的 `event_time`）。结果只取决于数据本身，重放可复现，但系统必须知道“某个事件时间之前的数据是不是都到齐了”。
+
+训练样本要可复现、要和归因窗口对齐，所以用 event time。
+
+### Watermark
+
+Watermark 是一条随数据流动的断言：**“事件时间 ≤ W 的数据，应该都已经到了。”** 最常见的生成策略是 bounded out-of-orderness：`W = 已见过的最大事件时间 − 允许的乱序延迟`。
+
+- 事件时间 < 当前 watermark 的记录就是**迟到数据**（late event）。
+- 一个算子有多个输入（多个 partition、两条流）时，它的 watermark 取**所有输入的最小值**。这就是第 04 章说的“一个慢 partition 拖住所有人”。
+- 某个 partition 长时间没有数据，它的 watermark 不前进，也会卡住整体，需要配置 idleness。
+
+### State TTL
+
+点击状态不能永远存着。两种清理方式：
+
+- **State TTL**（`StateTtlConfig`）：状态在最后一次写入（或读取）后一段**处理时间**之后过期。注意 Flink 的 state TTL 目前基于处理时间。
+- **Event-time timer**：在 `click.event_time + X` 注册一个事件时间定时器，watermark 越过它时清理。interval join 内部就是按 watermark 和 `between` 的边界来清理状态的。
+
+### 四个容易混淆的“时间”
+
+<Callout tone="warn" title="它们是四个不同的东西">
+- **Watermark delay**：允许多大的乱序。决定谁算迟到，以及按事件时间关窗的结果要晚多久才能输出。
+- **Allowed lateness**：窗口算子在 watermark 越过窗口末尾之后，还愿意再接收迟到数据并更新结果的时长。之后到的才被丢弃或旁路。
+- **Join state TTL**：点击状态在 join 算子里保留多久。是成本参数。
+- **Label observation window**：业务规则，点击后多久内的转化算数（例如 24 小时或 7 天）。
+
+TTL 短于 label window 是常见且合理的工程选择（7 天的点击全放内存太贵），但这意味着流式 join 接不住窗口后半段的转化，必须有批处理 backfill 或修正路径来补。
+</Callout>
+
+### Watermark Simulator
+
+下面 5 个用户，默认参数下：user_1、user_2 的转化正常 join；user_3 的转化在点击 2 小时后才到，点击状态已经被 60 分钟的 TTL 清掉；user_4 没有点击。试试：
+
+- 把 `event_502` 的到达延迟拉到超过 watermark delay，看它变成迟到；
+- 把 watermark delay 调到 0，看连 `event_501` 晚 1 分钟都算迟到；
+- 把 TTL 调到 130 分钟以上，看 user_3 也能 join，但状态里的点击数翻倍；
+- 把迟到处理换成“直接丢弃”，看一个正样本永远变成 0。
+
+<WatermarkSimulator />
+
+### Late Events：Provisional、Correction、Finalized
+
+流式结果不可能一次就对。一个可靠的设计把样本分成三种状态：
+
+| 状态 | 什么时候 | 谁写 |
+| --- | --- | --- |
+| **Provisional** | 点击后不久，用当前已知的信息写出（通常 label 0） | 流式 join |
+| **Corrected** | 迟到转化通过 side output、或批处理 backfill 发现 label 应该是 1 | 修正链路，`label_revision + 1` |
+| **Finalized** | label window 结束，且修正链路确认没有更多数据 | 定时任务 / 批处理 |
+
+迟到的数据**不能**简单丢掉：窗口算子可以用 `allowedLateness` 更新结果，再晚的用 `sideOutputLateData` 旁路出去；interval join 默认会丢弃迟到记录（较新版本也支持把它们输出到 side output，以所用版本的文档为准）。旁路出去的数据进入修正链路，最终以“同一个 sample_id、更高的 revision”写回样本表。
+
+### Stateful Dedup
+
+同样的 keyed state 也用来去重：
+
+```python
+# keyBy(dedup_key) 之后，每个 key 只有一个布尔状态，TTL = 去重窗口
+def process(event, seen_state):
+    if seen_state.value():          # 窗口内见过：重复
+        return None
+    seen_state.update(True)         # TTL 过后自动清理
+    return event
+```
+
+它的保证范围只有两个：**这个 Flink 作业内**、**TTL 之内**。跨作业、跨 Region、超过 TTL 的重复，它都看不到（第 06、07 章）。
+
+### Checkpoint 与 Savepoint
+
+- **Checkpoint**：Flink 周期性地在数据流里插入 barrier，各算子在 barrier 到达时异步快照自己的状态，连同 source 的 Kafka offset 一起持久化。故障时从最近一次完成的 checkpoint 恢复：状态回到那一刻，source 从那一刻的 offset 重新读。所以**恢复后，checkpoint 之后处理过的数据会被再处理一遍**，Flink 内部状态是 exactly-once 的，但外部 sink 可能已经收到过这些结果。这是第 06 章的核心。
+- **Savepoint**：用户手动触发的、可移植的快照，用于升级作业代码、改并行度、迁移集群。
+
+### Backpressure 与 Data Skew
+
+- **Backpressure**：某个算子慢，上游的网络缓冲填满后自然减速，最终表现为 source 读取变慢、Kafka lag 增长。它保护了系统不崩，但也意味着 checkpoint barrier 走得慢，checkpoint 时间变长（可以考虑 unaligned checkpoint）。
+- **Hot key**：一个机器人账号或大广告主让某个 key 的事件量远超其他，所在的并行实例成为瓶颈。常见做法：识别并单独处理异常 key、给 key 加 salt 做两阶段聚合、限制单 key 状态大小。
+
+### 下游：Model-ready Examples
+
+Flink 的产出写进样本存储（例如支持 upsert 的湖表或 KV + 日志），训练流水线按时间切片读取：
+
+- **流式 / 增量训练**：持续读取新样本，provisional 样本要么跳过、要么用延迟反馈方法纠偏（第 03 章）；
+- **批式训练**：读取 final 样本；
+- 同一份样本表可以服务 CVR、CTR 等多个任务，靠 `task_id` 和 `label_policy` 区分。
+
+在隐私增强的训练数据管道里，这一层还负责：只保留训练所需的特征（数据最小化）、对标识符做脱敏或替换、遵守数据保留期限，以及在用户撤回同意时能定位和删除相关样本。
+
+## System Design Trade-offs
+
+**Problem → Naive → Failure → Better → Trade-off**
+
+- **Problem：** 转化最晚要等 7 天，点击状态放不下。
+- **Naive：** 把 join state TTL 设成 7 天。
+- **Failure：** 状态从几十 GB 涨到几 TB，checkpoint 越来越慢，恢复要几十分钟，作业经常因为 checkpoint 超时失败。
+- **Better：** TTL 覆盖绝大多数转化（例如 24 小时），之后到达的转化通过 side output / 批处理 backfill 修正；用 RocksDB + 增量 checkpoint；监控“未匹配转化”的比例作为 TTL 是否合理的信号。
+- **Trade-off：** 多了一条修正链路和一个 revision 语义，换来状态可控。
+
+| 选择 | 方案 A | 方案 B | 关键考虑 |
+| --- | --- | --- | --- |
+| 时间语义 | Event time：正确、可复现 | Processing time：简单、快 | 正确性 vs 延迟 |
+| Watermark delay | 小：结果快 | 大：迟到少 | 延迟 vs 完整性 |
+| Join state TTL | 短：状态小 | 长：接住更多迟到转化 | 内存 vs 完整性 |
+| 迟到数据 | 丢弃 | side output + 修正 | 简单 vs label 正确 |
+| Checkpoint 间隔 | 短：重放少、事务提交快 | 长：开销小 | 恢复成本 vs 运行开销 |
+
+## 面试 Follow-up
+
+- **“Watermark、allowed lateness、state TTL、label window 有什么区别？”** 分别是：乱序容忍度、窗口接受迟到更新的时长、状态保留时长（成本）、业务上转化算数的时长。它们独立设置，TTL 短于 label window 要有修正路径。
+- **“迟到的转化怎么办？”** 不丢：旁路 → 修正链路 → 同一个 sample_id 更高 revision 写回；样本带 provisional / final 状态。
+- **“Flink 恢复后为什么会重复处理？”** 从上一个 checkpoint 的状态和 offset 恢复，checkpoint 之后的数据会被再处理；如果 sink 不是事务性或幂等的，外部就会看到重复。
+- **“一个 partition 卡住会怎样？”** watermark 取最小值，整个 join 的事件时间不前进，关窗和状态清理都停下，状态膨胀，样本延迟。
+
+## 再往下看
+
+- 上一章：[Streaming Data Architecture](/notes/systems/ads/streaming-architecture/)；下一章：[Deduplication & Exactly-once](/notes/systems/ads/dedup-exactly-once/)。
+- 现有笔记：[样本与特征拼接](/notes/ml/recsys/sample-feature-join/)；[数据基础设施：Spark vs Flink](/notes/systems/data/overview/)；[分布式系统：checkpoint 丢多少](/notes/systems/distributed/core/)。
+- 官方文档：[Apache Flink Documentation](https://nightlies.apache.org/flink/flink-docs-stable/)（Timely Stream Processing、Watermarks、Joining、State TTL、Checkpointing）。
