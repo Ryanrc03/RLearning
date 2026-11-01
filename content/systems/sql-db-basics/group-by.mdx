@@ -1,0 +1,159 @@
+import { WhyGroupBy, GroupByPlayground, AggregationPlayground, FilterPlayground, AdsAggregationFlow } from '@/components/visualization/systems/sql/GroupByFigures';
+
+# SQL GROUP BY：从数据分组到聚合统计
+
+**一句话：** GROUP BY 按一个或多个字段把原始行划成组，Aggregation Function 再把每组的多行算成一个统计值。
+
+**GROUP BY Keys + Aggregation Function → Aggregated Results**
+
+这篇笔记假定你已经知道基本的 `SELECT ... FROM ...`。我们用一个 Ads Click Aggregator 场景贯穿六节：广告点击明细，怎样变成广告主看得懂的统计报表？所有 Playground 都在本地计算，不会连接数据库。
+
+## 01 — Why GROUP BY：广告主想看的是统计
+
+我们每秒记录大量点击，但广告主想知道的是：**“每个广告一共被点击了多少次？”** 一行一条点击适合保存事实，直接展示几百万行却回答不了这个问题。
+
+下面全篇共用的 Toy Data 只有 8 行。`eventId` 标识演示事件，`adId` 标识广告，`minute` 已经是分钟粒度，`cost` 是这次点击的费用，单位为美元。这些是教学数据，不是实际广告账单。
+
+<WhyGroupBy />
+
+原始表回答“每次点击发生了什么”；结果表回答“每个广告有多少行点击”。A 有 e1、e2、e4、e8，所以是 4；B 有 3；C 有 1。**分组后输出的粒度变了**：从每个 event 一行，变成每个 adId 一行。
+
+```sql
+SELECT adId, COUNT(*) AS clicks
+FROM ClickEvents
+GROUP BY adId;
+```
+
+这里有两个独立的动作：
+
+1. `GROUP BY adId` 把相同 adId 的行放到同一组。
+2. `COUNT(*)` 数每个组包含多少行，并把这个数字命名为 `clicks`。
+
+GROUP BY 决定“谁和谁一起算”，COUNT 决定“一起算什么”。只想数整张表的行数，可以写 `SELECT COUNT(*) FROM ClickEvents;`，无需指定分组键。
+
+## 02 — 分组键：一个字段，还是联合 Key
+
+相同数据可以回答不同的问题。选 `adId`，问每个广告的点击量；选 `minute`，问所有广告在每分钟的总点击量；选 `adId, minute`，问每个广告在每分钟的点击量。
+
+<GroupByPlayground />
+
+`GROUP BY adId, minute` 使用整个 `(adId, minute)` 作为联合 Key，**两列都相同才算同一组**。例如 e1 和 e2 都是 `(A, 10:00)`，e4 和 e8 都是 `(A, 10:01)`，所以 A 被拆成两个分钟组。这不是先对 adId 统计一遍，再对 minute 独立统计一遍。
+
+| Group Key | 组内 eventId | COUNT(*) |
+| --- | --- | ---: |
+| (A, 10:00) | e1, e2 | 2 |
+| (A, 10:01) | e4, e8 | 2 |
+| (B, 10:00) | e3 | 1 |
+| (B, 10:01) | e5, e6 | 2 |
+| (C, 10:00) | e7 | 1 |
+
+Key 越细，往往能保留越细的分析粒度，但结果行数也可能更多。这里从 adId 的 3 组变成联合 Key 的 5 组；组合没有在输入里出现，就不会凭空生成一行，例如 `(C, 10:01)`。
+
+**写 SELECT 时也要对齐粒度。** 本篇采用的规则是：SELECT 中的非聚合列应是分组列。`GROUP BY adId` 后直接选 `minute` 会产生歧义：A 组里有两个 minute，应该返回哪一个？要么把 minute 加进分组键，要么明确用聚合函数处理它。本篇不展开方言里的特殊规则。
+
+另外，**GROUP BY 不保证结果顺序**。页面为方便观察，按 Key 排列；真实查询需要固定顺序时，应显式加 `ORDER BY adId, minute`。
+
+## 03 — 聚合函数：COUNT、SUM、AVG
+
+把分组方式固定为 `GROUP BY adId`，然后只改变计算方式：
+
+- `COUNT(*)`：每组有多少行，也就是这份输入里的点击条数。
+- `SUM(cost)`：每组点击费用的总和。
+- `AVG(cost)`：每组点击费用的平均值。
+
+<AggregationPlayground />
+
+| adId | COUNT(*) | SUM(cost) · USD | AVG(cost) · USD / click |
+| --- | ---: | ---: | ---: |
+| A | 4 | 1.40 | 0.35 |
+| B | 3 | 1.20 | 0.40 |
+| C | 1 | 0.70 | 0.70 |
+
+以 A 为例，总费用是 `0.30 + 0.50 + 0.20 + 0.40 = 1.40` 美元，平均费用是 `1.40 / 4 = 0.35` 美元。聚合函数换了，A 的成员没有变。
+
+**COUNT 的小区别：** `COUNT(*)` 计算组内全部行；`COUNT(cost)` 不计算 cost 为 `NULL` 的行。SUM 和 AVG 也忽略 NULL。本例 cost 都非空，所以 COUNT 两种写法相同，AVG 可以按费用总和除以行数理解；有 NULL 时，应除以非空 cost 的数量。
+
+聚合压缩了信息：仅凭 A 的次数和平均费用，无法还原每次点击的费用。因此实际系统通常需要在明细与汇总之间做取舍：汇总更适合报表，明细更适合重新计算和排查。
+
+## 04 — WHERE vs HAVING：过滤的是行还是组
+
+现在广告主提出两个看起来相似的要求：
+
+- “只统计单次费用至少 $0.40 的点击。”这是先挑选**原始行**，用 WHERE。
+- “只显示总点击次数至少 2 次的广告。”这是先统计，再挑选**聚合后的组**，用 HAVING。
+
+<FilterPlayground />
+
+WHERE 模式在分组前去掉 e1、e4、e6，留下 e2、e3、e5、e7、e8：A 和 B 各 2 行，C 仍有 1 行。
+
+```sql
+SELECT adId, COUNT(*) AS clicks
+FROM ClickEvents
+WHERE cost >= 0.40
+GROUP BY adId;
+```
+
+HAVING 模式把全部 8 行分组计数，得到 A = 4、B = 3、C = 1，再去掉不满足 `COUNT(*) >= 2` 的 C 组。它没有先从 A、B 组中删掉便宜的点击。
+
+```sql
+SELECT adId, COUNT(*) AS clicks
+FROM ClickEvents
+GROUP BY adId
+HAVING COUNT(*) >= 2;
+```
+
+**Raw Data → WHERE（行）→ GROUP BY → Aggregation → HAVING（组）→ Results** 是这里的理解顺序，不是数据库物理执行计划。不要把 `COUNT(*) >= 2` 写在 WHERE 里：此时用于本次查询的组计数还没有形成。
+
+## 05 — 放回 Ad Click Aggregator：每广告、每分钟
+
+前面的 `minute` 已经准备好了。真实的点击事件通常有更完整的 timestamp；下面只是同一业务场景的秒级时间示意，不替换 Playground 的 8 行数据：
+
+| eventId | adId | timestamp（省略日期） |
+| --- | --- | --- |
+| e1 | A | 10:00:12 |
+| e2 | A | 10:00:35 |
+| e3 | B | 10:00:45 |
+| e4 | A | 10:01:08 |
+
+先把 timestamp 截到分钟，就能复用联合 Key。下面采用 PostgreSQL / Spark SQL 可见的 `DATE_TRUNC` 写法；实际字段应是 timestamp 类型，包含日期。示意中 timestamp 是列名。
+
+```sql
+SELECT
+    adId,
+    DATE_TRUNC('MINUTE', timestamp) AS minute,
+    COUNT(*) AS totalClicks
+FROM ClickEvents
+GROUP BY
+    adId,
+    DATE_TRUNC('MINUTE', timestamp);
+```
+
+1. `DATE_TRUNC` 将 `10:00:12` 和 `10:00:35` 都映射到该日期的 `10:00:00`。
+2. GROUP BY 用 `(adId, minute)` 分组。
+3. COUNT 统计每个广告在每分钟的输入行数。
+4. 聚合结果可以写入 OLAP Database，供广告主高效查询。
+
+对这张 4 行时间示意表，输出是 `(A, 10:00) → 2`、`(A, 10:01) → 1`、`(B, 10:00) → 1`；如果输入是完整的 8 行 Toy Data，则仍是第二节的 5 个联合组。
+
+<AdsAggregationFlow />
+
+Spark 可以把同样的 GROUP BY 聚合工作分散到多个 Worker 并行执行。这里的批处理架构适合定期生成报表；代价是从点击发生到报表更新存在等待时间。本篇只建立聚合的直觉，不深入分布式执行和流处理。
+
+**COUNT(*) 不会识别重复点击。** 如果同一个事件被输入两次，它就数两行；业务需要去重时，必须在聚合前定义明确的去重规则。GROUP BY 输出汇总，不会自动删除 Click DB 里的原始行。
+
+时间粒度也要有明确约定：完整日期避免跨天的 `10:00` 混在一起，统一时区避免“同一分钟”有两种解释。仅有每天的 `HH:MM` 字符串适合本篇小表，不足以作为真实系统的完整时间键。
+
+## 06 — 从原始行到统计结果
+
+读到这里，可以用一条线检查自己的理解：
+
+**Raw Events → Grouping Keys → Groups → Aggregation → Results**
+
+先选 Key，才知道哪些行一起算；再选函数，才知道每组算什么；WHERE 在这之前选行，HAVING 在这之后选组。输出的每一行都应该对应一个被保留的 Group Key。
+
+### 继续阅读
+
+- [Ads Backend Systems：总览](/notes/systems/ads/overview/)：了解这类统计所处的广告数据链路。
+- [Dedup & Exactly-once](/notes/systems/ads/dedup-exactly-once/)：COUNT 之前如何界定重复事件。
+- [PostgreSQL SELECT 文档](https://www.postgresql.org/docs/current/sql-select.html)：查阅 GROUP BY、HAVING 与 ORDER BY 的完整规则。
+- [PostgreSQL 聚合函数](https://www.postgresql.org/docs/current/functions-aggregate.html)与[日期时间函数](https://www.postgresql.org/docs/current/functions-datetime.html)：核对 COUNT / SUM / AVG 和 DATE_TRUNC 的语义。

@@ -30,6 +30,8 @@ import DesignDataModeling from "@/content/systems/design/data-modeling.mdx";
 import DesignApi from "@/content/systems/design/api.mdx";
 import DesignAbPlatform from "@/content/systems/design/ab-testing-analytics-platform.mdx";
 import Serverless from "@/content/systems/backend/serverless.mdx";
+import MapreduceSpark from "@/content/systems/sql-db-basics/mapreduce-spark.mdx";
+import SqlGroupBy from "@/content/systems/sql-db-basics/group-by.mdx";
 import AdsOverview from "@/content/systems/ads/overview.mdx";
 import AdsSignalCollection from "@/content/systems/ads/signal-collection.mdx";
 import AdsIdentityResolution from "@/content/systems/ads/identity-resolution.mdx";
@@ -150,6 +152,8 @@ export type NoteComponent = ComponentType<{ components?: MDXComponents }>;
 
 /** Chinese pages, one per entry in content/notes.ts. */
 export const noteComponents = {
+  "systems/sql-db-basics/group-by": SqlGroupBy,
+  "systems/sql-db-basics/mapreduce-spark": MapreduceSpark,
   "cs/fundamentals/overview": FundamentalsOverview,
   "cs/networking/overview": NetworkingOverview,
   "cs/os/overview": OsOverview,

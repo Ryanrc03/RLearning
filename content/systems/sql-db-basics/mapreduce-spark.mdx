@@ -1,0 +1,242 @@
+import { DistributedWhy, BatchApplication } from '@/components/visualization/systems/sql/spark/SparkFlows';
+import { MapReducePipelineSimulator } from '@/components/visualization/systems/sql/spark/MapReducePipeline';
+import { AggregationCostComparison } from '@/components/visualization/systems/sql/spark/AggregationCost';
+import { SparkArchitectureDiagram } from '@/components/visualization/systems/sql/spark/SparkArchitecture';
+import { SparkDAGVisualizer } from '@/components/visualization/systems/sql/spark/SparkDAG';
+import { SparkPhysicalPlan } from '@/components/visualization/systems/sql/spark/SparkPlan';
+import { SparkFailureSimulator } from '@/components/visualization/systems/sql/spark/SparkRuntime';
+import { ShuffleSkewSimulator } from '@/components/visualization/systems/sql/spark/ShuffleSkew';
+import { SparkApiExamples, CombineExamples, LazyCode } from '@/components/visualization/systems/sql/spark/SparkExamples';
+
+# MapReduce & Apache Spark：从单机聚合到分布式计算
+
+**一句话：** 分布式聚合先让不同 Partition 各自计算，再把相同 Key 的贡献汇合；MapReduce 描述这条计算路径，Spark 则负责把更通用的计算图调度到 Executors 上执行、交换数据和恢复失败。
+
+[上一笔 GROUP BY](/notes/systems/sql-db-basics/group-by/)回答“哪些行一起算、每组算什么”。现在保持相同的 `(adId, minute)` 与 8 条点击不变，只追问：**数据和计算分散后，怎样仍然算出同一个答案？**
+
+本文所有图都是本地教学模型，不会启动 Spark 集群。没有实测时间、吞吐或网络带宽；大型数量级仅用于解释约束。学习主线是：
+
+**单机 GROUP BY → MapReduce → Shuffle → Spark Runtime → DAG → Physical Plan → 容错 → 性能 → Ad Click Aggregator**
+
+## 01 — Why Distributed Computing：一台机器什么时候不够
+
+假设明细累积到 **100 亿条点击（10 billion）**，希望统计每个广告在每分钟的点击量。单机并不需要先安装 Spark：一个 HashMap 就能把联合 Key 对应的次数累加。
+
+```python
+from collections import defaultdict
+
+counts = defaultdict(int)
+for ad_id, minute in events:
+    counts[(ad_id, minute)] += 1
+```
+
+这已经实现聚合。问题在资源：扫描数 TB 文件可能受 I/O 限制；解码与聚合需要 CPU；Key 很多时 HashMap 可能超出内存，需要溢写或分批处理。不能把“放不进内存”和“不能计算”画等号，但等待时间和工程复杂度会增加。
+
+<DistributedWhy />
+
+**Vertical Scaling** 是给一台机器更多资源；**Horizontal Scaling** 是增加 Worker，把数据切成 **Partitions**，让多个任务并行处理。拆开扫描并不难，难的是：广告 A 的点击分散在三处，三份局部计数怎么变成一个全局答案？这就是下面要解决的问题。横向扩展还要支付网络、调度和失败恢复的成本，不应预设三台机器一定快到三倍。
+
+## 02 — MapReduce：同一个 Key，最后要汇合
+
+先区分三个名字：**MapReduce** 是一种计算模型；**Hadoop MapReduce** 是执行这个模型的具体框架；**Apache Spark** 是支持更通用计算图的分布式引擎。Spark 自己调度和执行任务，不依赖 Hadoop MapReduce 执行器；它可以使用 Hadoop 生态的数据源或 YARN 资源管理，这不是同一回事。
+
+继续使用上一笔的原始行，cost 在本次 COUNT 里不参与计算：
+
+| eventId | adId | minute |
+| --- | --- | --- |
+| e1 | A | 10:00 |
+| e2 | A | 10:00 |
+| e3 | B | 10:00 |
+| e4 | A | 10:01 |
+| e5 | B | 10:01 |
+| e6 | B | 10:01 |
+| e7 | C | 10:00 |
+| e8 | A | 10:01 |
+
+目标仍是 `SELECT adId, minute, COUNT(*) FROM ClickEvents GROUP BY adId, minute;`。在下面的模拟器里，从 Split 逐步推进到 Reduce，尤其观察 **A · 10:01**：它的两条点击来自两个输入分区。
+
+<MapReducePipelineSimulator />
+
+**Split** 划分输入；**Map** 把每次点击转成 `((adId, minute), 1)`；**Local Combine** 只合并当前输入分区里的相同 Key；**Shuffle** 重新分配数据，使相同 Key 去往同一目标分区；**Reduce** 再合并收到的局部贡献。Shuffle 决定数据去哪，Reduce 决定如何合并。
+
+P0 里的 e4 和 P1 里的 e8 都属于 `(A, 10:01)`。Local Combine 后两边各是 1，所以局部计算结束不等于全局计算结束。最终的 5 组必须仍是 `2, 2, 1, 2, 1`，次数总和仍为 8。Map 在这里是一个变换步骤，不是 Python 的 dict；Partition 也不是物理机器。
+
+<details>
+<summary>为什么图里的分区编号不一定和 Spark UI 一样？</summary>
+
+图使用固定的教学分区函数，让你能重复观察路由。真实 Spark 的分区器和 hash 规则可能不同；重要的不变量是**同 Key 的贡献必须能够汇合**，而不是某个 Key 必须出现在 R0。
+
+</details>
+
+框架术语与执行边界可对照 [Hadoop MapReduce Tutorial](https://hadoop.apache.org/docs/stable/hadoop-mapreduce-client/hadoop-mapreduce-client-core/MapReduceTutorial.html)。
+
+## 03 — Local Combine & Shuffle：先少传一点
+
+如果一个输入 Partition 有 100 万行，但只有 1000 个唯一 Key，能不能先在本地把它们压成约 1000 条计数，再传出去？对可合并的 COUNT / SUM，通常可以。这减少的是**中间贡献的数量**，并没有少统计任何输入事件。
+
+<AggregationCostComparison />
+
+这里的“最多约 1000 条”针对**单个输入分区**，假设局部聚合完全生效、所有 Key 都出现。多个 Map 分区可能各自产生一份相同 Key 的 partial count；真实实现还可能多次溢写和合并。因此不要把图里的记录数直接当作实际网络包数或字节数。
+
+### groupByKey vs reduceByKey
+
+<CombineExamples />
+
+`groupByKey` 表达“收集这个 Key 的所有值”，适合后续真的需要组内明细的操作；若最后只是 sum，保留全部 1 往往没有必要。`reduceByKey` 能在 Map 侧先合并，仍可能 Shuffle；它不是“没有网络成本”。
+
+这种拆分需要满足合并规则。加法有**结合律**，可以先把局部括号算完；有**交换律**，局部结果换顺序仍能相加。注意浮点加法在计算机里可能出现舍入差异，本例使用小整数计数。Hadoop Combiner 是可选优化，可能不运行或运行多次，不能把业务正确性建立在“它一定执行一次”上。
+
+AVG 则要携带 `(sum, count)`：Worker 1 的 `[10,20]` 得到 `(30,2)`，Worker 2 的 `[100]` 得到 `(100,1)`。正确结果是 `130/3 ≈ 43.33`；把两个局部平均数 `15`、`100` 直接平均，会错误地得到 `57.5`，因为两组大小不同。
+
+## 04 — Spark Architecture：数据片、任务、进程、机器
+
+Spark Application 是一次应用运行。**Driver** 构建计划并调度任务；**Cluster Manager** 分配资源；**Executor** 是 Worker Node 上执行任务的进程。一个 Executor 可以运行多个 Task，也可以先后处理许多 Partition。
+
+<SparkArchitectureDiagram />
+
+**Task 是调度单位，Partition 是数据单位。** 在一个 Stage 内，一个 Task 处理一个 Partition。Partition 数决定可拆分的任务数量，Executor 可用 slots 决定实际并发上限。100 个 Partition、10 个 slots 并不需要 100 台机器，而是让任务分批获得资源。
+
+图中的 waves 只是 `ceil(partitions / slots)`：假设每 Task 用 1 slot、执行时间相等且没有重试。真实调度通常是有 slot 空出来就继续提交任务，不需要等整波同时结束；任务也可配置不同 CPU 需求。Driver、Executor 失效的影响不同，不应把所有失败都画成一个 Task 重跑即可。
+
+角色关系参考 [Spark Cluster Mode Overview](https://spark.apache.org/docs/latest/cluster-overview.html)。Spark 能使用内存与磁盘：缓存、执行过程和 Shuffle 的存储方式各有条件，它不是“只在内存里计算”的引擎。
+
+## 05 — Job / Stage / Task：Shuffle 为什么形成边界
+
+可以先用这个层次理解：**Application → Job → Stage → Task**。Action 等执行请求通常触发 Job；有些高层操作会触发多个 Job，不能机械地认为每个 API 调用都恰好对应一个。Stage 边界取决于依赖和实际执行计划，Task 才是在 Executor 上实际运行的单位。
+
+<SparkDAGVisualizer />
+
+**Narrow Dependency** 中，每个下游分区依赖有限的上游分区，常见的 map/filter 可以在已有 Partition 上流水线执行；这不意味着所有窄依赖都是严格一对一。**Wide Dependency** 中，下游需要多个上游分区的数据，重新分区通常引入 Shuffle；图用多对多箭头强调它的数据依赖。
+
+示例 Stage 0 把 Read → Filter → Map → Partial Aggregate 放进输入分区对应的任务；Stage 1 读取 Shuffle 数据、合并计数。**一个算子不是一个 Task，也不一定是一个 Stage。** 同一个 Stage 的多个算子可能由一个 Task 在当前分区内连续执行。
+
+理解边界后才能解释代价：网络传输、序列化、磁盘溢写和下游等待都可能发生在 Shuffle 附近。已有分区满足需求时，也不应武断地说每次按 Key 聚合都会新增一次 Shuffle。
+
+## 06 — RDD / DataFrame / SQL：表达目标与执行计划
+
+RDD API 让你直接操作分布式元素与键值对，适合看清本篇原理；DataFrame 用列与结构化操作表达计算；Spark SQL 则声明要得到什么统计结果。三者可以表达类似目标，但 RDD 代码不因此自动得到和 SQL 完全相同的优化计划。
+
+<SparkApiExamples />
+
+这几个例子共享完全相同的 8 行数据。DataFrame / SQL 能把数据结构与计算意图交给优化器；实际算子形态需要看计划。下面是一种常见的 GROUP BY 计划：先 Partial HashAggregate，再 Exchange，最后 Final HashAggregate。
+
+<SparkPhysicalPlan />
+
+`result.explain("formatted")` 用来查看实际计划。**Partial** 对应局部聚合，**Exchange** 对应重新分区，**Final** 合并局部结果。示意图不是采集的 Spark 日志；真实计划可能使用其他聚合策略，也可能被已有分区和 Adaptive Query Execution 改写。
+
+API 层次与结构化查询说明见 [Spark SQL / DataFrame Guide](https://spark.apache.org/docs/latest/sql-programming-guide.html)。不要仅凭 API 名称猜数据移动量，也不要把页面里演示的分区数当作默认配置。
+
+## 07 — Lazy Evaluation、Lineage 与写入边界
+
+**Transformation** 定义数据怎样变化；**Action** 请求运行并产生结果。对这里的 RDD 例子，串起 filter/map/reduceByKey 时先建立依赖，直到 `collect()` 才执行所需计算。延迟求值也让系统有机会按整体依赖组织执行，但不是“所有 API 都绝无提前工作”。
+
+<LazyCode />
+
+`collect()` 把结果送回 Driver，只适合可容纳的小结果。大结果通常应写入分布式存储；把大量数据全部拉到 Driver 会产生内存与网络压力。未持久化的结果被再次 Action 使用时，也可能重新计算。
+
+<SparkFailureSimulator />
+
+先点击 Run Action，再推进到 Stage 1：可以让 T1.0 失败，也可以让 Map T0.1 的 Shuffle 输出丢失。前者在输出仍可用时重试失败任务；后者可能要利用 **Lineage**，重读稳定输入并重算所需上游数据。不是所有失败都可无限、零成本恢复；确定性的计算和可重读输入很重要。
+
+### 外部 OLAP 不受 Lineage 自动回滚
+
+假设一个 Task 向 OLAP 写入 `+1000`，服务端成功了，确认却丢失。重试再写 `+1000`，就会出现 2000。**任务可以被再次执行，不等于外部副作用 Exactly-once。**
+
+可以按业务选择稳定结果键的 Idempotent Upsert、事务提交、批次清单或 Partition Replacement。Upsert 的前提是同一重试定位到同一个确定结果，而不是每次生成新 ID；替换批次还要处理提交原子性和并发。上面的 Sink 小实验只说明稳定键重复覆盖与重复增量的区别，不替代实际存储系统的提交协议。
+
+关于 lazy transformations、actions、shuffle 和恢复依赖，见 [Spark RDD Programming Guide](https://spark.apache.org/docs/latest/rdd-programming-guide.html)。
+
+## 08 — Performance & Data Skew：最慢的分区拖住谁
+
+Partition 数多不代表负载均匀。假如 A 有一亿条点击，其他广告只有一千，按 adId 路由时，某个分区可能承担绝大部分工作。其他任务先完成，Stage 仍需要等待重分区，这就是常见的拖尾来源。
+
+<ShuffleSkewSimulator />
+
+**Salting** 给热点 Key 添加后缀，例如 `A#0 ... A#3`。先分别聚合，再去掉 salt，对 A 再合并。理想均匀拆分时，四份各承载 2500 万的原始等价工作量；最终 A 仍是一亿。关掉二阶段时，只能看到 salted 的中间结果，不能直接把它当作按广告的最终报表。
+
+特别注意：**COUNT 如果已经有效局部聚合，一亿行不一定原样进入某个 Reduce 分区。** 它可能先变成每个 Map 的一个或少量计数。图中的 bars 是“未充分局部聚合时的原始记录等价工作量”，用于解释热点集中，不是对这个简单 COUNT 实际网络流量的预测。
+
+本模型固定 4 个 Reduce 分区，8 个 salt 仍要共享它们。真实 hash 还可能碰撞；增加 salt 无法突破可用资源上限。二阶段聚合增加中间 Key、调度与数据交换成本，有时比不加盐更慢。先看瓶颈，再决定优化。
+
+<details>
+<summary>Partition Count 应该越多越好吗？</summary>
+
+太少可能并发不足或单分区太大；太多会增加任务调度、元数据和小块数据处理开销。应结合数据大小、Key 分布、单任务资源和实际 Spark UI / Explain 判断，不能只凭总行数设置一个万能数字。
+
+</details>
+
+优化手段及其条件参考 [Spark SQL Performance Tuning](https://spark.apache.org/docs/latest/sql-performance-tuning.html)。不要把某类 skew join 的自动优化直接套用为所有聚合的保证。
+
+## 09 — Ad Click Aggregator：为什么用，又何时不用
+
+回到最初的业务问题：原始 ClickEvents 适合记录事实，广告主的时间区间查询更适合读取预聚合的 `(adId, minute, totalClicks)`。Spark Batch 可以定期读取一段明细、并行聚合，再把结果写入 OLAP。Cron 是触发运行的控制路径，不是存放点击的中间表。
+
+<BatchApplication />
+
+独立分析任务可以把大量历史扫描与在线写入、查询解耦，也适合 ETL、回填和重新计算。但 **Spark 不是 GROUP BY 的必要条件**。先估算一个五分钟批次：
+
+- `10K clicks/s × 300s = 3M clicks`。
+- 按每条 100 bytes，约 `300 MB`（十进制，不计索引、协议、序列化等开销）。
+
+这个量级未必值得启动大型 Spark Cluster。要综合实际扫描、聚合复杂度、增长、现有基础设施和运维成本；若单机或数据库已能满足 SLA，分布式系统可能只是增加调度和维护负担。不要把长期累计 100 亿行与每次只扫描五分钟混为一谈。
+
+### Batch vs Streaming
+
+| | Spark Batch | Flink Streaming |
+| --- | --- | --- |
+| 处理节奏 | 定期处理有界批次 | 持续处理输入流 |
+| 报表新鲜度 | 包括等待调度和批次运行 | 可更持续地更新，仍受处理及 Sink 延迟影响 |
+| 常见职责 | 历史统计、回填、重算、复杂 ETL | 持续统计、实时状态与增量结果 |
+| 主要代价 | 批次等待、扫描与调度开销 | 长期运行、状态与恢复、外部提交边界 |
+
+Spark 也支持 **Structured Streaming**，不能说“Spark 只能 Batch”。一个系统可以让 Spark 做历史回填、Flink 做持续处理，再约定一致的结果键和发布机制。这篇只比较处理节奏与取舍，不展开 Window / Watermark。[Spark Structured Streaming 官方说明](https://spark.apache.org/docs/latest/streaming/index.html)可用于继续学习。
+
+场景参考 [Hello Interview：Ad Click Aggregator](https://www.hellointerview.com/learn/system-design/problem-breakdowns/ad-click-aggregator)。它提供设计问题的上下文，框架行为仍以各自官方文档为准。无论在哪个引擎上运行，`COUNT(*)` 都只统计输入行，业务重复点击需要先定义去重规则。
+
+## Interview Questions：把机制放进回答里
+
+<details>
+<summary>为什么 Local Combine 后还需要 Shuffle？</summary>
+
+局部计数只包含当前输入分区的贡献。同一个 Key 在别的分区还可能有 partial counts，需要重新路由后才能合并成全局结果；A · 10:01 的两份 1 就是例子。
+
+</details>
+
+<details>
+<summary>Driver、Executor、Task 和 Partition 有什么区别？</summary>
+
+Driver 调度，Executor 进程执行，Task 是某 Stage 的工作单位，Partition 是它处理的数据片。不要把 100 Partitions 翻译成 100 台机器。
+
+</details>
+
+<details>
+<summary>一个 GROUP BY 为什么可能有多个 Stage？</summary>
+
+常见做法是先局部聚合，Exchange 重新分区，再全局聚合。Shuffle 带来上下游任务依赖，因而出现 Stage 边界；实际计划仍需 Explain 验证。
+
+</details>
+
+<details>
+<summary>Lineage 为什么不能保证 OLAP Exactly-once？</summary>
+
+Lineage 帮助恢复内部数据。一次外部增量写入即使成功，也可能因确认丢失被重试；Sink 需要稳定键、幂等替换或事务提交等机制。
+
+</details>
+
+<details>
+<summary>发现热点就应该 Salting 吗？</summary>
+
+先确认瓶颈和局部聚合效果。如果热点已变成少量 partials，加盐未必值得。若需要分散不可充分合并的工作量，还要评估 salt 路由、碰撞、最终去盐及二次聚合成本。
+
+</details>
+
+<details>
+<summary>为什么 300MB 的批次未必选 Spark？</summary>
+
+启动、调度和维护集群有固定成本。单机或数据库若已满足时效要求，通常可以从简单方案开始；大规模历史扫描、复杂 ETL 或现有集群可让 Spark 更合理。
+
+</details>
+
+
+
+继续阅读：[GROUP BY](/notes/systems/sql-db-basics/group-by/) 看分组语义；[Dedup & Exactly-once](/notes/systems/ads/dedup-exactly-once/) 看事件与写入边界；[Streaming Architecture](/notes/systems/ads/streaming-architecture/) 看持续数据链路。

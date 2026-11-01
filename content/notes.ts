@@ -7,6 +7,7 @@ export type NoteEntry = {
   categoryId: "cs" | "systems" | "ml" | "ai-infra" | "algorithms";
   category: string;
   section: string;
+  subsection?: string;
   created: string;
   updated: string;
   status: "seed" | "growing" | "stable";
@@ -22,6 +23,34 @@ export type NoteEntry = {
 
 // Published notes share this metadata across navigation, search, and article pages.
 export const noteEntries: NoteEntry[] = [
+  {
+    slug: "systems/sql-db-basics/group-by",
+    title: "SQL GROUP BY：从数据分组到聚合统计",
+    description: "从 8 条广告点击出发，亲手切换分组键与 COUNT / SUM / AVG，看清 WHERE 过滤行、HAVING 过滤组，再把聚合放回 Ad Click Aggregator。",
+    categoryId: "systems",
+    category: "Systems",
+    section: "System Design",
+    subsection: "SQL & DB Basics",
+    created: "2026-11-01",
+    updated: "2026-11-01",
+    status: "growing",
+    readingMinutes: 15,
+    tags: ["SQL", "database", "GROUP BY", "aggregation", "interactive", "Ads Click Aggregator"],
+  },
+  {
+    slug: "systems/sql-db-basics/mapreduce-spark",
+    title: "MapReduce & Apache Spark：从单机聚合到分布式计算",
+    description: "沿用 8 条广告点击，逐步走过 Split、Map、Combine、Shuffle、Reduce，再看 Spark 的调度、DAG、执行计划、容错与热点取舍。",
+    categoryId: "systems",
+    category: "Systems",
+    section: "System Design",
+    subsection: "SQL & DB Basics",
+    created: "2026-11-01",
+    updated: "2026-11-01",
+    status: "growing",
+    readingMinutes: 30,
+    tags: ["MapReduce", "Spark", "Shuffle", "DAG", "SQL", "interactive", "Data Skew"],
+  },
   {
     slug: "cs/fundamentals/overview",
     title: "CS Fundamentals Overview",
@@ -1569,7 +1598,7 @@ export const noteEntries: NoteEntry[] = [
     slug: "systems/ads/experiment-platform",
     title: "Identity Experiment Platform：Shadow、A/A、A/B 与逐层对账",
     description:
-      "稳定分流、SRM、sample count / ID set / label diff、特征漂移与 AUC diff；两个等价 pipeline 的 AUC 差很大时，怎样逐层找到差异第一次出现的地方。附对账看板和排查挑战。",
+      "稳定分流、SRM、sample count / ID set / label diff、特征漂移与 AUC diff；两个等价 pipeline 的 AUC 差很大时，怎样逐层找到差异第一次出现的地方。附交互式逐层对账看板。",
     categoryId: "systems",
     category: "Systems",
     section: "Ads Backend Systems",

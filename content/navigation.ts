@@ -18,6 +18,10 @@ export const navigation = categories.map((category) => {
     children: [...new Set(notes.map((note) => note.section))].map((section) => ({
       title: section,
       children: notes.filter((note) => note.section === section),
+      subsections: [...new Set(notes.filter((note) => note.section === section && note.subsection).map((note) => note.subsection!))].map((title) => ({
+        title,
+        children: notes.filter((note) => note.section === section && note.subsection === title),
+      })),
     })),
   };
 });
