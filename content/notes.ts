@@ -1641,14 +1641,14 @@ export const noteEntries: NoteEntry[] = [
     slug: "ai-infra/agent-harness/subagents-skills-mcp",
     title: "Subagent、Skill 与 MCP：三种扩展方式",
     description:
-      "subagent 是另一个循环，skill 是按需加载的说明书，MCP 是统一协议。三个可视化：委派省了什么、渐进披露加载了什么、一个 MCP 工具的完整时序。",
+      "保留 Subagent 与 Skill 的上下文机制，从 Host/Client/Server、CLI 与 Function Calling 对照，到内部 Ads 平台的 MCP 调用模拟、工具粒度和可运行 Python 适配器。",
     categoryId: "ai-infra",
     category: "AI Infrastructure",
     section: "Agent Harness",
     created: "2026-10-15",
-    updated: "2026-10-15",
+    updated: "2026-11-02",
     status: "growing",
-    readingMinutes: 12,
+    readingMinutes: 25,
     tags: ["agent", "harness", "subagents", "skills", "MCP", "interactive"],
   },
   {
