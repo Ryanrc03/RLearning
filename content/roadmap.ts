@@ -27,6 +27,7 @@ export type RoadmapEdge = { from: string; to: string };
 
 export const roadmapNodes: RoadmapNode[] = [
   // CS foundations, then systems built on them
+  { id: "algo-data-structures", section: "Data Structures", categoryId: "algorithms", row: 0, col: 0 },
   { id: "cs-fundamentals", section: "CS Fundamentals", categoryId: "cs", row: 0, col: 1 },
   { id: "algo-binary-search", section: "Binary Search", categoryId: "algorithms", row: 1, col: 0 },
   { id: "cs-networks", section: "Computer Networks", categoryId: "cs", label: "Networks", row: 1, col: 1 },
@@ -62,6 +63,7 @@ const handEdges: RoadmapEdge[] = [
   { from: "cs-fundamentals", to: "cs-os" },
   { from: "cs-fundamentals", to: "cs-networks" },
   { from: "cs-fundamentals", to: "algo-binary-search" },
+  { from: "algo-data-structures", to: "algo-binary-search" },
   { from: "algo-binary-search", to: "algo-stack" },
   { from: "cs-networks", to: "sys-distributed" },
   { from: "cs-os", to: "sys-distributed" },

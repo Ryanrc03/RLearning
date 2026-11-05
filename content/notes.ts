@@ -7,6 +7,7 @@ export type NoteEntry = {
   categoryId: "cs" | "systems" | "ml" | "ai-infra" | "algorithms";
   category: string;
   section: string;
+  subsection?: string;
   created: string;
   updated: string;
   status: "seed" | "growing" | "stable";
@@ -22,6 +23,34 @@ export type NoteEntry = {
 
 // Published notes share this metadata across navigation, search, and article pages.
 export const noteEntries: NoteEntry[] = [
+  {
+    slug: "systems/sql-db-basics/group-by",
+    title: "SQL GROUP BY：从数据分组到聚合统计",
+    description: "从 8 条广告点击出发，亲手切换分组键与 COUNT / SUM / AVG，看清 WHERE 过滤行、HAVING 过滤组，再把聚合放回 Ad Click Aggregator。",
+    categoryId: "systems",
+    category: "Systems",
+    section: "System Design",
+    subsection: "SQL & DB Basics",
+    created: "2026-11-01",
+    updated: "2026-11-01",
+    status: "growing",
+    readingMinutes: 15,
+    tags: ["SQL", "database", "GROUP BY", "aggregation", "interactive", "Ads Click Aggregator"],
+  },
+  {
+    slug: "systems/sql-db-basics/mapreduce-spark",
+    title: "MapReduce & Apache Spark：从单机聚合到分布式计算",
+    description: "沿用 8 条广告点击，逐步走过 Split、Map、Combine、Shuffle、Reduce，再看 Spark 的调度、DAG、执行计划、容错与热点取舍。",
+    categoryId: "systems",
+    category: "Systems",
+    section: "System Design",
+    subsection: "SQL & DB Basics",
+    created: "2026-11-01",
+    updated: "2026-11-01",
+    status: "growing",
+    readingMinutes: 30,
+    tags: ["MapReduce", "Spark", "Shuffle", "DAG", "SQL", "interactive", "Data Skew"],
+  },
   {
     slug: "cs/fundamentals/overview",
     title: "CS Fundamentals Overview",
@@ -1569,7 +1598,7 @@ export const noteEntries: NoteEntry[] = [
     slug: "systems/ads/experiment-platform",
     title: "Identity Experiment Platform：Shadow、A/A、A/B 与逐层对账",
     description:
-      "稳定分流、SRM、sample count / ID set / label diff、特征漂移与 AUC diff；两个等价 pipeline 的 AUC 差很大时，怎样逐层找到差异第一次出现的地方。附对账看板和排查挑战。",
+      "稳定分流、SRM、sample count / ID set / label diff、特征漂移与 AUC diff；两个等价 pipeline 的 AUC 差很大时，怎样逐层找到差异第一次出现的地方。附交互式逐层对账看板。",
     categoryId: "systems",
     category: "Systems",
     section: "Ads Backend Systems",
@@ -1612,14 +1641,14 @@ export const noteEntries: NoteEntry[] = [
     slug: "ai-infra/agent-harness/subagents-skills-mcp",
     title: "Subagent、Skill 与 MCP：三种扩展方式",
     description:
-      "subagent 是另一个循环，skill 是按需加载的说明书，MCP 是统一协议。三个可视化：委派省了什么、渐进披露加载了什么、一个 MCP 工具的完整时序。",
+      "保留 Subagent 与 Skill 的上下文机制，从 Host/Client/Server、CLI 与 Function Calling 对照，到内部 Ads 平台的 MCP 调用模拟、工具粒度和可运行 Python 适配器。",
     categoryId: "ai-infra",
     category: "AI Infrastructure",
     section: "Agent Harness",
     created: "2026-10-15",
-    updated: "2026-10-15",
+    updated: "2026-11-02",
     status: "growing",
-    readingMinutes: 12,
+    readingMinutes: 25,
     tags: ["agent", "harness", "subagents", "skills", "MCP", "interactive"],
   },
   {
@@ -1800,6 +1829,21 @@ export const noteEntries: NoteEntry[] = [
     readingMinutes: 12,
     tags: ["stack", "monotonic stack", "next greater element", "amortized", "LeetCode", "interactive"],
     series: { id: "stack", title: "Stack & Monotonic Stack", order: 1 },
+  },
+  {
+    slug: "algorithms/hash-table/hashmap-internals",
+    title: "HashMap Internals：从 Hash Function 到 Python Dict",
+    description:
+      "从数组的 Base + i × ElementSize 出发搭出一个 HashMap：hash → index、冲突、线性探测、tombstone、负载因子与均摊扩容；再对照 CPython dict 的 compact 两层布局和扰动探测、Java HashMap 的树化条件，最后手写一个带测试的 Python 版本。四个交互组件都在真实执行数据结构。",
+    categoryId: "algorithms",
+    category: "Algorithms",
+    section: "Data Structures",
+    subsection: "Hash Table",
+    created: "2026-11-05",
+    updated: "2026-11-05",
+    status: "growing",
+    readingMinutes: 35,
+    tags: ["hash map", "hash table", "dict", "open addressing", "linear probing", "tombstone", "load factor", "CPython", "Java HashMap", "interactive"],
   },
   {
     slug: "ml/post-training/overview",

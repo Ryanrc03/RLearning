@@ -6,8 +6,11 @@ import { LangProvider } from "@/components/i18n/LangProvider";
 import { htmlLang, type Lang } from "@/lib/i18n";
 import "@/app/globals.css";
 import "@/styles/visualization.css";
+import "@/styles/sql.css";
+import "@/styles/spark.css";
 import "@/styles/sketch.css";
 import "@/styles/machine.css";
+import "@/styles/hashmap.css";
 import "katex/dist/katex.min.css";
 
 // Handwritten face for the Excalidraw-style figures; self-hosted at build time.

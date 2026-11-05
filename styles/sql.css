@@ -1,0 +1,58 @@
+/* Local SQL figures: use the existing frame and controls with scoped theme tokens. */
+.nav-subsection.is-open > .nav-section-toggle .nav-chevron { transform: rotate(90deg); }
+.nav-subsection { margin-left: 10px; border-left: 1px solid var(--line); padding-left: 4px; }
+.sql-viz { --sql-bg: var(--paper); --sql-panel: var(--cream); --sql-ink: var(--ink); --sql-muted: #646464; --sql-line: #d5d5d5; --sql-accent: var(--accent); --sql-soft: var(--accent-soft); min-width: 0; }
+.sql-viz .viz { color: var(--sql-ink); background: var(--sql-panel); border-color: var(--sql-line); --vline: var(--sql-line); --muted: var(--sql-muted); }
+.sql-viz .viz strong, .sql-viz .viz-head h4, .sql-viz .viz-table th { color: var(--sql-ink); }
+.sql-viz .viz-btn { background: var(--sql-bg); color: var(--sql-ink); border-color: var(--sql-line); }
+.sql-viz .viz-btn.is-on { background: var(--sql-soft); border-color: var(--sql-accent); }
+.sql-viz .viz-narr { background: var(--sql-bg); border-left-color: var(--sql-accent); }
+.sql-choices { border: 0; padding: 0; margin: 0 0 14px; min-width: 0; }
+.sql-choices legend { color: var(--sql-muted); font-size: 12px; margin-bottom: 6px; }
+.sql-choices > div { display: flex; gap: 6px; flex-wrap: wrap; }
+.sql-choices label { display: flex; align-items: center; gap: 6px; cursor: pointer; border: 1px solid var(--sql-line); padding: 6px 10px; border-radius: 6px; background: var(--sql-bg); }
+.sql-choices .is-selected { background: var(--sql-soft); border-color: var(--sql-accent); }
+.sql-choices input { margin: 0; accent-color: var(--sql-accent); }
+.sql-choices label:focus-within { outline: 2px solid var(--sql-accent); outline-offset: 2px; }
+.prose .sql-code { margin: 12px 0; padding: 14px; border: 1px solid var(--sql-line); background: var(--sql-bg); color: var(--sql-ink); font-size: 12px; white-space: pre; overflow-x: auto; }
+.sql-viz .sql-code code { background: none; padding: 0; color: inherit; font-size: inherit; }
+.sql-table-wrap { min-width: 0; overflow-x: auto; }
+.sql-viz table { width: 100%; }
+.sql-viz caption { color: var(--sql-muted); text-align: left; padding: 6px 0; font-size: 12px; }
+.sql-viz .viz-table th, .sql-viz .viz-table td { border-color: var(--sql-line); }
+.sql-viz .sql-arrow { text-align: center; color: var(--sql-muted); padding: 14px 0; }
+.sql-summary { margin: 14px 0; padding: 8px 12px; background: var(--sql-soft); border-radius: 6px; font-weight: 600; }
+.sql-columns { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px; align-items: start; }
+.sql-viz h5 { margin: 6px 0 10px; font-size: 12px; color: var(--sql-muted); }
+.sql-groups { display: grid; gap: 8px; }
+.sql-color-0 { --group-color: #2a78d6; }
+.sql-color-1 { --group-color: #c45c30; }
+.sql-color-2 { --group-color: #238568; }
+.sql-color-3 { --group-color: #8861c2; }
+.sql-color-4 { --group-color: #a47816; }
+.sql-group { border: 1px solid var(--sql-line); border-left: 3px solid var(--group-color); border-radius: 6px; padding: 10px 12px; background: var(--sql-bg); }
+.sql-group > div:first-child { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.sql-group strong { font-weight: 600; }
+.sql-group > div > span { color: var(--sql-muted); }
+.sql-events { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
+.sql-events span { padding: 1px 7px; border-radius: 4px; background: var(--sql-panel); font-family: monospace; }
+.sql-bars { display: grid; gap: 12px; padding: 12px 0; }
+.sql-bar-row { display: grid; grid-template-columns: 18px minmax(0,1fr) 80px; gap: 10px; align-items: center; }
+.sql-bar-row > span { text-align: right; font-variant-numeric: tabular-nums; }
+.sql-bar-track { height: 16px; border-radius: 4px; overflow: hidden; background: var(--sql-bg); }
+.sql-bar { height: 100%; background: var(--group-color); border-radius: 4px; transition: width .25s ease; }
+.sql-pipeline { display: grid; gap: 16px; }
+.sql-stage { position: relative; border-left: 2px solid var(--sql-accent); padding: 0 0 12px 14px; }
+.sql-stage:not(:last-child)::after { content: '↓'; position: absolute; bottom: -14px; left: -6px; color: var(--sql-accent); }
+.sql-stage > p { color: var(--sql-muted); padding: 4px 0 8px; }
+.sql-viz .sql-removed { color: var(--sql-muted); }
+.sql-removed td:first-child { text-decoration: line-through; }
+.sql-viz .sql-architecture { list-style: none; margin: 0; padding: 0; display: grid; gap: 22px; }
+.sql-architecture li { position: relative; display: flex; flex-direction: column; text-align: center; padding: 10px; border: 1px solid var(--sql-line); border-radius: 6px; background: var(--sql-bg); }
+.sql-architecture span { color: var(--sql-muted); font-size: 12px; }
+.sql-architecture li:not(:last-child)::after { content: '↓'; position: absolute; bottom: -23px; left: 50%; color: var(--sql-accent); }
+@media (max-width: 640px) { .sql-columns { grid-template-columns: minmax(0,1fr); } .sql-viz .viz { padding: 14px 12px; } .sql-choices label { min-height: 40px; } }
+@media (prefers-reduced-motion: reduce) { .sql-bar { transition: none; } }
+@media (prefers-color-scheme: dark) {
+  .sql-viz { color-scheme: dark; --sql-bg: #222127; --sql-panel: #1b1a20; --sql-ink: #eeeaf5; --sql-muted: #bcb6c8; --sql-line: #514b5e; --sql-accent: #b59afa; --sql-soft: #393048; }
+}

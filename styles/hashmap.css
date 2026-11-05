@@ -1,0 +1,119 @@
+/* HashMap Internals note (components/visualization/algorithms/*Hash*, LoadFactor*, CompactDict*, ChainingVsTree*). */
+.hm-row { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 12px; font-size: 12.5px; }
+.hm-row label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.hm-row input[type="text"], .hm-row input[type="number"] { width: 72px; font-size: 12.5px; padding: 4px 7px; border: 1px solid var(--vline); border-radius: 4px; background: #fff; color: var(--ink); font-family: "Cascadia Code", Consolas, monospace; }
+.hm-row input[type="range"] { width: 160px; accent-color: #3f3f3f; }
+.hm-error { margin: -4px 0 10px; color: var(--vcrit); font-size: 12px; }
+
+/* key → hash → index → value pipeline */
+.hm-pipe { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; align-items: stretch; }
+.hm-pipe-box { position: relative; background: #fff; border: 1px solid var(--vline); border-radius: 6px; padding: 8px 10px; min-width: 0; }
+.hm-pipe-box small { display: block; font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; color: #8b8b8b; margin-bottom: 3px; }
+.hm-pipe-box b { display: block; font-family: "Cascadia Code", Consolas, monospace; font-size: 13.5px; font-weight: 600; word-break: break-all; }
+.hm-pipe-box em { display: block; font-style: normal; font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+.hm-pipe-box:not(:last-child)::after { content: "→"; position: absolute; right: -11px; top: 50%; transform: translateY(-50%); color: #b3b3b3; font-size: 13px; z-index: 1; }
+.hm-pipe-box.is-key { border-color: #9cc3ef; background: #eaf3fd; }
+.hm-pipe-box.is-idx { border-color: #b77d00; background: #fdf0c8; }
+.hm-pipe-box.is-val { border-color: var(--v3); background: #ecf8f3; }
+
+/* slot arrays shared by the playground and the load simulator */
+.hm-scroll { overflow-x: auto; scrollbar-width: thin; padding: 2px 2px 6px; }
+.hm-slots { --hm-cell: 58px; display: grid; gap: 2px 5px; width: fit-content; margin: 0 auto; }
+.hm-index { text-align: center; font-family: "Cascadia Code", Consolas, monospace; font-size: 10.5px; color: var(--muted); }
+.hm-slot { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; height: 48px; border: 1px solid #c9c9c9; border-radius: 6px; background: #fff; font-family: "Cascadia Code", Consolas, monospace; font-size: 13.5px; font-variant-numeric: tabular-nums; color: var(--ink); transition: background-color .2s, border-color .2s, box-shadow .2s; }
+.hm-slot small { font-size: 10px; color: var(--muted); line-height: 1; }
+.hm-slot.is-empty { border-style: dashed; color: #b3b3b3; background: #fafafa; }
+.hm-slot.is-deleted { border-style: dashed; border-color: #a9a9a9; background: repeating-linear-gradient(135deg, #f1f1f1 0 5px, #e3e3e3 5px 10px); color: #6a6a6a; }
+.hm-slot.is-home { box-shadow: inset 0 -3px 0 #2a78d6; }
+.hm-slot.is-now { background: #fdf0c8; border-color: #b77d00; box-shadow: 0 0 0 1px #b77d00; }
+.hm-slot.is-hit { background: #ecf8f3; border-color: var(--v3); box-shadow: 0 0 0 1px var(--v3); }
+.hm-slot.is-bad { background: #fdf0ee; border-color: var(--vcrit); box-shadow: 0 0 0 1px var(--vcrit); }
+.hm-slot.is-visited { background: #eef5fd; border-color: #9cc3ef; }
+.hm-slot.is-pick { box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--v1); }
+.hm-mark { text-align: center; font-family: "Cascadia Code", Consolas, monospace; font-size: 10.5px; font-weight: 600; color: #2a78d6; min-height: 14px; line-height: 14px; }
+.hm-log { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 3px; max-height: 160px; overflow-y: auto; scrollbar-width: thin; font-size: 12px; }
+.hm-log li { display: grid; grid-template-columns: 34px 46px minmax(0, 1fr); gap: 8px; padding: 2px 6px; border-radius: 4px; font-family: "Cascadia Code", Consolas, monospace; font-size: 11.5px; color: var(--muted); }
+.hm-log li.is-on { background: #eef5fd; color: var(--ink); }
+.hm-log li.is-future { opacity: .4; }
+
+/* chaining buckets */
+.hm-buckets { display: grid; gap: 4px; }
+.hm-bucket { display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 8px; min-height: 32px; }
+.hm-bucket > span { font-family: "Cascadia Code", Consolas, monospace; font-size: 11px; color: var(--muted); text-align: right; }
+.hm-bucket.is-home > span { color: #2a78d6; font-weight: 600; }
+.hm-chain { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-height: 30px; padding: 2px 6px; border-radius: 6px; border: 1px dashed #d6d6d6; background: #fff; }
+.hm-chain .nil { color: #b3b3b3; font-size: 11px; font-family: "Cascadia Code", Consolas, monospace; }
+.hm-node { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 5px; border: 1px solid #c9c9c9; background: #fff; font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; transition: background-color .2s, border-color .2s; }
+.hm-node small { color: var(--muted); font-size: 10px; }
+.hm-node.is-now { background: #fdf0c8; border-color: #b77d00; }
+.hm-node.is-hit { background: #ecf8f3; border-color: var(--v3); }
+.hm-node.is-visited { background: #eef5fd; border-color: #9cc3ef; }
+.hm-node.is-gone { background: #fdf0ee; border-color: var(--vcrit); text-decoration: line-through; opacity: .7; }
+.hm-arrow { color: #b3b3b3; font-size: 11px; }
+
+/* load factor */
+.hm-grid { display: grid; gap: 3px; width: 100%; }
+.hm-cellbox { aspect-ratio: 1; display: grid; place-items: center; border-radius: 3px; border: 1px solid #e3e3e3; background: #fafafa; font-family: "Cascadia Code", Consolas, monospace; font-size: 9.5px; color: var(--ink); overflow: hidden; cursor: default; transition: background-color .2s; }
+.hm-cellbox.p1 { background: #ecf8f3; border-color: #9ad6bf; }
+.hm-cellbox.p2 { background: #fdf3cc; border-color: #e5c45a; }
+.hm-cellbox.p3 { background: #fde3c3; border-color: #e7a04a; }
+.hm-cellbox.p4 { background: #fdd6cf; border-color: #e5786a; }
+.hm-cellbox.is-pick { box-shadow: 0 0 0 2px #fff, 0 0 0 3.5px var(--v1); }
+.hm-cellbox.is-pickhome { box-shadow: inset 0 0 0 2px #2a78d6; }
+.hm-cellbox.is-new { outline: 2px solid #3f3f3f; outline-offset: -2px; }
+.hm-cost { width: 100%; height: 110px; }
+.hm-cost rect.base { fill: #cfe2f8; }
+.hm-cost rect.spike { fill: #e5786a; }
+.hm-cost line.avg { stroke: #3f3f3f; stroke-dasharray: 3 3; }
+.hm-cost text { font-size: 10px; fill: var(--muted); }
+.hm-resize-pair { display: grid; gap: 10px; }
+.hm-resize-pair h6 { margin: 0 0 4px; font-size: 11px; font-weight: 600; color: #8b8b8b; letter-spacing: .04em; }
+
+/* compact dict */
+.hm-dict { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 14px; align-items: start; }
+.hm-dict-col h5 { margin-bottom: 6px; }
+.hm-ix { display: grid; gap: 3px; }
+.hm-ix button, .hm-entry { all: unset; box-sizing: border-box; display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 8px; align-items: center; padding: 4px 8px; border-radius: 5px; border: 1px solid #dcdcdc; background: #fff; font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; cursor: pointer; transition: background-color .2s, border-color .2s; }
+.hm-entry { grid-template-columns: 30px minmax(0, 1fr) auto; }
+.hm-ix button > span:first-child, .hm-entry > span:first-child { color: var(--muted); font-size: 11px; text-align: right; }
+.hm-ix button.is-empty { color: #b3b3b3; border-style: dashed; background: #fafafa; }
+.hm-ix button.is-dummy { color: #6a6a6a; border-style: dashed; background: repeating-linear-gradient(135deg, #f1f1f1 0 5px, #e3e3e3 5px 10px); }
+.hm-ix button.is-on, .hm-entry.is-on { background: #fdf0c8; border-color: #b77d00; box-shadow: 0 0 0 1px #b77d00; }
+.hm-ix button.is-path { background: #eef5fd; border-color: #9cc3ef; }
+.hm-entry.is-null { color: #b3b3b3; border-style: dashed; background: #fafafa; }
+.hm-entry.is-dim { opacity: .45; }
+.hm-entry .hash { color: var(--muted); font-size: 10.5px; }
+.hm-entries { display: grid; gap: 3px; }
+.hm-arrowcol { display: none; }
+
+/* list vs tree */
+.hm-lvt { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+.hm-list { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; padding: 6px; border: 1px solid var(--vline); border-radius: 6px; background: #fff; min-height: 44px; }
+.hm-lnode { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 5px; border: 1px solid #d2d2d2; background: #fff; font-family: "Cascadia Code", Consolas, monospace; font-size: 10.5px; color: var(--ink); }
+.hm-lnode.is-visited { background: #eef5fd; border-color: #9cc3ef; }
+.hm-lnode.is-hit { background: #ecf8f3; border-color: var(--v3); font-weight: 600; }
+.hm-lnode.is-dim { opacity: .35; }
+.hm-tree { width: 100%; height: auto; }
+.hm-tree line { stroke: #cfcfcf; stroke-width: 1.2; }
+.hm-tree line.is-path { stroke: #2a78d6; stroke-width: 2; }
+.hm-tree circle { fill: #fff; stroke: #c9c9c9; stroke-width: 1.2; }
+.hm-tree circle.is-visited { fill: #eef5fd; stroke: #2a78d6; }
+.hm-tree circle.is-hit { fill: #ecf8f3; stroke: var(--v3); stroke-width: 2; }
+.hm-tree text { font-family: "Cascadia Code", Consolas, monospace; font-size: 9px; fill: var(--ink); text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.hm-tree circle, .hm-lnode { cursor: pointer; }
+.hm-verdict { margin-top: 10px; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--vline); background: #fff; font-size: 12.5px; }
+.hm-verdict code { font-family: "Cascadia Code", Consolas, monospace; font-size: 11.5px; }
+.hm-verdict.is-tree { border-color: var(--v3); }
+.hm-verdict.is-resize { border-color: #e5c45a; }
+
+@media (max-width: 700px) {
+  .hm-pipe { grid-template-columns: 1fr 1fr; }
+  .hm-pipe-box:nth-child(2)::after { display: none; }
+  .hm-dict, .hm-lvt { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 580px) {
+  .hm-slots { --hm-cell: 44px; }
+  .hm-slot { height: 42px; font-size: 12px; }
+  .hm-row input[type="range"] { width: 120px; }
+  .hm-log li { grid-template-columns: 30px 40px minmax(0, 1fr); }
+}
