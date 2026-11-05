@@ -1831,6 +1831,21 @@ export const noteEntries: NoteEntry[] = [
     series: { id: "stack", title: "Stack & Monotonic Stack", order: 1 },
   },
   {
+    slug: "algorithms/hash-table/hashmap-internals",
+    title: "HashMap Internals：从 Hash Function 到 Python Dict",
+    description:
+      "从数组的 Base + i × ElementSize 出发搭出一个 HashMap：hash → index、冲突、线性探测、tombstone、负载因子与均摊扩容；再对照 CPython dict 的 compact 两层布局和扰动探测、Java HashMap 的树化条件，最后手写一个带测试的 Python 版本。四个交互组件都在真实执行数据结构。",
+    categoryId: "algorithms",
+    category: "Algorithms",
+    section: "Data Structures",
+    subsection: "Hash Table",
+    created: "2026-11-05",
+    updated: "2026-11-05",
+    status: "growing",
+    readingMinutes: 35,
+    tags: ["hash map", "hash table", "dict", "open addressing", "linear probing", "tombstone", "load factor", "CPython", "Java HashMap", "interactive"],
+  },
+  {
     slug: "ml/post-training/overview",
     title: "Post-training Overview",
     description:

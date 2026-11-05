@@ -10,6 +10,7 @@ import "@/styles/sql.css";
 import "@/styles/spark.css";
 import "@/styles/sketch.css";
 import "@/styles/machine.css";
+import "@/styles/hashmap.css";
 import "katex/dist/katex.min.css";
 
 // Handwritten face for the Excalidraw-style figures; self-hosted at build time.

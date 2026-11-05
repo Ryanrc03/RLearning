@@ -108,6 +108,7 @@ import Hallucination from "@/content/ml/llm-engineering/hallucination.mdx";
 import BinarySearchTemplates from "@/content/algorithms/binary-search/templates.mdx";
 import BinarySearchOnAnswer from "@/content/algorithms/binary-search/on-answer.mdx";
 import MonotonicStack from "@/content/algorithms/stack/monotonic-stack.mdx";
+import HashmapInternals from "@/content/algorithms/hash-table/hashmap-internals.mdx";
 import PostTrainingOverview from "@/content/ml/post-training/overview.mdx";
 import Sft from "@/content/ml/post-training/sft.mdx";
 import Lora from "@/content/ml/post-training/lora.mdx";
@@ -260,6 +261,7 @@ export const noteComponents = {
   "algorithms/binary-search/templates": BinarySearchTemplates,
   "algorithms/binary-search/on-answer": BinarySearchOnAnswer,
   "algorithms/stack/monotonic-stack": MonotonicStack,
+  "algorithms/hash-table/hashmap-internals": HashmapInternals,
   "ml/post-training/overview": PostTrainingOverview,
   "ml/post-training/sft": Sft,
   "ml/post-training/lora": Lora,
