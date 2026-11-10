@@ -1,0 +1,243 @@
+import { KlToyFigure, BradleyTerryFigure, DpoDerivationFigure, DpoLossFigure, DpoDistributionFigure, DpoPipelineFigure } from "@/components/visualization/ml/post-training/dpo/DpoFigures";
+
+# DPO：从成对偏好直接优化策略
+
+**Direct Preference Optimization 把「哪一个回答更好」变成语言模型的训练目标：比较 policy 相对冻结 reference 的两个回答的 log 概率增量，不单独训练 reward model。**
+
+[RLHF 总览](/notes/ml/post-training/rlhf/)讲了奖励模型与 PPO 的分工；这里用三个章节补齐 DPO 的推导，再看它到底更新了什么。先理解 KL 的代价，再用 Bradley–Terry 把偏好变成 likelihood，最后把 reward 换写成 policy。
+
+## 第一章 · KL Divergence：离参考分布多远
+
+### 从两组概率开始
+
+模型优化奖励时，可能利用评分漏洞，写出高分却没有帮助的回答。KL 给「偏离 reference」标上价格，让优化过程在奖励与保留原有行为之间取舍；它不是回答质量的直接分数，也不能保证阻止所有 reward hacking。
+
+<KlToyFigure />
+
+对同一离散空间的两个分布，使用自然对数，单位是 nats：
+
+$$
+D_{\mathrm{KL}}(P\|Q)=\sum_x P(x)\log\frac{P(x)}{Q(x)}.
+$$
+
+当 $P=[0.2,0.8]$、$Q=[0.8,0.2]$：
+
+$$
+0.2\ln(0.25)+0.8\ln(4)=-0.2773+1.1090\approx0.8318.
+$$
+
+**单项可以为负。** 当某个结果上 $P(x)<Q(x)$，log 比值为负。不能把每一项都解释成非负距离；非负的是加总后的期望。
+
+### 为什么总和非负，方向却有区别
+
+在 $P,Q$ 都为正时，用 $-\ln t\ge1-t$，令 $t=Q(x)/P(x)$：
+
+$$
+D_{\mathrm{KL}}(P\|Q)
+\ge\sum_x P(x)\left(1-\frac{Q(x)}{P(x)}\right)
+=1-1=0.
+$$
+
+等号仅在两个分布一致时成立。带零概率的情形按极限定义：$P(x)=0$ 的项记作 0；$P(x)>0,Q(x)=0$ 则 KL 为无穷大。存在零概率时，同样可以在 $P$ 的支持集上得到非负结论。
+
+KL 通常不对称，因为一个方向由 $P$ 加权，反向由 $Q$ 加权。上面的交换二元例子恰好两个方向一样，不能用它证明不对称；把图里的 $P(1)$ 调到 0.30 就能看出区别。
+
+在 RLHF 中罚的是 $D_{\mathrm{KL}}(\pi\|\pi_{\mathrm{ref}})$，按当前 policy 的概率算平均。固定 reward 时，β 越大，每单位漂移越贵；β 越小，允许更大的奖励驱动变化。真实 GRPO 日志、长度分布与逐 token 估计器，继续看已有的 [KL 散度笔记](/notes/ml/post-training/kl-divergence/)。
+
+## 第二章 · Bradley–Terry：比较怎样变成 loss
+
+### 先看比赛，再看回答
+
+假设 A、B、C 的能力是未知正数 $\alpha_A,\alpha_B,\alpha_C$。能力不是胜率本身；BT 用两者能力的相对比例来建模：
+
+$$
+P(i\succ j)=\frac{\alpha_i}{\alpha_i+\alpha_j}.
+$$
+
+| 比赛 | A 赢 | A 输 |
+| --- | ---: | ---: |
+| A 对 B | 8 | 4 |
+| A 对 C | 3 | 5 |
+
+<BradleyTerryFigure />
+
+**为什么构造 likelihood？** 数据已经观察到了，未知的是参数。我们要找一组能力，让模型尽可能容易产生这份比赛记录。假设给定参数后各场结果独立，观察到这个具体结果序列的 likelihood 为：
+
+$$
+L=P(A\succ B)^8 P(B\succ A)^4
+P(A\succ C)^3 P(C\succ A)^5.
+$$
+
+若把数据理解为「只记录胜负次数」，还会有组合系数，但它们与能力参数无关，不改变 MLE。Likelihood 是关于参数的函数，不是「参数为真的概率」。
+
+**为什么取 log？** 很多小概率相乘会下溢；取 log 把乘积变成加法。log 单调递增，所以最大化 $L$ 与最大化 $\log L$ 的参数相同；加上负号，就成为优化器常用的最小化 negative log likelihood：
+
+$$
+\operatorname{NLL}=-\log L
+=-8\log p_{AB}-4\log(1-p_{AB})
+-3\log p_{AC}-5\log(1-p_{AC}).
+$$
+
+固定 $\alpha_A=1$，最大似然解是 $\alpha_B=0.5$、$\alpha_C=5/3\approx1.667$：因此 $p_{AB}=2/3=8/12$、$p_{AC}=3/8$。整体能力同乘一个正数不影响概率，所以只能识别相对能力；固定 A 是选择刻度，不是额外观测。这里比较图连通、每对有胜有负，因而有有限的相对能力解；其他数据未必满足。
+
+### 从正能力到任意实数分数
+
+令 $s_i=\log\alpha_i$，正能力就换成了不受正值约束的实数 score：
+
+$$
+P(i\succ j)=\frac{e^{s_i}}{e^{s_i}+e^{s_j}}
+=\sigma(s_i-s_j),\qquad \sigma(z)=\frac{1}{1+e^{-z}}.
+$$
+
+一条「i 胜 j」的记录对应：
+
+$$
+\ell=-\log\sigma(s_i-s_j).
+$$
+
+模型给赢家更高的分差，预测概率接近 1，loss 接近 0；若把赢家排在后面，就付出更大的 loss。不过有输有赢的数据，优化的是所有记录的总似然，而不是让每一对胜率都无限接近 1。
+
+### 从比赛迁移到 LLM Preference Learning
+
+一个 prompt $x$ 配两个回答：人工更喜欢的 chosen $y_w$，以及 rejected $y_l$。Reward Model $r_\phi$ 为每个回答输出标量，用分差预测人工偏好：
+
+$$
+P(y_w\succ y_l\mid x)=\sigma\big(r_\phi(x,y_w)-r_\phi(x,y_l)\big),
+\qquad
+\mathcal L_{\mathrm{RM}}
+=-\mathbb E_{(x,y_w,y_l)\sim\mathcal D}
+\left[\log\sigma\big(r_\phi(x,y_w)-r_\phi(x,y_l)\big)\right].
+$$
+
+标注员不必写出绝对分数。每个偏好对提供一次「谁应该排前面」的约束，训练调整 $\phi$ 来提高这些比较结果的概率。人类意见可能有噪声，BT 也是建模假设；模型预测不等于真实偏好的保证。
+
+## 第三章 · DPO Derivation：把 reward 换成 policy
+
+### 两条训练路线
+
+| 路线 | 数据与优化流程 |
+| --- | --- |
+| 传统 PPO 式 RLHF | SFT → 偏好数据训练 Reward Model → PPO 采样、评分、优化 Policy |
+| DPO | SFT → Preference Dataset → 直接用 DPO loss 优化 Policy |
+
+两者通常都需要偏好数据。DPO 省掉的是独立 reward model 和在线 RL 优化循环；不是省掉人类偏好，也不是不用 reference。
+
+<DpoDerivationFigure />
+
+### Step 1 · KL-Constrained Reward Maximization
+
+对固定 prompt $x$，先假设有 reward $r(x,y)$：
+
+$$
+\max_\pi\ \mathbb E_{y\sim\pi(\cdot\mid x)}[r(x,y)]
+-\beta D_{\mathrm{KL}}\big(\pi(\cdot\mid x)\|\pi_{\mathrm{ref}}(\cdot\mid x)\big).
+$$
+
+第一项鼓励高奖励回答，第二项为偏离 reference 付费。这里「KL-constrained」写成了带系数 $\beta>0$ 的惩罚形式；不是一个每步保证 KL 小于固定阈值的硬约束。
+
+### Step 2 · Optimal Policy
+
+在 reference 的支持集上、归一化项有限的条件下，最优分布有闭式形式：
+
+$$
+\pi^*(y\mid x)=\frac{1}{Z(x)}\pi_{\mathrm{ref}}(y\mid x)e^{r(x,y)/\beta},
+\qquad
+Z(x)=\sum_y\pi_{\mathrm{ref}}(y\mid x)e^{r(x,y)/\beta}.
+$$
+
+直观上，先把 reference 的概率乘一个奖励权重，再除以总和。$Z(x)$ 是 normalization / partition function；它需要遍历所有回答，真实语言空间下难以直接计算。
+
+### Step 3 · Recover the Implicit Reward
+
+对上式取 log、移项：
+
+$$
+r(x,y)=\beta\log\frac{\pi^*(y\mid x)}{\pi_{\mathrm{ref}}(y\mid x)}+\beta\log Z(x).
+$$
+
+**关键：reward 可以用 policy 相对 reference 的 log-probability ratio 表达，再加一个只依赖 prompt 的项。** 这提供了新的 reward 参数化方式；我们可以让语言模型本身隐式表示偏好分差。
+
+### Step 4 · Substitute Into Bradley–Terry
+
+BT 只用同一个 prompt 下两个回答的 reward 差：
+
+$$
+\begin{aligned}
+r(x,y_w)-r(x,y_l)
+&=\left[\beta\log\frac{\pi^*(y_w\mid x)}{\pi_{\mathrm{ref}}(y_w\mid x)}+\beta\log Z(x)\right]\\
+&\quad-\left[\beta\log\frac{\pi^*(y_l\mid x)}{\pi_{\mathrm{ref}}(y_l\mid x)}+\beta\log Z(x)\right]\\
+&=\beta\log\frac{\pi^*(y_w\mid x)}{\pi_{\mathrm{ref}}(y_w\mid x)}
+-\beta\log\frac{\pi^*(y_l\mid x)}{\pi_{\mathrm{ref}}(y_l\mid x)}.
+\end{aligned}
+$$
+
+两处 $\beta\log Z(x)$ 相同、符号相反，因此抵消。把差代进 $\sigma(r_w-r_l)$，就不再需要算 $Z(x)$。这里必须是同一个 $x$；不同 prompt 的 partition function 通常不同。
+
+### Step 5 · Final DPO Loss
+
+用可训练的 $\pi_\theta$ 来参数化策略，对偏好数据做最大似然估计：
+
+$$
+\mathcal L_{\mathrm{DPO}}(\theta)
+=-\mathbb E_{(x,y_w,y_l)\sim\mathcal D}\left[
+\log\sigma\left(
+\beta\log\frac{\pi_\theta(y_w\mid x)}{\pi_{\mathrm{ref}}(y_w\mid x)}
+-\beta\log\frac{\pi_\theta(y_l\mid x)}{\pi_{\mathrm{ref}}(y_l\mid x)}
+\right)\right].
+$$
+
+- $\mathcal D$：同一 prompt 的 chosen / rejected 偏好对。
+- $\pi_\theta$：可训练 policy，一般从 SFT 初始化；两种回答都由它评估。
+- $\pi_{\mathrm{ref}}$：冻结 reference，通常为初始 SFT 模型；也评估两种回答。
+- $\beta$：来自 KL 惩罚的正系数，在 loss 中缩放相对 log 概率差。
+- Sigmoid 内的 $m$：缩放后的 preference margin；$\sigma(m)$ 是偏好模型预测概率。
+- $-\log\sigma(m)$：单对 negative log likelihood，最终对 batch / 数据集求平均。
+
+<DpoLossFigure />
+
+### Sequence log probabilities 与数值稳定
+
+一条回答的概率是逐 token 条件概率的乘积，所以 log 概率是求和：
+
+$$
+\log\pi_\theta(y\mid x)=\sum_{t=1}^{T}\log\pi_\theta(y_t\mid x,y_{<t}).
+$$
+
+Teacher forcing 把数据中的回答 token 逐个送入模型；仅对 response token 累加，排除 prompt 和 padding，并保持 policy / reference 的 tokenizer、模板、截断和 EOS 约定一致。标准 DPO 使用序列总 log 概率，随意改成长度平均就改变了目标。
+
+实现不先连乘概率，也不直接算 $-\log(\sigma(m))$：用 $\operatorname{softplus}(-m)=\max(0,-m)+\log(1+e^{-|m|})$，大正负 margin 都不会因 exp 溢出而变成 NaN。初始 $\pi_\theta=\pi_{\mathrm{ref}}$ 时，两种 log ratio 都为 0，$m=0$，单对 loss 是 $\ln 2\approx0.6931$。
+
+## DPO 到底训练了什么？
+
+### A · Distribution Shift：奖励重加权的理论图景
+
+<DpoDistributionFigure />
+
+固定玩具 reward 后，$\pi^*\propto\pi_{\mathrm{ref}} e^{r/\beta}$ 说明 KL 代价怎样改变最优分布：β 小，偏向高奖励回答；β 大，靠近 reference。图里的 reward 是人为指定的教学值，**不是 DPO 训练时必须额外提供的标签**。
+
+DPO 实际用偏好对调整相对 margin，没有独立的显式 reward 打分网络。闭式最优分布图也没有模拟神经网络梯度下降、有限数据或优化器误差，不能当成真实训练曲线。
+
+### B · Training Pipeline：只更新 Policy
+
+<DpoPipelineFigure />
+
+Policy 和 Reference 都评估 chosen、rejected；只有 policy 的两条路径参与反向传播。Reference 使用 no-grad / stop-gradient，参数不交给 optimizer。固定数据和预处理时，可以缓存 reference log 概率；冻结不等于「不用算它」。
+
+### C · 相对 margin 变好，不代表 chosen 每一步都涨
+
+在 calculator 点「两者都降、margin 却增」：reference log 概率是 $(-3,-4)$，policy 变成 $(-4,-7)$。Chosen 的绝对概率降低了，但其 log ratio 为 $-1$，rejected 为 $-3$，相对差 $\Delta=2$；β = 0.1 时 $m=0.2$、loss 约 0.5981，比初始的 0.6931 小。
+
+这个例子说明目标关心相对偏好。它不是对某个优化器轨迹的预测：神经网络共享参数，多条训练样本的梯度会相互影响，不能保证每一步 chosen 的绝对概率都增加。
+
+## 代价与取舍
+
+- **数据覆盖决定能学到什么。** 标准 DPO 使用离线偏好对，不依靠在线 rollout 持续探索；它仍可能泛化，但不能保证纠正数据中没覆盖的错误。
+- **不单独训练 RM，不代表没有假设。** BT 偏好模型、reference 的支持集与标签质量都会限制结果；隐式 reward 也只能确定到 prompt 相关的加性常数，不能当成可跨 prompt 比较的绝对质量分。
+- **β 的两种读法要分清。** 固定 reward 的最优策略中，大 β 意味着更强的 KL 代价；在固定 log 概率的 calculator 中，大 β 只是放大当前 margin。真实训练还受数据、学习率与拟合程度影响，没有「某个 β 保证最终 KL」的通用结论。
+- **DPO 与 PPO / GRPO 解决的路径不同。** PPO / GRPO 用采样与奖励优化；DPO 把静态偏好变成可微 loss，流程更简洁，但仍有训练显存、reference 前向、长度偏置与偏好噪声的成本。
+
+## 再往下看与参考
+
+返回 [RLHF 总览](/notes/ml/post-training/rlhf/)看两条路线的位置；[PPO](/notes/ml/post-training/ppo/)解释在线采样、GAE 与 clipping，[GRPO](/notes/ml/post-training/grpo/)解释如何用组内比较替代 critic。
+
+推导核对：[DPO 原论文](https://arxiv.org/abs/2305.18290)的 §3–4 与附录 A.1–A.2。延伸材料：[参考视频](https://www.bilibili.com/video/BV1GF4m1L7Nt/)。

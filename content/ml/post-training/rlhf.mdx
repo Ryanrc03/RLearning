@@ -41,8 +41,8 @@ $$
 - PPO 训练时显存里有四个模型：policy（训）、reference（冻结）、reward（冻结）、critic（训，通常和 policy 一样大）。critic 最贵，也最难训准。
 - PPO 是 on-policy：能用 RM 给自己新写的回答打分、持续探索，上限高；但超参多、易发散，RM 越被优化越不可信。
 - DPO 是 offline：只要 policy 和 reference 两个模型，像 SFT 一样稳；代价是只能学偏好数据里出现过的回答，见不到自己的新错误，还可能把 $y_w$、$y_l$ 的概率一起压低。
-- β 是同一个旋钮：太小会 reward hacking，太大等于没训；PPO 和 DPO 都有它。
+- β 在 RLHF 原目标中控制 KL 代价，在 DPO loss 中缩放相对 margin；固定 reward 的理论最优分布与实际有限步训练要区分，不能仅凭 β 大小断言最终 KL。
 
 ## 再往下看
 
-下一页 [PPO：从 Actor–Critic 到 LLM 强化学习](/notes/ml/post-training/ppo/) 从四种逻辑角色讲到 GAE、Clipping 与完整训练循环。Critic 估计状态价值来构造 advantage，[GRPO](/notes/ml/post-training/grpo/) 改用同一个 prompt 的一组回答的平均分当基线，把 critic 去掉。
+下一页 [DPO：从成对偏好直接优化策略](/notes/ml/post-training/dpo/)用 KL、Bradley–Terry 与交互计算器展开推导。继续走在线奖励优化路线，[PPO：从 Actor–Critic 到 LLM 强化学习](/notes/ml/post-training/ppo/) 从四种逻辑角色讲到 GAE、Clipping 与完整训练循环。Critic 估计状态价值来构造 advantage，[GRPO](/notes/ml/post-training/grpo/) 改用同一个 prompt 的一组回答的平均分当基线，把 critic 去掉。
