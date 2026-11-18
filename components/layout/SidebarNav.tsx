@@ -25,7 +25,7 @@ const sectionKey = (categoryId: string, section: string) => `${categoryId}/${sec
 function openFor(pathname: string) {
   const path = stripLang(pathname);
   const note = noteEntries.find((entry) => path === `/notes/${entry.slug}`);
-  return new Set(note ? [note.categoryId, sectionKey(note.categoryId, note.section)] : []);
+  return new Set(note ? [note.categoryId, sectionKey(note.categoryId, note.section), ...(note.subsection ? [sectionKey(note.categoryId, `${note.section}/${note.subsection}`)] : [])] : []);
 }
 
 function Highlight({ text, term }: { text: string; term: string }) {
@@ -53,7 +53,7 @@ export default function SidebarNav({ pathname, onNavigate, onSearchShortcut }: P
   const searchIndex = useMemo(() => noteEntries.map((note) => ({
     note,
     href: notePath(note, lang),
-    haystack: `${note.en?.title ?? ""} ${note.title} ${note.section} ${note.category} ${note.tags.join(" ")}`.toLowerCase(),
+    haystack: `${note.en?.title ?? ""} ${note.title} ${note.section} ${note.subsection ?? ""} ${note.category} ${note.tags.join(" ")}`.toLowerCase(),
   })), [lang]);
 
   const toggle = (key: string) => setOpen((prev) => {
@@ -154,9 +154,22 @@ export default function SidebarNav({ pathname, onNavigate, onSearchShortcut }: P
                               <button type="button" className="nav-section-toggle" aria-expanded={sectionOpen} onClick={() => toggle(key)}>
                                 <Icon name="chevron" className="nav-chevron" /><span>{section.title}</span><span className="nav-count">{section.children.length}</span>
                               </button>
-                              {sectionOpen && section.children.map((note) => {
+                              {sectionOpen && section.children.filter((note) => !note.subsection).map((note) => {
                                 const active = path === `/notes/${note.slug}`;
                                 return <Link key={note.slug} href={notePath(note, lang)} className={`note-link ${active ? "is-active" : ""}`} aria-current={active ? "page" : undefined} onClick={onNavigate}><span className="note-bullet" /><NoteTitle note={note} lang={lang} /></Link>;
+                              })}
+                              {sectionOpen && section.subsections.map((subsection) => {
+                                const subkey = sectionKey(group.id, `${section.title}/${subsection.title}`);
+                                const subOpen = open.has(subkey);
+                                return <div className={`nav-subsection ${subOpen ? "is-open" : ""}`} key={subkey}>
+                                  <button type="button" className="nav-section-toggle" aria-expanded={subOpen} onClick={() => toggle(subkey)}>
+                                    <Icon name="chevron" className="nav-chevron" /><span>{subsection.title}</span><span className="nav-count">{subsection.children.length}</span>
+                                  </button>
+                                  {subOpen && subsection.children.map((note) => {
+                                    const active = path === `/notes/${note.slug}`;
+                                    return <Link key={note.slug} href={notePath(note, lang)} className={`note-link ${active ? "is-active" : ""}`} aria-current={active ? "page" : undefined} onClick={onNavigate}><span className="note-bullet" /><NoteTitle note={note} lang={lang} /></Link>;
+                                  })}
+                                </div>;
                               })}
                             </div>
                           );

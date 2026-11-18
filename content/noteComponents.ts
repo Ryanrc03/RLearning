@@ -76,6 +76,11 @@ import Bert from "@/content/ml/llms/bert.mdx";
 import BertVsMacbert from "@/content/ml/llms/bert-vs-macbert.mdx";
 import BertFinetuning from "@/content/ml/llms/bert-finetuning.mdx";
 import InceptionBlock from "@/content/ml/dl-blocks/inception-block.mdx";
+import CollaborativeFiltering from "@/content/ml/recsys/collaborative-filtering.mdx";
+import EmbeddingRetrieval from "@/content/ml/recsys/embedding-retrieval.mdx";
+import TwoTowerArchitecture from "@/content/ml/recsys/two-tower-architecture.mdx";
+import TwoTowerSampling from "@/content/ml/recsys/two-tower-negative-sampling.mdx";
+import TwoTowerServing from "@/content/ml/recsys/two-tower-serving-updates.mdx";
 import RetrievalPrecisionAtK from "@/content/ml/recsys/retrieval-precision-at-k.mdx";
 import ClassifiersOverview from "@/content/ml/classifiers/overview.mdx";
 import NaiveBayes from "@/content/ml/classifiers/naive-bayes.mdx";
@@ -226,6 +231,11 @@ export const noteComponents = {
   "ml/llms/bert-vs-macbert": BertVsMacbert,
   "ml/llms/bert-finetuning": BertFinetuning,
   "ml/dl-blocks/inception-block": InceptionBlock,
+  "ml/recsys/collaborative-filtering": CollaborativeFiltering,
+  "ml/recsys/embedding-retrieval": EmbeddingRetrieval,
+  "ml/recsys/two-tower-architecture": TwoTowerArchitecture,
+  "ml/recsys/two-tower-negative-sampling": TwoTowerSampling,
+  "ml/recsys/two-tower-serving-updates": TwoTowerServing,
   "ml/recsys/retrieval-precision-at-k": RetrievalPrecisionAtK,
   "ml/classifiers/overview": ClassifiersOverview,
   "ml/classifiers/naive-bayes": NaiveBayes,

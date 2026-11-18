@@ -1,0 +1,120 @@
+import { ArchitectureExplorer, LossExplorer } from "@/components/visualization/ml/recsys/TwoTowerFigures";
+
+# 双塔召回（一）：模型结构与训练目标
+
+上一章用 ID 查表得到用户向量 $a$ 和物品向量 $b$，再用 $a^\top b$ 预测兴趣。视频推荐还可以利用地区、设备、短期行为、类别和时长。双塔把这些特征编码到同一个可检索空间。[向量召回：从矩阵补全到最近邻搜索](/notes/ml/recsys/embedding-retrieval/)
+
+三章共用一个平台场景。U1 常看 ML / Programming，U2 常看 Sports，U3 常看 Travel。物品 A、B、C、D 分别是 Python Tutorial、ML Interview、Basketball Highlights、Travel Guide。下文把二维向量当作可复算的模型输出；线上可以用 64 维或其他共同维度。
+
+## 两张特征表，两个编码器
+
+用 $x_u$ 表示用户 $u$ 编码后的输入特征，$x_i$ 表示物品 $i$ 的输入特征，$\theta,\phi$ 是各自的参数。
+
+$$
+a=f_\theta(x_u),\qquad b=g_\phi(x_i)
+$$
+
+用户塔有三路输入。User ID 查 ID Embedding。Country、Device 或 Membership 等类别字段各查独立的 Embedding 表，表的维度可以不同。账号年龄、历史活跃度、平均观看时长等连续特征可以归一化后直接输入；若先分桶，就把桶 ID 当作类别再查表。比如 User ID 16 维、Country 8 维、Device 8 维和 4 个数值特征，共 $16+8+8+4=36$ 维，再交给 MLP 输出 $a\in\mathbb R^{64}$。
+
+物品塔分别编码 Item ID、Category、Brand 和价格、热度、时长等数值，例如 $16+8+8+3=35$ 维，经自己的 MLP 输出 $b\in\mathbb R^{64}$。输入维度可以不同，输出维度须一致。两个塔各自维护参数；正物品 $b^+$ 和负物品 $b^-$ 都由同一个物品塔计算。
+
+<ArchitectureExplorer />
+
+## 为什么这种结构能用 ANN
+
+课程用 Cosine 衡量匹配。分子是内积，分母是两向量的 L2 模长。U1 若为 $(1,0)$，A 为 $(0.6,0.8)$，两个模长均为 1，$s(u,A)=0.6$。
+
+$$
+s(u,i)=\frac{a^\top b}{\|a\|_2\|b\|_2}
+$$
+
+单位化以后，内积排序等于 Cosine 排序。因此可以离线生成 item 向量和 ANN 索引，请求到来时只编码用户，再搜索 Top-K。实际实现可用带 epsilon 的归一化防止除以零，Serving 时还应有缺失或零向量时的兜底。
+
+Joint MLP 则把用户与物品特征拼在一起打分。它能学习更丰富的交叉，但一般要为每个用户–物品对执行网络，也更难把分数拆成可索引的独立向量。双塔用独立表示换取高效召回，交叉打分常留给下游 Ranking。
+
+## Pointwise：一个样本对的匹配损失
+
+把一次曝光点击记为标签 $y=1$，选定的负例记 $y=0$。Cosine 分数 $s$ 位于 $[-1,1]$。乘正的 Logit Scale $\gamma$ 后，Sigmoid 输出训练任务的预测概率 $p$。是否能把它解释成真实 CTR，还取决于采样与校准。
+
+$$
+p=\sigma(\gamma s),\qquad L=-y\log p-(1-y)\log(1-p)
+$$
+
+$s=0.6$、$\gamma=5$ 时 logit 是 3，$p\approx0.953$。如果 A 是点击正例，损失约 0.049；若标签切换为 0，同一个预测的损失约 3.049。扩大 $\gamma$ 可以让分数变得更尖锐，但也会拉大高置信度错误的惩罚。
+
+## Pairwise：让正例领先负例
+
+同一个用户对应 $b^+$ 和 $b^-$，相似度记作 $s^+$、$s^-$。Hinge 要求正样本至少领先 Margin $m$。Logistic 对分差使用平滑的 Softplus。
+
+$$
+L_{\mathrm{hinge}}=\max(0,s^-+m-s^+),\qquad
+L_{\mathrm{logistic}}=\log(1+e^{\gamma(s^--s^+)})
+$$
+
+令 $s^+=0.6$、$s^-=0.5$、$m=0.2$，正例虽然领先 0.1，仍差 0.1 才到 Margin，所以 Hinge 为 0.1。$\gamma=5$ 时 Logistic 为 $\log(1+e^{-0.5})\approx0.474$。当分差达到 Margin，Hinge 为 0；Logistic 会继续随分差增大而平滑下降。
+
+## Listwise：一正多负在候选集合里竞争
+
+温度 $\tau>0$ 把分数变成候选集合内的 logits。Softmax 做归一化后，正例的位置对应 one-hot 目标中的 1，因此交叉熵只留下 $-\log p^+$。
+
+$$
+p^+=\frac{\exp(s^+/\tau)}{\exp(s^+/\tau)+\sum_j\exp(s_j^-/\tau)},\qquad L=-\log p^+
+$$
+
+以 A 为正例、B/C/D 为负例候选。分数 $[0.6,0.5,0.2,-0.3]$ 除以 0.2 得 $[3,2.5,1,-1.5]$，正例概率约 0.570，损失约 0.561。$\tau$ 越低，概率越集中到高分物品；如果负例分数领先，这也会加大损失。实际代码用稳定的 log-sum-exp 或直接把原始 logits 传给交叉熵。
+
+<LossExplorer />
+
+| 目标 | 一次训练用什么 | 主要优化什么 |
+|---|---|---|
+| Pointwise | 一个用户–物品对 | 单项匹配 |
+| Pairwise | 一个正例和一个负例 | 正负分差 |
+| Listwise | 一个正例和多个负例 | 正例在集合内的概率 |
+
+## PyTorch：共享物品塔，切换训练目标
+
+示例用独立的 ID、类别和数值特征编码，再把两个输出 L2 归一化。把任一个标量损失交给优化器即可训练；打印值来自固定种子的初始网络，和上面的手算案例各自独立。
+
+```python
+import torch
+from torch import nn
+from torch.nn import functional as F
+
+torch.manual_seed(7)
+
+class Tower(nn.Module):
+    def __init__(self, id_count, categories, numeric_count):
+        super().__init__()
+        self.ids = nn.Embedding(id_count, 16)
+        self.fields = nn.ModuleList(nn.Embedding(size, 8) for size in categories)
+        self.mlp = nn.Sequential(
+            nn.Linear(16 + 8 * len(categories) + numeric_count, 32),
+            nn.ReLU(), nn.Linear(32, 64),
+        )
+
+    def forward(self, ids, categories, numerical):
+        fields = [table(categories[:, j]) for j, table in enumerate(self.fields)]
+        features = torch.cat([self.ids(ids), *fields, numerical], dim=-1)
+        return F.normalize(self.mlp(features), dim=-1)
+
+class UserTower(Tower):
+    def __init__(self):
+        super().__init__(3, (2, 2), 4)
+
+class ItemTower(Tower):
+    def __init__(self):
+        super().__init__(4, (3, 2), 3)
+
+user_tower, item_tower = UserTower(), ItemTower()
+a = user_tower(torch.tensor([0]), torch.tensor([[0, 1]]),
+               torch.tensor([[0.2, 0.8, 0.6, 0.4]]))
+b = item_tower(torch.arange(4), torch.tensor([[0, 0], [0, 1], [1, 0], [2, 1]]),
+               torch.tensor([[0., 1., .4], [0., .6, .5], [.1, .7, .2], [.2, .3, .7]]))
+scores = (a @ b.T).squeeze(0)
+bce = F.binary_cross_entropy_with_logits(5 * scores[:1], torch.ones(1))
+hinge = (scores[1] + 0.2 - scores[0]).clamp_min(0)
+listwise = F.cross_entropy(scores[None, :] / 0.2, torch.tensor([0]))
+print("BCE / hinge / listwise:", *(round(loss.item(), 4) for loss in (bce, hinge, listwise)))
+```
+
+Pairwise 和 Listwise 都要先决定参与比较的负例从哪来，这会改变模型学到的匹配关系。[下一章：正负样本选择与采样偏差](/notes/ml/recsys/two-tower-negative-sampling/) · [王树森：双塔召回第一讲](https://www.youtube.com/watch?v=2Mc10LZ-DB0)

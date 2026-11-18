@@ -5,6 +5,7 @@ import {
   bce,
   boundarySegment,
   crossEntropy,
+  crossEntropyFromLogits,
   logisticGrad,
   logitsForTarget,
   makeBlobs,
@@ -100,5 +101,32 @@ test("logitsForTarget inverts softmax for the target class", () => {
 test("K = 2: softmax of (z1, z2) is the sigmoid of z1 − z2", () => {
   for (const [z1, z2] of [[1.5, -0.5], [-2, 3], [0, 0], [4, 4.5]]) {
     close(softmax([z1, z2])[0], sigmoid(z1 - z2), 1e-9);
+  }
+});
+
+test("logit cross-entropy remains accurate after probability underflow and common shifts", () => {
+  close(crossEntropyFromLogits([2, 1, 0], 0), 0.4076059644443804);
+  close(crossEntropyFromLogits([1002, 1001, 1000], 0), 0.4076059644443804);
+  close(crossEntropyFromLogits([1000, -1000], 1), 2000);
+  assert.throws(() => crossEntropyFromLogits([], 0));
+  assert.throws(() => crossEntropyFromLogits([NaN, 0], 0));
+  assert.throws(() => crossEntropyFromLogits([1, 0], 0.5));
+});
+
+test("softmax competition and finite-difference loss gradient match the tutorial", () => {
+  const logits = [2, 1, 0];
+  const probabilities = softmax(logits);
+  const h = 1e-5;
+  logits.forEach((_, index) => {
+    const plus = logits.map((value, i) => value + (i === index ? h : 0));
+    const minus = logits.map((value, i) => value - (i === index ? h : 0));
+    const numerical = (crossEntropyFromLogits(plus, 0) - crossEntropyFromLogits(minus, 0)) / (2 * h);
+    close(numerical, probabilities[index] - Number(index === 0), 1e-8);
+  });
+  assert.ok(softmax([2, 2, 0])[0] < softmax([2, 0, 0])[0]);
+  for (let dog = -5; dog <= 5; dog += 0.1) {
+    const p = softmax([2, dog, 0]);
+    close(p.reduce((total, value) => total + value, 0), 1);
+    assert.ok(p.every(Number.isFinite));
   }
 });

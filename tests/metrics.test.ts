@@ -78,6 +78,24 @@ test("ROC points start at (0,0), end at (1,1), and their area equals the pairwis
   }
 });
 
+test("four-sample ROC sweep advances both counts at the shared 0.8 threshold", () => {
+  const items = [
+    { score: 0.2, label: false },
+    { score: 0.9, label: true },
+    { score: 0.8, label: false },
+    { score: 0.8, label: true },
+  ];
+  const points = rocPoints(items);
+  assert.deepEqual(points, [
+    { threshold: Infinity, fpr: 0, tpr: 0 },
+    { threshold: 0.9, fpr: 0, tpr: 0.5 },
+    { threshold: 0.8, fpr: 0.5, tpr: 1 },
+    { threshold: 0.2, fpr: 1, tpr: 1 },
+  ]);
+  assert.deepEqual(confusionAtThreshold(items, 0.8), { tp: 2, fp: 1, fn: 0, tn: 1 });
+  assert.equal(trapezoid(points.map(({ fpr, tpr }) => [fpr, tpr])), 0.875);
+});
+
 test("PR points and average precision on a hand example", () => {
   // Ranked: P N P N → precision at each positive: 1/1, 2/3 → AP = (1 + 2/3) / 2
   const items = [
