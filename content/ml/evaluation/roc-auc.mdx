@@ -1,46 +1,91 @@
 import RocAucFigure from "@/components/visualization/ml/evaluation/RocAucFigure";
+import RocAucSweepFigure from "@/components/visualization/ml/evaluation/RocAucSweepFigure";
 
 # ROC 与 AUC
 
-## 一句话
+ROC 曲线记录分类阈值从高到低时，模型找出多少正例、误报多少负例。AUC 是曲线下面积，用来比较模型的排序能力。实际做预测时，仍要根据误报和漏报的成本选一个阈值。
 
-**ROC 曲线把阈值从高扫到低，每个阈值记一个 (FPR, TPR) 点连起来；AUC 是曲线下面积，等于随机抽一个正例和一个负例、模型给正例更高分数的概率。**
+## 阈值怎么画成一条曲线
 
-它比较的是模型的排序能力，和你最后选哪个阈值无关。
+将分数大于等于阈值的样本判为正例。ROC 的横轴 FPR 是被误报的负例占全部负例的比例，纵轴 TPR 是被找出的正例占全部正例的比例，也就是 recall。
 
-## 为什么需要它
+$$
+FPR = \frac{FP}{FP + TN},\qquad TPR = \frac{TP}{TP + FN}
+$$
 
-上一页的三个指标都挂在一个阈值上。两个模型放在一起比：A 在阈值 0.5 下 precision 高，B 在 0.3 下 recall 高，谁更好说不清，因为比的不是模型，是两个阈值。要么先定死阈值，要么把所有阈值一起看。ROC 做的是后者：每个阈值一个点，整条曲线才是模型。
-
-## 怎么工作
+阈值高于所有分数时，曲线从 (0, 0) 出发。每次把阈值降到下一个分数，纳入这一整组样本，记下新的 (FPR, TPR)。当所有样本都被判为正例时，曲线到达 (1, 1)。曲线越贴左上角，模型就越能在同样的误报率下找出更多正例。
 
 <RocAucFigure />
 
-横轴和纵轴都是从混淆矩阵来的比例。纵轴 TPR 就是 recall，也叫 sensitivity；横轴 FPR 是被冤枉的负例占全部负例的比例，1 − FPR 叫 specificity，也就是负例那一侧的 recall：
+## 用 NumPy 算一遍
 
-$$
-TPR = \frac{TP}{TP + FN},\qquad FPR = \frac{FP}{FP + TN}
-$$
+下面有两个正例和两个负例。拖动滑杆到 0.8，观察两个同分样本怎样一起进入 ROC 曲线。
 
-阈值最高时谁都不被叫成 dog，TPR 和 FPR 都是 0，曲线从左下角出发；阈值最低时所有动物都是 dog，两者都是 1，曲线在右上角结束。中间每降一点阈值，就多放进来一只动物：是 dog 就往上走一格，是 cat 就往右走一格。对角线是 TPR = FPR，相当于瞎猜；曲线越贴左上角，说明同样冤枉这么多 cat 时找出的 dog 越多。
+<RocAucSweepFigure />
 
-AUC 是曲线下面积。它有一个更好记的等价说法：把每一只 dog 和每一只 cat 配成一对，看模型给 dog 的分数是不是更高，分数相同算半对：
+先数出正负例各两个。用 `np.argsort` 拿到分数降序的索引，再用同一个索引重排标签，保证每个标签还跟着原来的分数。对正例和负例的指示数组分别做 `np.cumsum`，得到扫描到每一行时的 TP 和 FP。
 
-$$
-AUC = \frac{\sum_{i \in \text{dog}} \sum_{j \in \text{cat}} \left[\,\mathbb{1}(s_i > s_j) + \tfrac{1}{2}\,\mathbb{1}(s_i = s_j)\,\right]}{N_{\text{dog}} \cdot N_{\text{cat}}}
-$$
+比较相邻分数，用布尔掩码只保留每组的最后一行。阈值降到 0.8 时，两个同分样本一起进入，累计 TP 为 2，FP 为 1，ROC 点从 (0, 0.5) 走到 (0.5, 1)。阈值高于最大分数时谁都没进来，所以还要在最前面补上 (0, 0)。
 
-图里模型 A 的 AUC 约 0.9，意思是随便抽一只 dog 和一只 cat，十次里有九次 A 把 dog 排在前面。拖阈值时点在曲线上走，曲线和 AUC 一动不动。
+每段面积等于横向宽度乘两端的平均高度。`np.diff(fpr)` 算宽度，相邻两个 TPR 的均值算高度。第一段竖直，面积为 0；后两段面积是 0.375 和 0.5，加起来是 0.875。用正负配对也能核对：四对里赢三对、平一对，平局算半对，得到 (3 + 0.5) / 4 = 0.875。
 
-## 代价与取舍
+<a href="/labs/evaluation/roc_auc.py" download="roc_auc.py">下载 NumPy 实现</a>。运行 `python roc_auc.py` 会打印这个例子的结果。
 
-- AUC 只看排序，不看分数本身准不准。两个模型 AUC 相同，输出的概率可以一个整体偏高、一个整体偏低，需要概率时还要看校准。
-- AUC 把所有阈值平均对待，而上线只用一个阈值。曲线在你关心的那一段（比如 FPR 小于 1% 的区间）谁高，比总面积更要紧。
-- 正例稀少时，FPR 的分母是庞大的负例数，几千个误报也只是零点几的 FPR，ROC 依旧好看。这是下一页。
-- 分数相同的正负样本各记半对。模型只输出 0 / 1 时，ROC 只剩一个点，AUC 退化成 (TPR + 1 − FPR) / 2。
+```python
+import numpy as np
 
-## 再往下看
+def calculate_auc(y_true, y_scores):
+    y_true = np.array(y_true)
+    y_scores = np.array(y_scores)
 
-[PR 曲线与 Precision@k](/notes/ml/evaluation/pr-curve-precision-at-k/) 把横轴换成 recall、纵轴换成 precision，只盯正例那一侧，不平衡数据上才看得出差别。
+    # Count positive and negative samples
+    n_pos = np.sum(y_true == 1)
+    n_neg = np.sum(y_true == 0)
 
-跨章：推荐系统那一章的 [梯度提升树如何给曝光打分](/notes/ml/recsys/lightgbm-explained/) 用验证集 AUC 决定什么时候停止训练，[提升树训练实验台](/notes/ml/recsys/boosting-lab/) 里也能看到 AUC 先升后平再降。推荐里更常用的是按用户分组的版本，见 [GAUC 与配对用户 bootstrap](/notes/ml/recsys/gauc-paired-bootstrap/)。
+    if n_pos == 0 or n_neg == 0:
+        return 0.0
+
+    # Sort by prediction scores
+    sorted_indices = np.argsort(y_scores, kind="mergesort")[::-1]
+    y_true_sorted = y_true[sorted_indices]
+    y_scores_sorted = y_scores[sorted_indices]
+
+    # Cumulative TP and FP
+    tps = np.cumsum(y_true_sorted == 1)
+    fps = np.cumsum(y_true_sorted == 0)
+
+    # Handle tied scores
+    last_of_group = np.append(
+        y_scores_sorted[1:] != y_scores_sorted[:-1],
+        True
+    )
+
+    tps = tps[last_of_group]
+    fps = fps[last_of_group]
+
+    # Compute ROC coordinates
+    tpr = tps / n_pos
+    fpr = fps / n_neg
+
+    # Add origin (0, 0)
+    tpr = np.concatenate([[0], tpr])
+    fpr = np.concatenate([[0], fpr])
+
+    # Trapezoidal integration
+    auc = np.sum(
+        np.diff(fpr) *
+        (tpr[1:] + tpr[:-1]) / 2
+    )
+
+    return float(auc)
+
+
+if __name__ == "__main__":
+    y_true = [0, 1, 0, 1]
+    y_scores = [0.2, 0.9, 0.8, 0.8]
+    print(calculate_auc(y_true, y_scores))  # 0.875
+```
+
+排序耗时 $O(n \log n)$，索引和中间数组占用 $O(n)$ 空间。输入应是等长的一维数组，标签取 0 或 1，分数为有限数值。只有一类时 AUC 未定义，示例代码约定返回 0.0。正负例都存在时，全部同分得到 0.5，完美排序得到 1，完全反向排序得到 0。
+
+AUC 衡量排序，分数整体偏高或偏低仍可能得到相同的 AUC。若业务只关心低误报区间，可以直接比较那一段 ROC。正例很少时，可以看 [PR 曲线与 Precision@k](/notes/ml/evaluation/pr-curve-precision-at-k/)。推荐系统要比较每位用户的排序效果时，可以看 [GAUC 与配对用户 bootstrap](/notes/ml/recsys/gauc-paired-bootstrap/)。

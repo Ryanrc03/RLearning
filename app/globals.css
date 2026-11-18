@@ -38,6 +38,8 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
 .nav-shortcut { margin-left: auto; color: #9d9d9d; font-size: 16px; }
 .nav-heading { display: flex; align-items: center; justify-content: space-between; margin: 22px 10px 10px; color: #878787; font-size: 10px; font-weight: 650; letter-spacing: 1.5px; }
 .nav-heading > span:last-child { font-weight: 400; letter-spacing: .1px; }
+.nav-subsection { margin-left: 10px; border-left: 1px solid var(--line); padding-left: 4px; }
+.nav-subsection.is-open > .nav-section-toggle .nav-chevron { transform: rotate(90deg); }
 .nav-groups { display: flex; flex-direction: column; gap: 4px; }
 .nav-search { display: flex; align-items: center; gap: 8px; margin: 0 2px 14px; padding: 0 9px; height: 34px; border: 1px solid #e3e3e3; border-radius: 8px; background: var(--paper); color: #929292; transition: border-color .15s, box-shadow .15s; }
 .nav-search:focus-within { border-color: #b6adfd; box-shadow: 0 0 0 3px var(--accent-soft); }

@@ -1,0 +1,218 @@
+import { AnnSearchPlayground, DotProductPlayground, MatrixTrainingPlayground, VectorMetricsPlayground } from "@/components/visualization/ml/recsys/EmbeddingRetrievalFigures";
+
+# 向量召回：从矩阵补全到最近邻搜索（Embedding-based Retrieval）
+
+ItemCF 从用户历史查相似物品，UserCF 从相似用户查他们喜欢的物品。向量召回仍能用同样的交互日志，但把计算变成了一个训练问题：给每位用户和每件物品学习一个低维向量，让它们的内积预测兴趣。线上拿到用户向量后，就可以把找候选变成一次向量搜索。前一篇从交互矩阵讲两种 CF 召回路径。[协同过滤召回](/notes/ml/recsys/collaborative-filtering/)
+
+## 通过 ID 查向量，再算匹配分数
+
+可以把 ID 看作 one-hot 向量。用参数矩阵乘它，就取出了对应的一列。实现时 Embedding Layer 直接按 ID 查表，省掉显式构造 one-hot。用户与物品有各自的参数表，梯度分别更新它们。向量的每一维由训练学出，通常无需预先指定为某个兴趣或物品属性。
+
+```text
+User ID → User Embedding → aᵤ ─┐
+                               ├→ Dot Product → 预测兴趣
+Item ID → Item Embedding → bᵢ ─┘
+```
+
+设用户数为 $m$、物品数为 $n$、向量维度为 $d$。采用列向量记法，$A\in\mathbb R^{d\times m}$ 的第 $u$ 列是用户向量 $a_u$，$B\in\mathbb R^{d\times n}$ 的第 $i$ 列是物品向量 $b_i$。两者必须有相同的维度。下标 $k$ 表示第 $k$ 个坐标。
+
+$$
+\hat y_{ui}=a_u^\top b_i=\sum_{k=1}^{d}a_{u,k}b_{i,k}
+$$
+
+本篇有 3 位用户、4 件物品，每个向量有 2 维。U1 是 $[0.8,0.2]$，物品 A 是 $[1.0,0.5]$，所以预测是 $0.8(1.0)+0.2(0.5)=0.9$。它是匹配分数，取值可以超出 0～1；若业务需要概率，还须定义概率模型和校准方式。
+
+<div className="embedding-note">
+  <DotProductPlayground />
+</div>
+
+## 只在观察到的格子上训练
+
+把日志聚合成 $\Omega=\{(u,i,y)\}$，每一条记录包含用户 ID、物品 ID 和观察到的兴趣分数。课程用了一种 0～4 的简化规则：曝光未点击计 0，点击、点赞、收藏和转发各加 1。实际项目按业务定义行为权重与标签窗口。
+
+| 用户 | A | B | C | D |
+|---|---:|---:|---:|---:|
+| U1 | 4 | 0 | ? | ? |
+| U2 | 1 | ? | 3 | ? |
+| U3 | ? | 2 | ? | 1 |
+
+U1–B 的 0 来自真实曝光，属于 $\Omega$。U1–C 的 `?` 表示这个位置缺少观测，可能从未曝光。在基础目标里，只有这六个有记录的格子参与训练。将未知格全部填 0 会凭空增加负样本，并改变训练目标。
+
+### 平方误差怎样更新两张表
+
+课程的目标是最小化观察集上的 Squared Error Sum：
+
+$$
+\min_{A,B}\sum_{(u,i,y)\in\Omega}(y-a_u^\top b_i)^2
+$$
+
+$y$ 是观测分数，$\hat y_{ui}=a_u^\top b_i$ 是预测。平方让大误差受到更重的惩罚。把和除以 $|\Omega|=6$ 就得到这里展示的 Observed MSE。对固定训练集，取均值保留相同的最优点，改变梯度的尺度。
+
+手算 U3–B。初始 $a_3=[0.5,0.2]$、$b_B=[1.0,0.5]$，得到预测 $0.5+0.1=0.6$。真实值是 2，所以单样本损失 $L=(2-0.6)^2=1.96$。平方项对预测的导数是 $2(\hat y-y)$，内积对两个向量的梯度分别是另一个向量，由链式法则得到：
+
+$$
+\frac{\partial L}{\partial a_u}=2(\hat y-y)b_i,\qquad
+\frac{\partial L}{\partial b_i}=2(\hat y-y)a_u
+$$
+
+这一格的梯度分别是 $[-2.8,-1.4]$ 和 $[-1.4,-0.56]$。学习率取 0.05，使用更新前的两个向量算好梯度，再同时减去各自的梯度乘学习率，得到 $[0.64,0.27]$ 和 $[1.07,0.528]$。新预测为 $0.82736$，该格的平方误差约为 1.375。一次 SGD 步只优化选中的样本，整组观测的 MSE 可能上升。
+
+<div className="embedding-note">
+  <MatrixTrainingPlayground />
+</div>
+
+### 为什么未知格也有预测
+
+原始兴趣矩阵 $R$ 的形状是 $m\times n$。左边 $A^\top$ 的每行是一个用户向量，右边 $B$ 的每列是一个物品向量，因此乘积的第 $(u,i)$ 格就是那对向量的内积：
+
+$$
+\hat R=A^\top B\in\mathbb R^{m\times n}
+$$
+
+比如 U1–C 没有观测，初始向量仍能给出 $0.8(0.35)+0.2(0.9)=0.46$ 的预测。U1 的向量也被其他有记录的格子共享，因此训练那些格子会间接改变这项预测。补出来的是低秩近似的预测分数，真实标签仍未知。模型最多具有秩 $d$，参数量为 $d(m+n)$。这张极小矩阵有 12 格，参数表用了 14 个数；当用户和物品各有 100 万、维度为 64 时，参数量才从 $10^{12}$ 个独立格子降到 $1.28\times10^8$。
+
+## 从 Exact Top-K 到在线 MIPS
+
+离线训练后，把用户向量存入 Key-Value Store，把物品向量及 ID 写入向量索引。每次请求先按 User ID 查 $a_u$，再取内积最高的 $K$ 件物品，这叫 **Maximum Inner Product Search（MIPS）**。
+
+$$
+\operatorname{TopK}_i(a_u^\top b_i)
+$$
+
+初始 U1 的未观察候选只有 C、D，内积分别为 0.46 和 −0.04，Exact Top-1 是 C。演示中的候选过滤排除所有观察过的格子，包括已曝光未点击的 0。线上是否过滤重复曝光由业务规则决定，也常过滤下架或不符合条件的物品。
+
+精确搜索会逐个算分。物品数为 $N$、向量维度为 $d$，全扫描的评分量为 $O(Nd)$，另有选 Top-K 的开销。1,000 万个 64 维向量意味着每个查询约 6.4 亿次分量乘法。ANN 用预建索引缩小候选范围，让服务在延迟预算内找近似 Top-K。
+
+## L2、Inner Product 与 Cosine 怎样改变排序
+
+对查询向量 $a$ 和物品向量 $b$，L2 越小越好，内积和余弦越大越好。$\|\cdot\|_2$ 表示欧氏模长，余弦需要两个非零向量。
+
+$$
+d(a,b)=\|a-b\|_2,\qquad
+s(a,b)=a^\top b,\qquad
+\cos(a,b)=\frac{a^\top b}{\|a\|_2\|b\|_2}
+$$
+
+取 $a=(1,0)$，$b_1=(2,0)$，$b_2=(0.8,0.6)$。内积同时受方向和长度影响，余弦把长度除掉，L2 直接度量端点距离。
+
+| 指标 | b₁ | b₂ | 排第一 |
+|---|---:|---:|---|
+| Inner Product | 2.0 | 0.8 | b₁ |
+| Cosine | 1.0 | 0.8 | b₁ |
+| L2 | 1.0 | 0.632 | b₂ |
+
+$b_2$ 的 L2 来自 $\sqrt{(1-0.8)^2+(0-0.6)^2}=\sqrt{0.4}$。展开距离平方可得：
+
+$$
+\|a-b\|_2^2=\|a\|_2^2+\|b\|_2^2-2a^\top b
+$$
+
+两边均单位化时，内积等于余弦，距离平方等于 $2-2\cos(a,b)$，三种排序等价。上例单位化后 $b_1=(1,0)$，它的 L2 变为 0，三种指标都选 $b_1$。若模型按原始内积训练，直接换成余弦等于丢掉模长信息，可能改变候选。查询指标应与模型约定一致。
+
+<div className="embedding-note">
+  <VectorMetricsPlayground />
+</div>
+
+## ANN 如何缩小搜索范围
+
+Exact Search 评分整个索引，提供真实 Top-K。Approximate Nearest Neighbor（ANN）优先访问看起来最有希望的向量，可能漏掉部分真实 Top-K，优化发生在搜索阶段，训练目标可以继续使用上面的平方误差。
+
+下面另用 24 个二维物品演示分区搜索。先用查询与 4 个固定中心的内积挑分区，再用同样的内积比较分区里的物品。固定分区是教学近似。扇区或圆形示意只表达「先缩小范围」，实际边界取决于索引算法。
+
+<div className="embedding-note">
+  <AnnSearchPlayground />
+</div>
+
+- **IVF**（Inverted File Index）离线聚类，把每个物品归入倒排列表。在线先挑若干相关聚类，再访问对应列表中的候选。增加探测列表通常会提高召回，同时要读更多向量。
+- **HNSW**（Hierarchical Navigable Small World）构建多层近邻图。查询从上层开始沿图导航，到下层继续扩展候选。搜索预算增加时会访问更多节点。
+
+| 系统 | 定位 |
+|---|---|
+| [Faiss](https://faiss.ai/) | 向量相似度检索和聚类库 |
+| [HnswLib](https://github.com/nmslib/hnswlib) | 使用 HNSW 的近邻搜索库 |
+| [Milvus](https://milvus.io/docs/overview.md) | 管理向量、索引与元数据的向量数据库 |
+
+### 怎么衡量漏找与搜索开销
+
+同一批查询在相同物品集合和同一指标下，先用 Exact Search 建基准。$T_{\mathrm{ANN}}$ 与 $T_{\mathrm{exact}}$ 是两种方法的 Top-K 物品集合。若基准能返回 $K$ 件物品，检索 Recall@K 为：
+
+$$
+\mathrm{Recall@K}=\frac{|T_{\mathrm{ANN}}\cap T_{\mathrm{exact}}|}{K}
+$$
+
+Exact Top-5 是 [A, B, C, D, E]，ANN 返回 [A, B, C, F, G]，重合 3 件，Recall@5 为 60%。它度量 ANN 对精确搜索的复现程度。推荐效果评估中的 Recall@K 用真实相关物品或留出的用户行为作为分母，两者回答的问题不同。
+
+生产评估还要一起看固定并发下的 P95 / P99 延迟、索引内存、构建时间和更新成本。图里的访问点数只度量扫描的候选数量，端到端延迟还包括分区选择、内存访问、过滤和服务开销。
+
+## 把训练和在线服务接起来
+
+```text
+离线训练
+交互日志 → 观测样本 Ω → Matrix Completion
+                       ├→ 用户向量 → User KV
+                       └→ 物品向量 → ANN Index
+
+在线召回
+用户请求 → User KV → 用户向量
+                     ↓
+          ANN Index · MIPS 查询
+                     ↓
+          Top-K IDs → 过滤 → Ranking
+```
+
+离线负责学参数、产出向量和构建索引。线上读 User KV 得到查询向量，ANN Index 返回物品 ID。过滤可能让最终数量少于 K，常见做法是多取一些候选，过滤后再截断。
+
+**版本一致性。** 即使维度相同，两次训练也可能学出不同的坐标系。用户向量 v2 与物品索引 v1 混用，内积的含义就可能改变。把 User KV、物品向量和 ANN 索引按同一模型版本发布，切流前校验兼容性，回滚时一起切回上一套。
+
+**Cold Start 与 Freshness。** 纯 ID 参数表缺少新用户或物品的训练向量，可以用热门或内容召回补充。对新上线、下架或重新编码的物品，结合增量写入、周期重建和可用性检查，避免重建过程影响在线查询。
+
+**训练数据的取舍。** L2 Regularization 能约束向量模长，User / Item Bias 可以单独建模基础兴趣水平。隐式反馈采样应保留曝光与未知的区别，也应考虑曝光偏差。上面的基础目标只使用已有观测，扩展采样后要重新说明标签的来源。
+
+## Python 从零实现
+
+代码沿用同一矩阵和初始向量。NumPy 按行存储向量，所以完整矩阵写成 `users @ items.T`。训练的梯度只来自观测位置，更新时用两个旧向量。召回用全量内积、过滤和排序实现 Exact Search。
+
+```python
+import numpy as np
+
+ratings = np.array([
+    [4, 0, np.nan, np.nan],
+    [1, np.nan, 3, np.nan],
+    [np.nan, 2, np.nan, 1],
+], dtype=float)
+users = np.array([[0.8, 0.2], [0.3, 0.9], [0.5, 0.2]])
+items = np.array([[1.0, 0.5], [1.0, 0.5], [0.35, 0.9], [-0.2, 0.6]])
+observed = ~np.isnan(ratings)
+pairs = np.argwhere(observed)
+item_ids = np.array(["A", "B", "C", "D"])
+
+def observed_mse():
+    predictions = users @ items.T
+    return np.mean((predictions[observed] - ratings[observed]) ** 2)
+
+def exact_top_k(user_id, k, eligible):
+    scores = items @ users[user_id]
+    candidates = np.flatnonzero(~observed[user_id] & eligible)
+    order = np.argsort(-scores[candidates], kind="stable")[:k]
+    return [(item_ids[i], round(float(scores[i]), 3)) for i in candidates[order]]
+
+print("Observed training samples:", [(u + 1, item_ids[i], ratings[u, i]) for u, i in pairs])
+print("Initial predictions:\n", (users @ items.T).round(3))
+print("Initial loss:", round(float(observed_mse()), 6))
+
+learning_rate = 0.05
+for _ in range(120):
+    for u, i in pairs:
+        a, b = users[u].copy(), items[i].copy()
+        error_gradient = 2 * (a @ b - ratings[u, i])
+        users[u] = a - learning_rate * error_gradient * b
+        items[i] = b - learning_rate * error_gradient * a
+
+print("Final loss:", round(float(observed_mse()), 6))
+print("Predicted user-item scores:\n", (users @ items.T).round(3))
+print("U1 Exact Top-2:", exact_top_k(0, 2, np.ones(len(items), dtype=bool)))
+```
+
+这条链路也适用于 Two-Tower Retrieval。双塔仍输出可用于向量搜索的用户和物品表示，但可以从更多特征编码出向量，用于弥补纯 ID 表的覆盖不足。
+
+课程参考为王树森《工业界的推荐系统》的向量召回一节。[向量召回课程](https://www.youtube.com/watch?v=phpIjr8_C7g)

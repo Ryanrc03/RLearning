@@ -135,3 +135,12 @@ export function logitsForTarget(p: number, others: readonly number[]): number {
 }
 
 export { softmax };
+
+// Stable one-hot loss evaluated from logits, avoiding probability clipping.
+export function crossEntropyFromLogits(logits: readonly number[], trueIdx: number): number {
+  if (logits.length === 0 || !logits.every(Number.isFinite)) throw new Error("logits must be finite and nonempty");
+  if (!Number.isInteger(trueIdx) || trueIdx < 0 || trueIdx >= logits.length) throw new Error("trueIdx out of range");
+  const maximum = Math.max(...logits);
+  const shifted = logits.map((value) => value - maximum);
+  return logSumExp(shifted) - shifted[trueIdx];
+}

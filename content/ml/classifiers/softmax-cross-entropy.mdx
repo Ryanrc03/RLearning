@@ -1,47 +1,168 @@
 import SoftmaxCrossEntropyFigure from "@/components/visualization/ml/classifiers/SoftmaxCrossEntropyFigure";
+import SoftmaxPlayground, { SoftmaxStabilityFigure } from "@/components/visualization/ml/classifiers/SoftmaxPlayground";
 
 # Softmax 与 Cross-Entropy
 
-## 一句话
+一张图片要在 Cat、Dog、Bird 里选一个类别。模型先输出三个分数，再把它们变成概率；训练时，真实类别的概率决定这次预测要付出多大的损失。这一页沿着这条计算路径，解释 Softmax、分类任务、Cross-Entropy 和实际实现。
 
-**softmax 把 K 个分数变成一组和为 1 的概率；cross-entropy 用 −log p 惩罚模型，真实类的概率越低，罚得越重。**
+## 为什么需要 Softmax
 
-几乎所有分类网络的最后一层都是这一对：图像分类、语言模型预测下一个 token、Word2Vec 的输出层。
+假设图片里是一只猫，模型给出的分数是 [2.0, 1.0, 0.0]，依次对应 Cat、Dog、Bird。这些未经概率转换的分数叫 **logits**，可以为负，也可以大于 1，总和没有限制。这里三个数加起来是 3，直接当概率就说不通；但它们仍然表达了模型更偏向哪个类别。
 
-## 为什么需要它
+Softmax 先取指数，得到 [7.389, 2.718, 1.000]，再各自除以总和 11.107，得到约 [0.665, 0.245, 0.090]。概率全部非负，未舍入的数加起来恰好为 1。
 
-Logistic Regression 只有一个分数、一个 sigmoid，只能回答「是不是」。猫、狗、鸟三类怎么办？给每类各一个分数 z_cat、z_dog、z_bird 很自然，但三个分数怎么变成三个加起来是 1 的概率？损失也得跟上：笔记里的两个例子，模型给真实类 cat 的概率分别是 0.9 和 0.2，第二个显然错得更离谱，损失应该重得多，而不是只差 0.7。
+<SoftmaxPlayground />
 
-## 怎么工作
+记输入为 $x$，真实类别为 $y$，类别数为 $K$。$z_k$ 是第 $k$ 类的 logit，$p_k$ 是给定输入后它的预测概率，$j$ 是遍历所有类别的下标。
+
+$$
+p_k = P(y=k\mid x) = \frac{e^{z_k}}{\sum_{j=1}^{K}e^{z_j}}
+$$
+
+取指数把任意实数变成正数，同时保留分数的大小顺序。更具体地说，两个类别的概率之比是 $p_i/p_j=e^{z_i-z_j}$，分数差每增加 1，概率之比就乘上 $e$。这让 logits 的差能解释为对数概率比。再除以同一个分母，所有概率自然加起来为 1。指数给出一种平滑、可求导的转换，训练时能把概率误差传回分数。
+
+这些概率是模型的预测。Softmax 保证概率约束，预测是否校准还取决于数据和训练；它也会在所有类别都不合适时分配完这 1 份概率。
+
+## Logistic Regression、Sigmoid 和三种分类任务
+
+**Logistic Regression 是分类模型，Sigmoid 和 Softmax 是函数。** 模型负责从特征计算 logits，函数负责把 logits 转成满足任务约束的概率。
+
+二分类 Logistic Regression 先计算 $z=w^Tx+b$，再用 Sigmoid 得到正类概率。这里 $x\in\mathbb R^d$ 是 $d$ 维特征，$w\in\mathbb R^d$ 是权重，$b$ 是偏置。
+
+$$
+P(y=1\mid x)=\sigma(z)=\frac{1}{1+e^{-z}},\qquad
+P(y=0\mid x)=1-\sigma(z)
+$$
+
+扩展到 $K$ 个互斥类别，给每类各算一个分数，写成 $z=Wx+b$。此时 $W\in\mathbb R^{K\times d}$，$b\in\mathbb R^K$，输出 $z\in\mathbb R^K$，再对整个向量做 Softmax。这叫 **Softmax Regression**，也叫 **Multinomial Logistic Regression**。深度网络可以先提取非线性特征，再接同样的分类输出层。
+
+| | Binary 二分类 | Multiclass 多分类 | Multilabel 多标签 |
+|---|---|---|---|
+| 一个样本的标签 | Click 或 No Click | Cat、Dog、Bird 选一个 | Cat、Dog、Bird 可以共存 |
+| 常用 logits 数量 | 1 | $K$ | $K$ |
+| 概率转换 | 一个 Sigmoid | 一个 Softmax | 每个输出各做 Sigmoid |
+| 概率约束 | $p$ 与 $1-p$ 加起来为 1 | 所有类别加起来为 1 | 各标签在 [0, 1]，总和自由 |
+| 目标形式 | 0 或 1 | 类别索引或 one-hot | multi-hot，例如 [1, 1, 0] |
+| 常用损失 | Binary Cross-Entropy | Categorical Cross-Entropy | 每标签 BCE 后求和或平均 |
+| 例子 | 一次曝光是否被点击 | 单一主体图片分类 | 一张图里有哪些动物 |
+
+Click 的概率为 0.8，就意味着 No Click 的概率为 0.2。互斥三分类中，Cat 得到更多概率，Dog 和 Bird 合计就必须更少。多标签图像则可以同时给 Cat 和 Dog 很高的概率，分别判断每个标签是否出现。独立 Sigmoid 表达的是各标签的边际概率，它们的预测仍可共享同一个特征网络；训练目标通常按标签分别计算 BCE。
+
+## 为什么 Softmax 的类别会竞争
+
+固定 Cat 的 logit 为 2、Bird 为 0，只改变 Dog。Cat 的分子一直是 $e^2$，但 Dog 分数升高会让公共分母变大，Cat 的概率随之下降。
+
+$$
+p_{\text{Cat}}=\frac{e^2}{e^2+e^{z_{\text{Dog}}}+e^0}
+$$
+
+<SoftmaxPlayground competition />
+
+Dog 从 0 升到 2 时，Cat 的 Softmax 概率从约 0.787 降到 0.468。右边各自做 Sigmoid，Cat 的分数没有改变，它的概率就一直是 $\sigma(2)\approx0.881$。Softmax 分配一份总量为 1 的概率，多标签输出则逐个回答「这个标签在不在」。
+
+这种耦合也能直接从导数看出来。对不同类别 $i\ne j$，有 $\partial p_i/\partial z_j=-p_ip_j$。有限 logits 下两项概率都为正，所以提高另一类的 logit 会降低本类概率。
+
+## 两类 Softmax 为什么等于 Sigmoid
+
+让类别 0 和类别 1 的 logits 分别为 $z_0$ 和 $z_1$。将两类 Softmax 的分子分母同除以 $e^{z_1}$，得到
+
+$$
+P(y=1)=\frac{e^{z_1}}{e^{z_0}+e^{z_1}}
+=\frac{1}{1+e^{z_0-z_1}}
+=\sigma(z_1-z_0)
+$$
+
+例如 $z_0=1$、$z_1=2$，两类 Softmax 给类别 1 的概率约为 0.731，恰好等于 $\sigma(1)$。给两个 logits 同时加 1000，差仍然是 1，概率相同。二分类只需要表达这一个分数差，所以常用一个 logit 和 Sigmoid；也可以用两个 logits 和 Softmax 表达相同的概率。
+
+## Softmax 怎样和 Cross-Entropy 一起训练
+
+回到 [2, 1, 0]，真实类别为 Cat，one-hot 目标向量为 $y=[1,0,0]$。这里用 $y_k$ 表示目标向量第 $k$ 项，$p_k$ 表示预测概率，$L$ 表示单样本损失，$t$ 表示真实类别的下标。以下 $\log$ 都是自然对数。
+
+$$
+L=-\sum_{k=1}^{K} y_k\log p_k=-\log p_t
+$$
+
+one-hot 向量中只有真实类对应的一项为 1，所以损失只留下 $-\log p_t$。本例 $p_t\approx0.665241$，$L\approx0.407606$。真实类概率为 0.9 时损失约 0.105，为 0.2 时约 1.609。提高真实类概率会降低损失，这也等价于提高观察到真实标签的似然。
 
 <SoftmaxCrossEntropyFigure />
 
-$$
-p_k = \frac{e^{z_k}}{\sum_{j=1}^{K} e^{z_j}}
-$$
+代入 Softmax 的表达式，可以把损失写成 logits 的函数。利用 $\sum_i y_i=1$，有
 
 $$
-L = -\sum_{k} y_k \log p_k = -\log p_{\text{true}}
+L=-\sum_i y_i z_i+\log\sum_j e^{z_j}
 $$
 
+对 $z_k$ 求导，第一项给出 $-y_k$，第二项给出 $e^{z_k}/\sum_j e^{z_j}=p_k$，因此
+
 $$
-K = 2:\quad \frac{e^{z_1}}{e^{z_1} + e^{z_2}} = \frac{1}{1 + e^{-(z_1 - z_2)}} = \sigma(z_1 - z_2)
+\frac{\partial L}{\partial z_k}=p_k-y_k
 $$
 
-softmax 先把每个分数取指数——这一步保证全部为正，而且大的分数被放大得更多——再除以总和，K 个数就加起来是 1。图里 dog 和 bird 的 logit 固定在 0，只拖 cat 的：z_cat = 2.89 时 cat 得 0.9、dog 和 bird 各 0.05，正是笔记的第一个例子；拖到 −0.69，cat 掉到 0.2，dog 和 bird 各 0.4，是第二个例子。
+本例对 logits 的梯度约为 [-0.335, 0.245, 0.090]。若直接把 logits 当作待优化变量，梯度下降 $z_k\leftarrow z_k-\eta(p_k-y_k)$ 会增大 Cat 分数，减小另外两类的分数，其中 $\eta>0$ 是学习率。图里拖动 Cat 分数，能看到概率、损失和梯度一起变化。
 
-cross-entropy 只看真实类那一项：y 是 one-hot，其它类的 y_k = 0 把那些项都乘没了，剩下 −log p_true。0.9 → 0.105，0.2 → 1.61，差 15 倍。右图的 −log p 曲线说明了为什么：p 在 1 附近曲线几乎是平的，模型已经答对，多一点把握不值几个钱；p 往 0 走曲线越来越陡，趋向无穷。真实类被排得越靠后，每再低一点罚得越重，梯度也越大，训练时模型会优先修最离谱的错。
+实际更新的是参数。在线性输出层 $z=Wx+b$ 中，$\partial L/\partial W=(p-y)x^T$，$\partial L/\partial b=p-y$；特征、共享参数和学习率都会影响下一步 logits 的变化。还要分清两种梯度，$\partial L/\partial p_t=-1/p_t$ 在概率趋近 0 时会发散，而 $\partial L/\partial z_k=p_k-y_k$ 的每项都在 [-1, 1] 内。
 
-K = 2 时公式退化：两个分数的 softmax 等于它们之差的 sigmoid，上一页的 logistic regression 就是 softmax 的两类特例。图里「只留 cat / dog 两类」那一行算的就是这个。
+## 为什么实现时先减最大值
 
-## 代价与取舍
+直接计算 [1002, 1001, 1000] 的指数会超过 float64 能表示的最大值，得到 Infinity，继续相除就会遇到 $\infty/\infty$。这叫 overflow。另一头，很大的负数取指数会小到被舍入成 0，叫 underflow。
 
-- 指数会溢出：z = 1000 时 e^z 是 Infinity。实际实现先减去最大的 z 再取指数（结果不变），loss 也直接在 log 空间算 logsumexp − z_true。
-- softmax 永远给每个类留一点概率，z 差 20 也不会精确是 0；它表达不了「这个类不可能」，也分不清「不确定」和「都不像」。
-- 一个样本只能属于一类。标签可以多选（一张图里既有猫又有狗）时要换成 K 个独立的 sigmoid 加 BCE。
-- 把分数除以一个 temperature 再 softmax，分布会被拉平或压尖：排序不变，概率的大小全由它决定。
-- 类别数几十万时（词表）分母的求和很贵，Word2Vec 用 negative sampling 和 hierarchical softmax 绕开它。
+Softmax 只依赖相对分数。给每项减同一个常数 $c$，分子分母都乘上 $e^{-c}$，可以约掉。
 
-## 再往下看
+$$
+\frac{e^{z_k-c}}{\sum_j e^{z_j-c}}
+=\frac{e^{z_k}}{\sum_j e^{z_j}}
+$$
 
-这一章到此结束：分数先过 sigmoid 或 softmax 变成概率，再用 −log p 罚它，loss 有了；loss 怎么降下去，是下一章 [Gradient Descent 与 Optimizers](/notes/ml/training/gradient-descent-optimizers/) 的事。softmax 在后面还会反复出现：[Word2Vec](/notes/ml/representations/word2vec/) 的输出层就是一个词表大小的 softmax，[Hallucination](/notes/ml/llm-engineering/hallucination/) 里的 temperature 改的是 softmax 前的分数，[CLIP 对比学习](/notes/ml/multimodal/clip-contrastive-learning/) 的 contrastive loss 是一个双向的 cross-entropy。
+选 $c=\max_j z_j$，每个移位后的分数都不大于 0，至少一个等于 0。因此指数不会超过 1，分母至少为 1。[1002, 1001, 1000] 变成 [0, -1, -2]，稳定得到 [0.665, 0.245, 0.090]。
+
+<SoftmaxStabilityFigure />
+
+下面的函数处理非空、有限数值的一维 logits。批量数据可以沿类别轴分别执行相同操作。
+
+```python
+import numpy as np
+
+def stable_softmax(scores):
+    scores = np.asarray(scores, dtype=np.float64)
+    shifted = scores - np.max(scores)
+    exp_scores = np.exp(shifted)
+    return exp_scores / np.sum(exp_scores)
+
+print(stable_softmax([2.0, 1.0, 0.0]))
+print(stable_softmax([1002.0, 1001.0, 1000.0]))
+# Both: [0.66524096 0.24472847 0.09003057]
+```
+
+第一行把列表转为 float64 数组；第二行整体平移，保留分数差；第三行将分数变为正权重；最后除以权重总和，完成归一化。最大值移位避免指数上溢，但很小的权重仍可能下溢成 0。数学上有限 logits 的概率严格为正，浮点计算里则可能得到精确的 0。
+
+因此，训练时还要避免先得到概率再取对数。定义 $m=\max_j z_j$，**Log-Sum-Exp** 稳定计算指数和的对数，**Log-Softmax** 直接计算对数概率。
+
+$$
+\operatorname{LSE}(z)=m+\log\sum_j e^{z_j-m},\qquad
+\log p_k=(z_k-m)-\log\sum_j e^{z_j-m}
+$$
+
+将移位后的 logits 直接代入损失，可以在真实类概率下溢时仍得到有限损失。
+
+```python
+def log_softmax(scores):
+    scores = np.asarray(scores, dtype=np.float64)
+    shifted = scores - np.max(scores)
+    return shifted - np.log(np.exp(shifted).sum())
+
+def cross_entropy_from_logits(scores, target):
+    return float(-log_softmax(scores)[target])
+
+print(cross_entropy_from_logits([2, 1, 0], 0))
+# 0.4076059644443804
+print(cross_entropy_from_logits([1000, -1000], 1))
+# 2000.0
+```
+
+最后一个例子里，真实类概率在 float64 下会舍入为 0，但稳定的负对数概率仍是 2000。把概率裁剪到某个很小的常数再取对数，会改变这时的损失和梯度。
+
+PyTorch 的 `CrossEntropyLoss` 接收原始 logits，并在内部完成 Log-Softmax 与负对数似然的计算。手动先做 Softmax 再传入，会让已经归一化的概率再次被当作 logits 处理。多标签任务对应的 `BCEWithLogitsLoss` 也接收每个标签的原始 logit。用法可核对 [CrossEntropyLoss 文档](https://docs.pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html) 和 [BCEWithLogitsLoss 文档](https://docs.pytorch.org/docs/stable/generated/torch.nn.BCEWithLogitsLoss.html)。
+
+还有两个实际取舍。用 $z/T$ 做 Softmax 时，$T>0$ 称为 temperature，$T$ 增大让分布更平、减小让分布更尖，类别排序相同。类别数达到几十万时，分母求和和输出层计算都更贵，Word2Vec 的 negative sampling 和 hierarchical softmax 就是针对这类开销的处理方式。
+
+接着看 [Gradient Descent 与 Optimizers](/notes/ml/training/gradient-descent-optimizers/)，把这里的梯度变成参数更新。Softmax 也会出现在 [Word2Vec](/notes/ml/representations/word2vec/) 的词表输出、[CLIP 对比学习](/notes/ml/multimodal/clip-contrastive-learning/) 的匹配分布，以及[语言模型的 temperature](/notes/ml/llm-engineering/hallucination/)中。

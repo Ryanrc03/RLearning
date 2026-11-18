@@ -1,0 +1,92 @@
+import { NegativeSourceExplorer, SamplingExplorer, BatchNegativeExplorer, LogQExplorer } from "@/components/visualization/ml/recsys/TwoTowerFigures";
+
+# 双塔召回（二）：正负样本选择与采样偏差
+
+上一章把同一个用户的正负物品放在一起训练。以 U1 为例，曝光后点击了 Python Tutorial（A），就能得到一个正样本。是否把 ML Interview（B）当成负样本，要看它经过了哪一步，以及有没有其他已知正反馈。[上一章：模型结构与训练目标](/notes/ml/recsys/two-tower-architecture/)
+
+## 正例来自行为，负例来自选样规则
+
+课程以 **曝光并点击** 定义召回正例。其他产品也可用有效观看、购买或收藏。热门物品本身曝光、点击多，日志正例容易集中在少量物品。可以 Up-sample 部分长尾正例，或 Down-sample 热门正例。前者提高长尾样本权重，也可能重复放大噪声；后者节约训练预算，也会丢掉一部分真实信号。线上效果要通过评估确认。
+
+全库随机抽样往往得到 Easy Negative，例如给想学 Python 的用户配一个无关物品。更接近用户兴趣，但在粗排或精排被淘汰的技术视频，可以成为 Hard Negative。它帮助区分细小差异，也容易误伤潜在正例。可以混用两种来源，比例取决于候选质量。
+
+曝光未点常用来训练 **CTR Ranking**，因为 Ranking 的目标定义在已曝光或待排序场景。召回要从全库找相关项，未点也可能来自位置、时机或注意力不足。课程建议避免把全部未点曝光直接当成召回强负例。**Engineering Notes。** 某些任务可以把它们作为弱负反馈，权重仍需与曝光偏差和业务目标一起验证。
+
+<NegativeSourceExplorer />
+
+## Uniform 和 Popularity Sampling
+
+以 A、B、C 的点击数 1000、100、10 为例，Uniform 给每个物品 $1/3$ 的负采样概率。C 的点击信号很少，却与 A 一样常作为随机负例出现。按点击次数加权会提升热门物品的负采样频率；指数 $\alpha$ 控制平滑程度：
+
+$$
+q_i(\alpha)=\frac{c_i^\alpha}{\sum_j c_j^\alpha}
+$$
+
+$c_i$ 是物品 $i$ 的历史点击数。这里三项都大于零。$\alpha=0$ 是 Uniform；$0.75$ 时约为 82.7%、14.7%、2.6%；$1$ 时约为 90.1%、9.0%、0.9%。$0.75$ 是可调经验值。若候选中有零点击物品，还要保证想学习的物品获得适当的采样覆盖。
+
+<SamplingExplorer />
+
+## In-batch Negatives：复用同批正物品
+
+示例 Batch 的点击对是 U1→A、U2→B、U3→C、U4→D。这是用于展示 Batch 排列的日志切片，U2、U3 也可能偶尔点击主兴趣之外的内容。把单位化的用户向量按行堆成 $A\in\mathbb R^{n\times d}$、物品向量按行堆成 $B\in\mathbb R^{n\times d}$，$n$ 是 Batch Size，$d$ 是向量维度：
+
+$$
+S=AB^\top\in\mathbb R^{n\times n}
+$$
+
+$S_{r,c}$ 是第 $r$ 行用户与第 $c$ 列物品的 Cosine。例如 U1 是 $(1,0)$，B 是 $(0.5,\sqrt{0.75})$，所以 $S_{1,2}=0.5$。按对齐的配对顺序，$n$ 个对角线是监督正例，其余 $n(n-1)$ 个格子只是**候选负配对位置**。$n=4$ 时 12 格，$n=128$ 时 16,256 格。共享物品和重复出现会让独立物品数更少。
+
+如果其他行也出现了 U1 的目标物品 A，U1 对那一列仍是正反馈。可屏蔽重复目标与已知正物品，或使用支持多正例的目标；下图保留对角线目标，屏蔽其余已知正例。尚未观察到的潜在正例仍可能漏过标记。
+
+<BatchNegativeExplorer />
+
+## LogQ：纠正采样机会带来的偏差
+
+Batch 从点击日志抽正样本，热门物品更频繁出现在其他行的负例候选里。简单独立抽样下，单次物品概率可近似按点击频率估计；如果从 $n$ 次独立抽样的列表做去重，某物品至少出现一次的概率则是 $1-(1-q_i)^n$。例如 $q_i=0.2$、$n=4$ 时至少出现一次约为 59.0%，和单次的 20% 不同；相关抽样、分层或混合采样还需要用自己的概率模型。
+
+课程介绍的 Sampling Bias Correction 用 $q_i$ 表示与训练候选机制相符的采样概率。设 $s(u,i)$ 在本节专指已经除以温度、准备进入 Softmax 的 logit。校正后 $\exp(s-\log q_i)=\exp(s)/q_i$，所以较稀少的采样机会得到较大的训练权重：
+
+$$
+\tilde s(u,i)=s(u,i)-\log q_i,\qquad
+L=-\log\frac{\exp\tilde s(u,i^+)}{\sum_{j\in C}\exp\tilde s(u,j)}
+$$
+
+$C$ 是本次参与 Softmax 的候选集合，$i^+$ 是目标。若使用原始 Cosine $s_{\cos}$，这里的次序是 $s_{\cos}/\tau-\log q_i$。把校正项先减再一起除温度会改变校正力度。选择目标列是否同样校正，应与具体 sampled-softmax 估计器一致；下图为所有参与列使用统一规则。
+
+A/B/C 的 logits 为 $[1,0.8,0.6]$，$q=[0.8,0.15,0.05]$，得到约 $[1.223,2.697,3.596]$。A 的训练概率从约 0.402 降到 0.062，因为相对频繁出现的 A 获得的补偿更小。这只是候选集合里的教学例子。LogQ 作用于训练 logits；线上 ANN 按两塔约定的相似度检索。
+
+<LogQExplorer />
+
+**Engineering Notes。** False Negative 是标签问题，LogQ 处理候选采样机会不均衡。即使 $q_i$ 估计准确，仍可能有曝光偏差、未知正例或目标不匹配。相关方法见 [Sampling-Bias-Corrected Neural Modeling for Large Corpus Item Recommendations（RecSys 2019）](https://doi.org/10.1145/3298689.3346996)。
+
+## PyTorch：采样分布、候选矩阵和屏蔽
+
+下面的独立示例分别演示全库抽样和 Batch 抽样。Batch 的 $q$ 此处假设来自另一套按点击日志抽样的估计，包含 Batch 中重复出现的 A。均匀或平滑全库抽样与该 Batch 估计是不同机制。
+
+```python
+import torch
+from torch.nn import functional as F
+
+torch.manual_seed(7)
+counts = torch.tensor([1000., 100., 10., 50.])
+uniform = torch.ones_like(counts) / counts.numel()
+weights = counts.pow(0.75)
+popular = weights / weights.sum()
+for q in (uniform, popular):
+    print("sampled IDs:", torch.multinomial(q, 4, replacement=True).tolist())
+
+item_ids = torch.tensor([0, 0, 2, 3])  # Batch 中 A 重复
+users = F.normalize(torch.tensor([[1., 0.], [0., 1.], [-1., 0.], [.6, .8]]), dim=1)
+items = F.normalize(torch.tensor([[.6, .8], [.5, .866], [.2, .98], [-.3, .954]]), dim=1)
+logits = (users @ items[item_ids].T) / 0.2
+targets = torch.arange(item_ids.numel())
+positive = item_ids[:, None] == item_ids[None, :]
+positive[0] |= item_ids == 2  # U1 对 C 也有已知正反馈
+mask = positive & ~torch.eye(item_ids.numel(), dtype=torch.bool)
+
+batch_q = counts / counts.sum()  # 近似用点击日志的单次物品分布
+corrected = (logits - batch_q[item_ids].log()).masked_fill(mask, -torch.inf)
+print("loss:", F.cross_entropy(corrected, targets).item())
+```
+
+选样规则确定了模型如何拉开物品分数。下一章把训练后的两塔接到线上，并跟踪全量和增量更新。[下一章：线上服务与全量 / 增量更新](/notes/ml/recsys/two-tower-serving-updates/) · [王树森：双塔召回第二讲](https://www.youtube.com/watch?v=KOpl2cJyKOg)

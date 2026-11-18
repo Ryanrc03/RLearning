@@ -1,0 +1,162 @@
+import { ServingExplorer, UpdateTimeline, VersionTimeline } from "@/components/visualization/ml/recsys/TwoTowerFigures";
+
+# 双塔召回（三）：线上服务与全量 / 增量更新
+
+前两章训练了可独立编码的用户塔和物品塔。现在把物品向量写进索引，让请求只做一次用户编码，再把近期数据接回训练。这里继续用 U1 与 A–D 的视频案例。[上一章：正负样本选择与采样偏差](/notes/ml/recsys/two-tower-negative-sampling/)
+
+## 离线算物品，在线算用户
+
+```text
+离线  Item Features → Item Tower → Item Vectors → ANN Index
+                                                       ↓
+在线  User Request → User Features → User Tower → ANN Search
+                                                       ↓
+                                             Top-K IDs → Ranking
+```
+
+物品塔批量计算后，同一版本的表示可以在请求间复用。用户请求则按 ID 补齐类别、数值和近期行为，让用户塔生成一个向量。U1 早上看编程，晚上转去看旅行，近期行为可以随请求进入模型。若两塔输出都做了 L2 归一化，索引可用内积实现第一章的 Cosine 排序。四件物品的手算例里，初始 U1 与 A、B、C、D 的分数为 $[0.6,0.5,0.2,-0.3]$，所以 Top-2 是 A、B。
+
+若物品数为 $N$、请求数为 $R$、向量维度为 $d$，朴素方案重算 $NR$ 个物品向量并进行 $NRd$ 次分量乘法。例子用 1,000 万个物品、100 次请求和 64 维，分别得到 10 亿次物品编码和 640 亿次分量相乘。按一个索引版本预计算时，离线编码 $N$ 次，线上只编码 $R$ 个用户向量并查询索引。ANN 评分多少候选取决于实际搜索预算。
+
+<ServingExplorer />
+
+**Engineering Notes。** User Embedding 可以按特征版本与时效缓存。长期特征可提前聚合，短期特征再在请求时读取。物品价格、状态或内容变化时也可能需要更新向量和索引。延迟还包括特征查询、编码、索引访问、过滤和网络开销。
+
+## 全量更新：用完整批次继续训练
+
+课程的一种方案是每天执行一次批训练，例如凌晨用昨天的数据训练。收集完整一天的样本，从上一版本 checkpoint 恢复参数，随机 Shuffle 后走一个 Epoch，更新两个塔的完整参数，再编码物品、构建索引，准备新的线上 bundle。
+
+沿用 checkpoint 可以继承已学到的表示。完整日批次覆盖多个时段，Shuffle 让同类事件少一些连续成段的梯度。新物品向量来自新模型，所以用户塔切换要与索引协调。全量在这里描述训练批次及更新范围，仍然可以从上一版继续。
+
+## 增量更新：新数据先更新少量参数
+
+流式方案把行为采集、样本生成、模型训练和发布视为不同工作：
+
+```text
+New Events → Stream Processing → 训练样本（如 TFRecord）
+                                  ↓
+                   Incremental Training → 参数验证与发布
+                                  ↓
+                           Online User Tower
+```
+
+课程示例可以固定共享网络，主要更新 ID Embedding。若在线索引暂时继续用旧版物品向量，一种实现是只更新 User ID Embedding，物品侧和其他用户塔参数都冻结。令 $e_u$ 为用户 ID 向量，$x_u$ 为其余特征，$\theta$ 为用户塔其他参数：
+
+$$
+a_u=f_\theta(e_u,x_u),\qquad e_u^{\mathrm{new}}=e_u^{\mathrm{old}}-\eta\nabla_{e_u}L
+$$
+
+例如 $e_u=[0.4,0.2]$、学习率 $\eta=0.1$、损失 $L$ 的对应梯度是 $[-0.3,0.1]$，则新向量是 $[0.43,0.19]$。它会改变该用户表示，其他用户与物品的参数可保持固定。若也更新 Item ID 表，就要评估是否同步刷新对应物品向量及索引。
+
+| 维度 | Full Update | Incremental Update |
+|---|---|---|
+| 数据 | 完整批次或一天 | 近期持续到达的样本 |
+| 训练顺序 | 通常对批次 Shuffle | 通常按可用的时间顺序 |
+| 更新范围 | 全模型 | 课程示例主要更新 ID Embedding |
+| 频率 | 例如日级 | 例如分钟级、小时级或连续 |
+| 优势 | 覆盖更多时段和样本 | 更快吸收新行为 |
+| 挑战 | 发布慢、响应滞后 | 窗口偏差、参数不稳定 |
+
+## 为什么要同时看全天和近期的损失
+
+下面三个时段各用 20 条教学样本：
+
+| 时段 | 科技 | 娱乐 | 体育 |
+|---|---:|---:|---:|
+| 上午 | 70% | 20% | 10% |
+| 下午 | 20% | 60% | 20% |
+| 晚上 | 15% | 25% | 60% |
+
+把三类映射为目标 $y=1,0,-1$，用一个标量参数 $w$ 模拟兴趣。每次用平方误差 $(w-y)^2$，梯度为 $2(w-y)$。例如 $w=0,y=1,\eta=0.1$ 时，下一步 $w=0.2$。示例用同一批样本，比较固定随机种子的 Shuffle 和按时段顺序训练。评估看固定的全天混合分布和晚间分布，显示各自的期望平方误差。
+
+<UpdateTimeline />
+
+短时窗口可能被某类流量主导，连续梯度会对近期类别更敏感。若晚间分布的变化确实反映兴趣转移，近期适应有价值。Shuffle 有助于打散相邻同分布样本，优势仍取决于评估窗口和漂移。图里两条曲线只比较顺序；真实全量与增量还会有数据窗口和参数更新范围的差异。
+
+## Engineering Notes：协调发布与回滚
+
+```text
+Event Logs
+  ├→ Batch Data  → Full Training        → Base Model
+  └→ Stream Data → Incremental Training → ID Embedding Updates
+                                              ↓
+                              Model Validation / Publication
+                                              ↓
+                               User Tower + Item ANN Index
+```
+
+全量训练负责刷新共享参数并覆盖更完整的分布，增量训练负责尽快吸收新反馈。发布时要把 **User Tower、Item Tower、User ID 参数、Item 向量、ANN Index 和特征转换** 当作一组兼容组件。即使维度相同，v2 用户向量和 v1 物品索引也可能属于不同的坐标空间。组件版本号可以不同，只要事先验证过兼容性。
+
+```text
+Serving Bundle v12
+  User Tower / Item Tower     model-v12
+  User ID parameters         compatible-v12
+  Item embeddings            model-v12
+  Item ANN Index             index-v12
+  Feature transformation     schema-v3
+```
+
+先完成训练和验证，再批量生成物品向量并构建新索引。准备匹配的用户塔和参数，验证完整 bundle 后一致切流。保留上一版做回滚，把后续增量训练接到新 checkpoint 及其记录的事件位置，避免重放或漏掉事件。若切流前后都接收增量，还应明确增量的基座版本和应用边界。
+
+<VersionTimeline />
+
+## PyTorch：物品预计算，只微调 User ID
+
+下面用两维样例模拟已训练的塔。用恒等线性层表示被冻结的用户共享变换，取归一化向量，缓存物品侧输出。之后只用 U1 的新正反馈 B 更新 User ID 表，示例用 A 作对比项以演示梯度方向；实际训练应按第二章的规则选样。Checkpoint 记录参数所属的模型和索引版本。
+
+```python
+import io
+import torch
+from torch import nn
+from torch.nn import functional as F
+
+users = nn.Embedding.from_pretrained(
+    torch.tensor([[1., 0.], [0., 1.], [-1., 0.]]), freeze=False
+)
+shared = nn.Linear(2, 2, bias=False)
+with torch.no_grad():
+    shared.weight.copy_(torch.eye(2))
+shared.requires_grad_(False)
+
+first = torch.tensor([0.6, 0.5, 0.2, -0.3])
+items = nn.Embedding.from_pretrained(
+    torch.stack((first, (1 - first.square()).sqrt()), dim=1), freeze=True
+)
+
+@torch.no_grad()
+def cache_items():
+    return F.normalize(items(torch.arange(4)), dim=-1)
+
+item_index = cache_items()
+
+def user_vector(user_id):
+    return F.normalize(shared(users(torch.tensor([user_id]))), dim=-1)
+
+@torch.no_grad()
+def exact_top_k(user_id, k):
+    scores = (user_vector(user_id) @ item_index.T).squeeze(0)
+    values, indices = scores.topk(k)
+    return [(chr(65 + i), round(float(s), 3)) for i, s in zip(indices.tolist(), values)]
+
+print("Before:", exact_top_k(0, 2))
+optimizer = torch.optim.SGD(users.parameters(), lr=0.1)
+optimizer.zero_grad()
+logits = (user_vector(0) @ item_index[[1, 0]].T) / 0.2
+F.cross_entropy(logits, torch.tensor([0])).backward()
+optimizer.step()
+print("After:", exact_top_k(0, 2))
+assert shared.weight.grad is None and items.weight.grad is None
+
+checkpoint = io.BytesIO()
+torch.save({"model_version": "v1", "index_version": "index-v1",
+            "feature_schema": "schema-v1", "user_delta_step": 1,
+            "user_parameters": users.state_dict(),
+            "shared": shared.state_dict(), "item_parameters": items.state_dict()},
+           checkpoint)
+
+# 若进入下一轮全量训练，可解冻，再重新创建包含所有参数的 optimizer。
+shared.requires_grad_(True)
+items.requires_grad_(True)
+```
+
+模型发布后还要分开评估精确邻居复现、业务候选相关性和线上延迟。[接着看：Precision@K 和 Recall@K](/notes/ml/recsys/retrieval-precision-at-k/) · [王树森：双塔召回第三讲](https://www.youtube.com/watch?v=3qOvHfW1A-8)

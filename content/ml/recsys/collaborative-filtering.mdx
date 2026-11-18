@@ -1,0 +1,196 @@
+import { InteractionMatrix, ScoringPlayground, PopularityPenaltyFigure, CfComparison, RetrievalSimulator } from "@/components/visualization/ml/recsys/CollaborativeFilteringFigures";
+
+# 协同过滤召回（Collaborative Filtering Retrieval）：ItemCF 与 UserCF
+
+用户看过《笑傲江湖》，很多看过它的人也看过《鹿鼎记》。ItemCF 沿着这条物品之间的关联找候选。UserCF 从另一头出发：两位小红书用户经常点赞或收藏同一批机器学习笔记，其中一位收藏了一篇新的笔记，就可以把它召回给另一位。相似用户由行为定义，好友关系可有可无。
+
+这两种 **Collaborative Filtering（协同过滤）** 方法都用历史交互来找候选，即使没有物品文本或图像也能工作。ItemCF 比较物品，UserCF 比较用户。
+
+## 一张 User-Item Interaction Matrix
+
+行是用户向量，列是物品向量。这里的 `1` 表示观察到了正向交互，比如收藏；`0` 表示没有观察到，可能连曝光都没有。后面的 U6 是新请求的用户，已交互 A 和 B。物品相似度使用下图初始的 U1–U5 离线快照，U6 的历史用于线上打分。
+
+<div className="cf-note">
+  <InteractionMatrix />
+</div>
+
+## ItemCF 沿历史物品找相似物品
+
+设 $W_i$ 是与物品 $i$ 有正向交互的用户集合。二值余弦的分子数两列共享的 1，分母按两列各自的交互规模归一化。
+
+$$
+\operatorname{sim}(i,j)=\frac{|W_i\cap W_j|}{\sqrt{|W_i||W_j|}}
+$$
+
+A 由 U1、U2、U3 交互，C 由 U2、U3、U5 交互。共享 U2 和 U3，所以 $\operatorname{sim}(A,C)=2/\sqrt{3\times3}\approx0.667$。同理，A–B 为 0.667，B–C 为 0.333，B–D 为 $1/\sqrt{3\times2}\approx0.408$。用共同人数直接打分，会让覆盖面大的物品更容易占优。除以规模后，同样的两次重合，在两列各有三次交互和各有三千次交互时给出的证据不同。
+
+也可以把每个格子换成非负兴趣权重 $\operatorname{like}(u,i)$，例如按行为类型或时间衰减赋权。令 $\mathbf i$ 和 $\mathbf j$ 分别为两列，未观察到交互的格子仍记 0。
+
+$$
+\operatorname{sim}(i,j)=\frac{\mathbf i\cdot\mathbf j}{\|\mathbf i\|_2\|\mathbf j\|_2}
+=\frac{\sum_{u\in W_i\cap W_j}\operatorname{like}(u,i)\operatorname{like}(u,j)}
+{\sqrt{\sum_{u\in W_i}\operatorname{like}(u,i)^2}\sqrt{\sum_{u\in W_j}\operatorname{like}(u,j)^2}}
+$$
+
+点积把每个共同用户的两项权重相乘后累加。除以两个向量的模长后，整体放大任一列不会改变相似度，留下的是两列在用户维度上的方向接近程度。权重取 0 或 1 就回到二值公式。若任一列为全零，本页示例约定返回 0。
+
+打分时，令 $H_u$ 为用户 $u$ 的历史兴趣物品集合，$i$ 为候选。每个历史物品 $j$ 都可以给候选贡献一次，用户越喜欢 $j$、$j$ 越像 $i$，贡献越大。
+
+$$
+\operatorname{score}(u,i)=\sum_{j\in H_u}\operatorname{like}(u,j)\operatorname{sim}(j,i)
+$$
+
+课程例子把四个历史物品的 Like [2, 1, 4, 3] 与相似度 [0.1, 0.4, 0.2, 0.6] 对应相乘，得到 $0.2+0.4+0.8+1.8=3.2$。兴趣分数用于排列候选，可以超过 1。
+
+<div className="cf-note">
+  <ScoringPlayground mode="item" />
+</div>
+
+## UserCF 沿相似用户找他们喜欢的物品
+
+同一张矩阵现在按行读。$J_u$ 表示用户 $u$ 的交互物品集合。U1 的 $J_{U1}$ 是 A、B，U2 的 $J_{U2}$ 是 A、B、C，共同交互两个，得到 $2/\sqrt{2\times3}\approx0.816$。在上方矩阵切换到 UserCF 可以复算。
+
+$$
+\operatorname{sim}(u,v)=\frac{|J_u\cap J_v|}{\sqrt{|J_u||J_v|}}
+$$
+
+从 $N(u)$，即用户 $u$ 的 Top-K 相似用户集合，取出每位近邻 $v$ 的行为。越相似的用户、越强的兴趣，对同一候选的贡献越大。当前用户已经消费过的物品在输出前滤掉。
+
+$$
+\operatorname{score}(u,i)=\sum_{v\in N(u)}\operatorname{sim}(u,v)\operatorname{like}(v,i)
+$$
+
+课程例子的四位近邻相似度为 [0.9, 0.7, 0.7, 0.4]，他们对候选的 Like 为 [0, 1, 3, 0]，只有第二、第三位贡献，合计 $0.7+2.1=2.8$。
+
+<div className="cf-note">
+  <ScoringPlayground mode="user" />
+</div>
+
+### 给热门物品降权
+
+两个人都看过一条全站爆款，和两个人都收藏了一条冷门的专业视频，在二值余弦里都给分子加 1。冷门物品的重合可能提供更有区分度的兴趣信号。一种扩展是把每个共同物品的贡献换成 $1/\ln(1+n_i)$，其中 $n_i$ 是交互过物品 $i$ 的用户数，进入求和的物品须满足 $n_i\ge1$。
+
+$$
+\operatorname{sim}_{\text{pop}}(u,v)=
+\frac{\sum_{i\in J_u\cap J_v}1/\ln(1+n_i)}{\sqrt{|J_u||J_v|}}
+$$
+
+这个例子只改分子，人数越多，单项贡献越小。权重函数和统计窗口可以按业务选择。对极少交互的物品，还应结合最小共现次数或收缩项，避免把一次偶然重合看得太重。
+
+<div className="cf-note">
+  <PopularityPenaltyFigure />
+</div>
+
+## 同一个 U6，两条召回路径
+
+U6 喜欢 A 和 B。ItemCF 经 A 和 B 找 C，贡献约为 0.667 和 0.333，合计 1.000。D 只从 B 得到约 0.408，A 与 D 的共现为 0。
+
+UserCF 中，U6 与 U1–U5 的相似度依次为 1、0.816、0.5、0.5、0。用全部示例用户计算，C 从 U2 和 U3 得到约 1.316，D 从 U4 得到 0.5。U1 最相似，但只看过 A、B，所以对这两个新候选没有贡献。两边都优先返回 C。这里使用二值行为和直接累加，各通道的分数尺度不同，融合时需要额外处理。
+
+<div className="cf-note">
+  <CfComparison />
+</div>
+
+| | ItemCF | UserCF |
+|---|---|---|
+| 相似度对象 | 物品列向量 | 用户行向量 |
+| 共同输入 | User-Item Matrix | User-Item Matrix |
+| 第一跳 | 当前用户的历史物品 | 当前用户的相似用户 |
+| 第二跳 | 历史物品的相似物品 | 相似用户的历史物品 |
+| 近邻索引 | Item → Item | User → User |
+| 单条贡献 | 历史 Like × 物品相似度 | 用户相似度 × 近邻 Like |
+| 常见挑战 | 物品冷启动、共现稀疏 | 用户规模、兴趣漂移、热门偏差 |
+
+## Offline Computation 与 Online Retrieval
+
+离线先按时间窗聚合用户行为，生成 **User → Item**，例如 `U1 → [(A, 1), (B, 1)]`。ItemCF 按用户枚举其交互物品的共现，UserCF 按物品枚举交互过它的用户共现。累积共现和向量范数后计算相似度，每个键只保留 Top-K 正相似近邻。两者分别写出 **Item → Item**（如 `A → [(B, 0.667), (C, 0.667)]`）和 **User → User**（如 `U6 → [(U1, 1), (U2, 0.816), …]`），供在线查找。UserCF 的 U6 近邻需要预先用它已知的历史算好。
+
+线上只查这些索引。ItemCF 可以先取最近 $N=200$ 个历史物品，再为每个物品查 $K=10$ 个邻居，最多展开 2,000 条去重前路径。UserCF 先查 Top-K 用户，再取每位近邻最近 N 个物品，最多展开 $K\times N$ 条路径。两个通道都按候选物品合并并累加路径贡献，过滤已交互、下架或不符合业务条件的物品，再取 Top-100。条目上限是查表和聚合的工作量预算，实际唯一候选数取决于索引覆盖、重复和过滤。预计算索引把全量两两相似度计算移出线上请求。
+
+<div className="cf-note">
+  <RetrievalSimulator />
+</div>
+
+## Python 从零实现
+
+下面用邻接表表示同一张矩阵。为了方便复算，离线索引默认不截断；真实服务会给近邻和历史都设上限。示例对没有行为的用户返回空列表，对同分候选按物品 ID 排序。
+
+```python
+from collections import Counter
+from math import sqrt
+
+ITEMS = ("A", "B", "C", "D")
+MATRIX = {
+    "U1": (1, 1, 0, 0),
+    "U2": (1, 1, 1, 0),
+    "U3": (1, 0, 1, 0),
+    "U4": (0, 1, 0, 1),
+    "U5": (0, 0, 1, 1),
+}
+interactions = {
+    user: {item for item, bit in zip(ITEMS, row) if bit}
+    for user, row in MATRIX.items()
+}
+interactions["U6"] = {"A", "B"}
+
+# U6 是请求用户。物品列仍用 U1–U5 的离线快照。
+item_users = {
+    item: {user for user in MATRIX if item in interactions[user]}
+    for item in ITEMS
+}
+
+def binary_cosine(left, right):
+    return len(left & right) / sqrt(len(left) * len(right)) if left and right else 0.0
+
+def item_similarity(item_a, item_b):
+    return binary_cosine(item_users.get(item_a, set()), item_users.get(item_b, set()))
+
+def user_similarity(user_a, user_b):
+    return binary_cosine(interactions.get(user_a, set()), interactions.get(user_b, set()))
+
+def build_index(keys, peers, similarity, limit=None):
+    index = {}
+    for key in keys:
+        neighbors = [(peer, similarity(key, peer)) for peer in peers if peer != key]
+        positive = [(peer, weight) for peer, weight in neighbors if weight > 0]
+        index[key] = sorted(positive, key=lambda pair: (-pair[1], pair[0]))[:limit]
+    return index
+
+item_index = build_index(ITEMS, ITEMS, item_similarity)
+user_index = build_index(interactions, MATRIX, user_similarity)
+
+def ranked(scores, top_k):
+    return sorted(scores.items(), key=lambda pair: (-pair[1], pair[0]))[:top_k]
+
+def recommend_itemcf(user_id, top_k=10):
+    seen = interactions.get(user_id, set())
+    scores = Counter()
+    for history_item in sorted(seen):
+        for candidate, similarity in item_index[history_item]:
+            if candidate not in seen:
+                scores[candidate] += similarity  # 历史 Like 为 1
+    return ranked(scores, top_k)
+
+def recommend_usercf(user_id, top_k=10):
+    seen = interactions.get(user_id, set())
+    scores = Counter()
+    for neighbor, similarity in user_index.get(user_id, []):
+        for candidate in sorted(interactions[neighbor] - seen):
+            scores[candidate] += similarity  # 近邻 Like 为 1
+    return ranked(scores, top_k)
+
+print(recommend_itemcf("U6"))  # C ≈ 1.000, D ≈ 0.408
+print(recommend_usercf("U6"))  # C ≈ 1.316, D ≈ 0.500
+```
+
+## 工程上的取舍
+
+- **Popularity Bias 与 Sparsity。** 归一化和热门降权能减少爆款共现的影响，低频共现仍需最低支持度或收缩。一次共现不宜当成稳定的兴趣关联。
+- **Cold Start。** 新用户尚无历史、新物品尚无共现时，CF 索引覆盖有限。热门召回、内容召回或其他通道可补足候选。
+- **Scalability。** 教学代码枚举两两关系。生产环境可从稀疏倒排记录生成有共现的配对，限制超大用户历史和热门物品的配对规模，再保留 Top-K。
+- **Freshness。** 离线快照可能落后于兴趣变化或新物品上线。近期历史可在线更新，近邻表可以定期重建或增量更新，再用实时通道补足空档。
+- **多路召回。** ItemCF、UserCF、热门、内容和 embedding 通道可以共同产出候选。合并去重时保留来源及各通道分数，供下游 Ranking 使用。
+
+下一步可以从共现继续看 Swing，再到 Embedding Retrieval、Two-Tower 和多路融合。候选召回之后，可以用 [Precision@K 与 Recall@K](/notes/ml/recsys/retrieval-precision-at-k/) 衡量找回了多少相关物品。
+
+课程参考为王树森《工业界的推荐系统》的两节召回课。[ItemCF](https://www.youtube.com/watch?v=QtmunNLeDvo) · [UserCF](https://www.youtube.com/watch?v=7O9zFMNdrZ8)

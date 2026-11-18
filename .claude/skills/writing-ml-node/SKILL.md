@@ -1,6 +1,6 @@
 ---
 name: writing-ml-node
-description: Use when adding or editing a page under ML & LLM (content/ml/), when the owner mentions 知识树 / 节点 / 这一章, or asks for a concept page that explains what a thing is, why it exists, how it works and its trade-offs with one computed, interactive figure.
+description: Use when adding or editing a page under ML & LLM (content/ml/), when the owner mentions 知识树 / 节点 / 这一章, or asks for a concept page that explains what a thing is, why it exists, how it works and its trade-offs with computed interactive figures where they clarify the concept.
 ---
 
 # Writing an ML knowledge-tree node
@@ -11,25 +11,16 @@ ML & LLM notes are a **knowledge tree** (`content/ml/tree.ts`): a chapter is a r
 
 Reference page: `content/ml/evaluation/precision-recall-f1.mdx` with `components/visualization/ml/evaluation/PrecisionRecallFigure.tsx`. Design spec: `docs/superpowers/specs/2026-10-16-ml-knowledge-tree-design.md`.
 
-## The page contract
+## Writing the page
 
-The MDX file is exactly these five sections, in this order:
-
-| Part | Heading | What it is | Budget |
-| --- | --- | --- | --- |
-| 1 | `## 一句话` | One bold sentence defining the concept, then at most two plain sentences on where it is used | bold ≤ 80 字 |
-| 2 | `## 为什么需要它` | Pick up the question the previous node left; what goes wrong without this concept. Use the example from the owner's notes when there is one | 2–4 sentences |
-| 3 | `## 怎么工作` | The figure first, then the formulas (≤ 3, KaTeX `$$`), then 2–4 short paragraphs explaining what the figure shows | longest section |
-| 4 | `## 代价与取舍` | 3–5 bullets: when not to use it, common traps, trade-offs against neighbouring nodes | list or ≤ 3-row table |
-| 5 | `## 再往下看` | Lead into the next node of the chain in one sentence; add cross-chapter prerequisites or exits when the tree has an edge | ≤ 3 sentences |
-
-- Title is the concept itself (`# ROC 与 AUC`, `# GBDT`), never `X vs Y`. Technical terms stay English with a space between CJK and Latin text.
-- 500–800 字 of prose. No code blocks. One main figure; a second, static structure figure only when the main figure cannot carry it.
-- Whole page is readable in 5–7 minutes.
+- Keep a concept and its worked implementation on the same page when they answer the same question.
+- Let the topic determine the headings, order, and length. Explain the motivation, mechanism, and trade-offs where they help the reader follow the example.
+- Use a runnable code block when the implementation is part of the lesson.
+- Use a descriptive title and put spaces between CJK text and English technical terms.
 
 ## The figure contract
 
-One client component in `components/visualization/ml/<chapter>/<Concept>Figure.tsx`, wrapped in `VisualizationFrame`, styled only with classes from `styles/visualization.css`. Four hard rules:
+Build each interactive figure as a client component in `components/visualization/ml/<chapter>/<Concept>Figure.tsx`, wrapped in `VisualizationFrame`, styled only with classes from `styles/visualization.css`. Four hard rules:
 
 1. **Every number is computed.** Metrics, curves, trajectories, p-values come from pure functions in `lib/ml/` with unit tests in `tests/`. Randomness goes through `lib/ml/random.ts` with a fixed seed so a reload draws the same picture.
 2. **One primary control plus reset.** A slider, a step player, a toggle group, or a draggable point. One auxiliary preset (tabs or chips) is allowed when it sets up a second scenario, e.g. "990 dogs, 10 cats".
@@ -54,4 +45,4 @@ Under the figure, one `viz-narr` sentence or two that changes with the state and
 | Numbers typed into the figure | Move the computation into `lib/ml/` and test it with the numbers from the owner's notes |
 | Two or three controls competing | Keep one primary control; demote the rest to presets or delete them |
 | 9 px labels, 600 px cramped SVG | Use the primitives and the 720 × 360 baseline |
-| "再往下看" links a page that is still `planned` | Say it is not written yet and link the tree page `/notes/ml/overview/` instead |
+| A related link points to a page that is still `planned` | Say it is not written yet and link the tree page `/notes/ml/overview/` instead |

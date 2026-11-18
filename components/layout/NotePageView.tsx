@@ -27,7 +27,7 @@ export default function NotePageView({ slug, lang }: { slug: string; lang: Lang 
     <div className="note-layout">
       <div className="note-main">
         <header className="article-header">
-          <div className="note-breadcrumb"><span>{note.category}</span><Icon name="chevron" /><span>{note.section}</span></div>
+          <div className="note-breadcrumb"><span>{note.category}</span><Icon name="chevron" /><span>{note.section}</span>{note.subsection && <><Icon name="chevron" /><span>{note.subsection}</span></>}</div>
           <h1>{title}</h1>
           <p className="article-description">{description}</p>
           <div className="article-meta">
