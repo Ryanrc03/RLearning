@@ -1,5 +1,8 @@
 import SubagentContextViz from "@/components/visualization/agent-harness/SubagentContextViz";
 import SkillDisclosureViz from "@/components/visualization/agent-harness/SkillDisclosureViz";
+import McpArchitectureViz from "@/components/visualization/agent-harness/McpArchitectureViz";
+import InternalMcpLab from "@/components/visualization/agent-harness/InternalMcpLab";
+import McpGranularityViz from "@/components/visualization/agent-harness/McpGranularityViz";
 import McpSequenceViz from "@/components/visualization/agent-harness/McpSequenceViz";
 
 # Subagent、Skill 与 MCP：三种扩展方式
@@ -78,28 +81,244 @@ frontmatter 里有几个开关决定 skill 的性格：`disable-model-invocation
 
 Hermes Agent 把 skill 做得更激进一些：它兼容 agentskills.io 的开放格式，并且在完成复杂任务后会自己写一个 skill 存起来，下次遇到类似任务时触发。那是“把经验变成流程知识”的闭环，但原理和这里一样。
 
-## MCP: one protocol instead of one integration per system
+## MCP：为什么不是再写一个 API Adapter
 
-要让 agent 操作 GitHub、数据库、浏览器、公司内部系统，传统做法是给每个系统写一组工具函数塞进 harness。系统一多就维护不过来，而且每个 harness 都要重写一遍。
+要让 Coding Agent 操作 GitHub、PostgreSQL、Google Drive 和内部平台，Host 可以为每个系统写一组适配器。但换一个 Host 又要重复接入。**MCP（Model Context Protocol）统一外部能力的发现与调用协议**：Server 描述能提供什么，Host 内的 Client 按协议接入。
 
-MCP（Model Context Protocol）把这件事反过来：每个外部系统提供一个 **server**，用标准协议描述自己有哪些工具、参数是什么；harness 扮演 **client**，只需要会说这门协议。接一个新系统变成写一行配置：
+它没有消除业务适配工作，而是让适配器能被多个兼容 Host 复用。已有 REST API 可以保留，MCP Server 只是它前面的工具接口；接入仍需要配置、兼容版本和授权，不是任意系统写一行 URL 就都能用。
+
+<McpArchitectureViz />
+
+四个角色要分开：**LLM** 选择工具、生成参数并理解结果；**Host** 管理应用和 Agent 运行，Harness 负责工具注册、权限与循环；**MCP Client** 是 Host 内处理协议通信的连接器；**MCP Server** 提供能力并执行业务适配。模型可以运行在远程服务中，图里的 Host 边界表示应用职责，不要求本地部署模型。
+
+Server 可以暴露 **Tools**（可调用函数）、**Resources**（上下文数据）和 **Prompts**（可复用模板）。本案例只实现两个只读 Tool。MCP 不负责 LLM 推理，不是 Agent Framework，也不取代 REST API。
+
+### Function Calling、CLI、REST API：各在哪一层
+
+| 机制 | 负责什么 | 创建 GitHub Issue 时的位置 |
+| --- | --- | --- |
+| Function Calling | 模型表达工具调用意图 | 生成工具名和结构化参数，由 Host 决定是否执行 |
+| CLI | 通过命令行使用系统能力 | Harness 在受控 Shell 中运行 `gh issue create` |
+| MCP | 外部能力的标准化发现与调用 | Client 发 `tools/list` / `tools/call` 给 Server |
+| REST API | 系统已有的业务接口 | CLI 或 MCP Server 最后调用 GitHub API |
+
+同一个操作，CLI 可以这样表达（仅代码示例，不会在本页执行）：
+
+```bash
+gh issue create \
+  --repo Ryanrc03/RLearning \
+  --title "Improve MCP Notes" \
+  --body "Add MCP examples"
+```
+
+MCP 路径则是：
+
+```text
+LLM → Function Calling → Harness 权限检查
+    → MCP Client → tools/call → GitHub MCP Server → GitHub API
+    ← 工具结果 ←─────────────────────────────────────────────
+```
+
+**这两条路径不是互斥选项。** MCP Server 也可以封装 CLI。已有成熟 CLI、Agent 有受控 Shell 权限、任务局限在当前开发环境时，直接用 CLI 可能更简单；多个 Host 要共享集成、需要统一 Schema 或只暴露有限业务操作时，MCP 更有价值。使用 CLI 不等于凭证必须进入模型上下文，使用 MCP 也不等于凭证天然安全。
+
+### 先分清协议版本，再看时序
+
+下面默认展示 **2026-07-28**。这一版没有协议级 Session，也没有旧的 `initialize` / `notifications/initialized` 握手；每个请求带自己的版本与客户端能力。Client 可选调用 `server/discover`；Server 必须支持该方法。若查看 **2025-11-25**，则需要先完成初始化。两套消息不能混在同一条时序里。[版本规则](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning)
+
+<McpSequenceViz />
+
+`tools/list` 是发现工具与 Schema，`tools/call` 才执行指定工具。Function Calling 是模型一侧的调用表达；Host 需要把它映射为 MCP 请求，并把结果带回下一轮模型调用。`mcp__server__tool` 是部分 Host 的别名约定，不是协议强制的工具名称。
+
+常见传输有 **stdio** 与 **Streamable HTTP**：前者由 Host 启动本地子进程，通过标准输入输出通信；后者连接 HTTP 端点，可部署为共享服务。stdio 的 stdout 是协议通道，调试日志应写到 stderr。旧 HTTP+SSE 传输已被新版规范弃用；这不等于 Streamable HTTP 响应里不能使用 SSE。[协议更新说明](https://blog.modelcontextprotocol.io/posts/2026-07-28/)
+
+工具定义进入模型输入时会占上下文；工具多，名称、说明和参数结构都可能成为成本。图里的 token 数只是估算。**Tool Search／按需加载是 Host 优化策略**，不是每个 Client 必须实现的协议能力；缓存和按任务筛选也要考虑搜索往返与可发现性。输出上限、截断和落盘同样取决于 Host，不宜当作 MCP 的统一配额。
+
+## 内部 Ads Platform：MCP Server 究竟写什么
+
+假设公司已经有一个广告 A/A 实验平台，能查询 Experiment Metrics、AUC Difference、Control / Treatment 样本数、Joiner / Flink 指标和 Pipeline Errors。已有 REST 接口如下，不需要因为 MCP 重做平台：
+
+```http
+GET /api/experiments/{id}/metrics
+GET /api/experiments/{id}/sample-diff
+GET /api/pipelines/{id}/status
+```
+
+用户希望问：“帮我排查 `exp_123` 为什么没有 A/A 打平，看看是不是 Joiner 或 Flink 出了问题。”需要新增的是**面向这个任务的只读工具适配层**：
+
+```text
+User → AI Agent / Host → Harness → MCP Client → Ads MCP Server
+                                             ├─ get_experiment_metrics
+                                             └─ get_sample_diff
+                                                    ↓
+                                             Internal REST API
+                                                    ↓
+                                           Ads Experiment Platform
+                                             ├─ Experiment Storage
+                                             └─ Joiner / Flink Metrics
+```
+
+Server 负责校验参数、检查业务权限、请求 API、整理响应；LLM 在 Host 的循环中决定如何组合证据。接口数量不等于 Tool 数量，下面先实现两个能支撑排查问题的查询。
+
+### 从异常指标到下一份证据
+
+<InternalMcpLab />
+
+Mock 指标里的 AUC Diff 为 `0.0012`，教学阈值是 `0.0005`。它触发的是进一步检查，**不是统计显著性结论**。Joiner 的两组数量都为一百万，Flink 为 980K 对 960K：可以定位“可见阶段里数量差异首次出现的位置”，不能仅凭这张表证明 Joiner 没问题或 Flink 有某个确定 Bug。
+
+本案例的分流约定是：**负样本直接下发；正样本由 Flink 内部的 Delayed Model 设置等待时间，经过 Timer 后下发。Delayed Model 不在 Joiner。** 排查应对齐观察时间和成熟样本口径，再看过滤、延迟下发、Timer 与去重；必要时比较样本 ID 集合与 label，而不仅是 count。
+
+### Tool 粒度：Agent 编排，还是 Server 编排
+
+<McpGranularityViz />
+
+细粒度查询让 Agent 灵活组合证据，但需要更多往返，也可能选择错误的下一步。粗粒度 `diagnose_experiment` 可以把稳定的 SOP 固化在 Server 中，减少模型调用轮次；代价是 Server 的规则、异常分支与版本维护更复杂。**不要机械地把每个 Endpoint 都变成 Tool，也不要把所有业务逻辑塞进一个超级 Tool。** 应围绕真实任务、可组合性、权限和延迟预算划边界。
+
+### 一份可运行的 Python 适配器
+
+以下示例固定 **官方 `mcp==2.0.0` + `httpx==0.28.1`**，使用 Python 3.11+，本地验证环境为 3.12。采用 `from mcp.server import MCPServer`，HTTP 端口传给 `run()`；不要把其他 SDK 或旧 FastMCP 的构造参数直接混用。[官方 SDK](https://py.sdk.modelcontextprotocol.io/) / [运行方式](https://py.sdk.modelcontextprotocol.io/run/)
+
+<details>
+<summary>展开完整 server.py：两个只读 Tool → 现有 REST API</summary>
+
+```python
+"""Two read-only API adapters; official mcp==2.0.0, Python 3.11+."""
+import os
+from typing import Annotated, Any
+from urllib.parse import urlsplit
+
+import httpx
+from mcp.server import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
+from pydantic import Field
+
+mcp = MCPServer('Ads Experiment Platform')
+API_BASE = os.environ['ADS_API_URL'].rstrip('/')
+TOKEN = os.environ['ADS_API_TOKEN']
+parsed = urlsplit(API_BASE)
+if parsed.scheme not in {'http', 'https'} or not parsed.hostname or parsed.username or parsed.password:
+    raise ValueError('ADS_API_URL must be an HTTP(S) base URL without embedded credentials')
+if parsed.query or parsed.fragment or parsed.path not in {'', '/'}:
+    raise ValueError('ADS_API_URL must be an origin, without a path/query/fragment')
+ExperimentId = Annotated[str, Field(pattern=r'^exp_[A-Za-z0-9_-]{1,64}$')]
+
+
+def fetch_api(path: str) -> dict[str, Any]:
+    try:
+        with httpx.Client(timeout=10, follow_redirects=False) as client:
+            response = client.get(f'{API_BASE}{path}',
+                                  headers={'Authorization': f'Bearer {TOKEN}'})
+            response.raise_for_status()
+            payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError('Expected a JSON object')
+        return payload
+    except (httpx.HTTPError, ValueError):
+        # Do not expose Authorization headers or raw upstream error bodies.
+        raise ToolError('Ads API unavailable or returned an invalid response') from None
+
+
+@mcp.tool()
+def get_experiment_metrics(experiment_id: ExperimentId) -> dict[str, Any]:
+    """Read sample counts and AUC metrics for an authorized experiment."""
+    return fetch_api(f'/api/experiments/{experiment_id}/metrics')
+
+
+@mcp.tool()
+def get_sample_diff(experiment_id: ExperimentId) -> dict[str, Any]:
+    """Read comparable sample counts at Joiner and Flink stages."""
+    return fetch_api(f'/api/experiments/{experiment_id}/sample-diff')
+
+
+if __name__ == '__main__':
+    mcp.run(transport='streamable-http', host='127.0.0.1',
+            port=int(os.environ.get('ADS_MCP_PORT', '3001')))
+```
+
+</details>
+
+`@mcp.tool()` 根据函数名、docstring、类型注解生成工具定义。`ExperimentId` 的字符串 Pattern 会进入 `inputSchema`，无效格式在调用时被拒绝；`dict[str, Any]` 返回注解让这个版本的 SDK 生成结构化输出。下面只摘出输入 Schema 的关键字段：
 
 ```json
 {
-  "mcpServers": {
-    "github": { "type": "http", "url": "https://api.githubcopilot.com/mcp/" },
-    "browser": { "type": "stdio", "command": "npx", "args": ["@playwright/mcp@latest"] }
+  "name": "get_experiment_metrics",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "experiment_id": {
+        "type": "string",
+        "pattern": "^exp_[A-Za-z0-9_-]{1,64}$"
+      }
+    },
+    "required": ["experiment_id"]
   }
 }
 ```
 
-`stdio` 是 harness 拉起的本地子进程，`http` 是远程服务（旧的 `sse` 已不推荐）。配置可以放在项目的 `.mcp.json`（随仓库走）、用户级或本地。接入后的工具以 `mcp__<server>__<tool>` 命名，进入和内置工具同一个列表，走同一道权限闸门：可以写 `allow mcp__github__*`，也可以只放行其中一两个。
+`tools/call` 的 `arguments.experiment_id` 进入 Python 函数，随后映射到固定的 `/api/experiments/{id}/metrics` 路径。SDK 处理 JSON-RPC 与传输；你写的是业务适配。两个工具不依赖真实 LLM，也不在 Server 内做 Agent 推理。
 
-按步骤看一个 MCP 工具从接入到被调用的完整时序：
+<details>
+<summary>安装、Mock API、启动、Host 配置与 Inspector 调试</summary>
 
-<McpSequenceViz />
+仓库的 [examples/ads-mcp](https://github.com/Ryanrc03/RLearning/tree/main/examples/ads-mcp) 提供 `server.py`、`mock_api.py`、`client.py`、`smoke_test.py` 和依赖文件。以下为 macOS/Linux 命令，先安装 uv；在该目录执行：
 
-MCP 的隔离价值常被忽略：GitHub 的 token 只在 server 进程里，harness 和模型都碰不到。但它的代价也很具体，**每个工具的 schema 都要占上下文**。三个 server 各 20 个工具，就是上万 token 在模型做任何事之前先花掉。Claude Code 默认开 tool search：开始只给模型工具名，要用时再把 schema 载入。另一个上限是输出：单次 MCP 工具输出默认最多 25,000 token，超过 10,000 就会警告，再大的文本会落盘而不是进上下文。
+```bash
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python -r requirements.txt
+```
+
+终端 1 启动虚构业务 API：
+
+```bash
+.venv/bin/python mock_api.py
+```
+
+终端 2 配置本地演示地址与虚构 Token，再启动 MCP HTTP 服务：
+
+```bash
+export ADS_API_URL=http://127.0.0.1:3002
+export ADS_API_TOKEN=local-demo-token
+.venv/bin/python server.py
+```
+
+端点为 `http://127.0.0.1:3001/mcp`。本地客户端验证：
+
+```bash
+.venv/bin/python client.py
+.venv/bin/python smoke_test.py
+```
+
+后者会自行启动临时端口上的 Mock API 和 MCP Server，验证目录、Schema、两次 HTTP 工具调用、无效 ID、上游 503 与错误 JSON，再停止服务。它会覆盖子进程的 URL / Token 为本地虚构值，不读取真实平台数据。
+
+兼容的 Claude Code Host 可采用下列项目 `.mcp.json` **配置示例**；此格式由 Host 定义，不是 MCP 协议的一部分。本任务不会修改你的实际 Host 配置：
+
+```json
+{
+  "mcpServers": {
+    "ads-experiments": {
+      "type": "http",
+      "url": "http://127.0.0.1:3001/mcp"
+    }
+  }
+}
+```
+
+连接前检查 Host 支持的协议版本与信任提示；旧 Host 不一定能直接连接新版专用服务。[Host 配置参考](https://code.claude.com/docs/en/mcp)
+
+图形调试使用 MCP Inspector（此版本需要 Node 22.19+，与网站构建环境无关）：
+
+```bash
+npx @modelcontextprotocol/inspector@2.13.0
+```
+
+选择 Streamable HTTP，连接 `http://127.0.0.1:3001/mcp`。在 Tools 中列出两个工具，查看必填参数与 Pattern；调用 `get_experiment_metrics`，填入 `exp_123`，再试无效的 `../private`。观察请求、结构化结果和校验错误。Inspector 启动 URL 的调试 Token 与 Ads API Token 是不同的凭证。[Inspector 使用说明](https://modelcontextprotocol.io/docs/2026-07-28/tools/inspector)
+
+</details>
+
+### 能运行，不等于已具备生产权限体系
+
+这个演示只绑定 loopback，没有实现面向远程用户的入站认证。真实平台还需要用户／租户授权、最小权限凭证、输出脱敏与审计；**ID 格式合法不等于用户有权查询该实验**。配置中的服务域名可以是 `https://ads-api.example.invalid` 这样的占位符，不能把它当作可访问平台。
+
+MCP 不自动保证认证、权限控制或 Token 隔离。这里 API Token 由 Server 环境提供，不作为工具参数或返回值；错误经过清理，不跟随 API 重定向。Host 的 MCP 连接凭证与 Server 的上游 API 凭证也要区分，不能随意透传。上游 Tool 结果仍属于不可信数据，不能把结果里的文字当成新的权限指令。
 
 ## Which one to reach for
 
@@ -109,23 +328,26 @@ MCP 的隔离价值常被忽略：GitHub 的 token 只在 server 进程里，har
 | 几件事互不依赖，可以同时做 | 并行的 subagent | 串行 |
 | 一段流程会反复用，但不是每次都用 | skill | 写进 CLAUDE.md（每轮都付钱） |
 | 每一轮都必须知道的项目约定 | CLAUDE.md | skill（可能没被触发） |
-| 要操作一个外部系统 | MCP server | 让模型用 curl 拼 API（凭证进上下文） |
+| 已有成熟 CLI、受控 Shell，任务局限于本地开发 | 直接 CLI | 为了统一名字再套一层协议 |
+| 多个 Host 共享外部能力，或需要受限的工具接口 | MCP Server | 把每个 REST Endpoint 机械变成 Tool |
 | 需要全部细节才能决定 | 自己读 | subagent（报告会丢细节） |
 
 ## Trade-offs
 
 - **subagent 用总 token 换主上下文，用细节换并行。** 任务描述写得差，省下的上下文会被返工吃掉。
 - **skill 的触发依赖描述写得准。** 描述太窄，该用的时候没触发；太宽，不该用的时候占上下文。描述是 skill 最重要的一行。
-- **MCP 让接入变便宜，让上下文变贵。** 接了不等于该全开，工具该按任务挑。
+- **MCP 标准化接入，但不是零成本。** 工具定义、返回结果、搜索往返和 Server 运维都有代价；粒度要按任务设计。
 - **三者都在增加系统的层数。** 每多一层，出问题时就多一个要查的地方：是子代理没读到文件，还是 skill 没触发，还是 MCP server 没起来。
 
 ## Key ideas to remember
 
 1. subagent 是另一个循环；父代理只拿到报告，看不到过程。
 2. skill 分三层加载：目录常驻，正文触发后进，附件按需读。
-3. MCP 把“接系统”变成“写配置”，代价是工具 schema 占上下文，所以要延迟加载。
-4. CLAUDE.md 放约定，skill 放流程，subagent 放子任务。
-5. 三者都走同一道权限闸门，扩展能力不等于扩展权限。
+3. MCP 标准化外部能力接入，不取代业务 REST API，也不负责 LLM 推理。
+4. Function Calling 表达调用意图；Host 的 MCP Client 负责协议通信，Server 提供并执行工具。
+5. CLI 与 MCP 可以共存；是否引入 MCP 要看复用、Schema、权限接口与维护成本。
+6. 细粒度让 Agent 灵活组合，粗粒度让 Server 固化流程；调用次数、延迟和可控性需要取舍。
+7. 工具 Schema、按需加载与输出治理是上下文设计的一部分；扩展能力不等于自动获得权限。
 
 ## Related notes
 
@@ -138,5 +360,7 @@ MCP 的隔离价值常被忽略：GitHub 的 token 只在 server 进程里，har
 - [Claude Code: Subagents](https://code.claude.com/docs/en/sub-agents)
 - [Claude Code: Skills](https://code.claude.com/docs/en/skills)
 - [Claude Code: MCP](https://code.claude.com/docs/en/mcp)
-- [Model Context Protocol specification](https://modelcontextprotocol.io/)
+- [MCP 2026-07-28 specification](https://modelcontextprotocol.io/specification/2026-07-28)
+- [MCP 2025-11-25 lifecycle（旧握手）](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle)
+- [MCP Python SDK](https://py.sdk.modelcontextprotocol.io/)
 - [Agent Skills open standard](https://agentskills.io)

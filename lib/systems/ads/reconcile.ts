@@ -49,15 +49,6 @@ export const STAGES: { id: StageId; name: string; unit: string }[] = [
   { id: "auc", name: "AUC Evaluation", unit: "AUC" },
 ];
 
-/** Stages a reader can blame in the debugging challenge. */
-export const BLAMEABLE: { id: StageId; name: string }[] = [
-  { id: "assignment", name: "Assignment" },
-  { id: "dedup", name: "Dedup" },
-  { id: "identity", name: "Identity / Attribution" },
-  { id: "join", name: "Join" },
-  { id: "training", name: "Training" },
-];
-
 export const SCENARIOS: { id: ScenarioId; name: string; candidate: Partial<PipelineConfig>; culprit: StageId | null; story: string }[] = [
   { id: "healthy", name: "A/A：两边配置完全相同", candidate: {}, culprit: null, story: "两条等价 pipeline。所有数据层的集合完全一致，AUC 只差一点点，落在自然波动范围里。" },
   { id: "assignment", name: "候选用了另一个 hash salt", candidate: { salt: "exp_2026_10_v2", share: 0.97 }, culprit: "assignment", story: "候选 pipeline 的分流配置换了 salt，又只镜像 97% 流量。第一层的用户集合就不一样了，后面每一层都跟着不一样。" },

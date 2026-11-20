@@ -16,7 +16,7 @@
 | 05 | `systems/ads/flink-streaming-training` | `WatermarkSimulator`：到达延迟、watermark delay、state TTL、迟到处理 |
 | 06 | `systems/ads/dedup-exactly-once` | `DedupSimulator`（四条消息逐层去重）、`RevisionSinkViz`（DROP / LWW / version-aware） |
 | 07 | `systems/ads/multi-region-dr` | `FailoverSimulator`：fencing × 唯一键 × 接管起点 |
-| 08 | `systems/ads/experiment-platform` | `ReconciliationDashboard`：Shadow / A/B、七个场景、排查挑战 |
+| 08 | `systems/ads/experiment-platform` | `ReconciliationDashboard`：Shadow / A/B、七个场景 |
 
 ## 结构
 

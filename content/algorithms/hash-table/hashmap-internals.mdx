@@ -1,0 +1,335 @@
+import HashPipelineFigure from "@/components/visualization/algorithms/HashPipelineFigure";
+import HashCollisionPlayground from "@/components/visualization/algorithms/HashCollisionPlayground";
+import LoadFactorSimulator from "@/components/visualization/algorithms/LoadFactorSimulator";
+import CompactDictVisualizer from "@/components/visualization/algorithms/CompactDictVisualizer";
+import ChainingVsTreeVisualizer from "@/components/visualization/algorithms/ChainingVsTreeVisualizer";
+
+# HashMap Internals：从 Hash Function 到 Python Dict
+
+> `d["apple"]` 为什么几乎总是 O(1)？它什么时候不是？
+
+你每天都在用 `dict`、`set`、`HashMap`，LeetCode 里一半的题靠它把 O(n²) 压成 O(n)。但「平均 O(1)」四个字背后，是一张会冲突、会长墓碑、会在某一次插入时突然把全部元素搬一遍的数组。这篇笔记从普通数组出发，一步步搭出一个 HashMap，然后对照 CPython `dict` 和 Java `HashMap` 的真实源码，看工程实现在哪些地方和教学模型不一样。读完你应该能自己解释一次 `put`、`get`、`delete`、`resize` 在底层数组上各发生了什么，并且能手写一个通过测试的版本。
+
+## 1. 从 Array 到 HashMap
+
+**问题**：数组能 O(1) 随机访问，是因为下标直接变成地址：
+
+$$
+\text{Address}(i) = \text{Base} + i \times \text{ElementSize}
+$$
+
+CPU 不用「找」，算一下就跳过去。但数组的下标只能是 `0..n-1` 的整数。如果 key 是 `"apple"`、是一个元组、是一个用户 ID，怎么也享受这种一步到位？
+
+**答案**：先把 key 变成整数，再把整数压进数组范围：
+
+$$
+index = hash(key) \bmod capacity
+$$
+
+`hash()` 把任意可哈希对象变成一个（通常很大的）整数；`mod capacity` 把它折叠到 `0..capacity-1`。之后就是一次普通的数组访问。
+
+<HashPipelineFigure />
+
+两个工程细节，现在先记下，后面会反复用到：
+
+- **容量常取 2 的幂，取模换成按位与**。`hash % 8` 和 `hash & 7` 结果相同，但按位与快得多。CPython 的 `dict` 和 Java 的 `HashMap` 都这么做（Java 里是 `(n - 1) & hash`）。代价是只用了 hash 的低位，所以 Java 在 `hash()` 里先做一次 `h ^ (h >>> 16)`，把高位混进低位。
+- **hash 相等不代表 key 相等**。hash 是一个整数，key 的空间远大于整数空间，两个不同的 key 完全可以有同一个 hash（更别说同一个 index）。反过来，**key 相等必须 hash 相等**，否则同一个 key 会被放到两个地方。这是 Python 数据模型对 `__hash__` 唯一的硬性要求："objects which compare equal have the same hash value"。因此一个类只重写 `__eq__` 不重写 `__hash__` 时，Python 会把 `__hash__` 置为 `None`，让它不可哈希；`list`、`dict` 这类按值比较的可变容器也因此不能当 key：内容一变 hash 就变，对象会落在「错误的 bucket」里再也找不到。
+
+## 2. Hash Collision
+
+既然不同 key 可以有同一个 index，冲突就不是异常，而是常态。用整数 key 和容量 8 的数组（CPython 里小整数的 hash 就是它自己，`hash(10) == 10`）：
+
+```text
+10 % 8 = 2
+18 % 8 = 2
+26 % 8 = 2
+```
+
+三个 key 都想住 index 2。HashMap 的全部复杂度，几乎都来自「第二个人来了怎么办」。两种主流答案：
+
+**Separate Chaining（链地址法）**：每个 bucket 不直接放一个元素，而是放一条链表（或别的容器）。冲突就往链上追加；查找就沿链比较。实现简单，删除也简单，代价是每个节点多一个指针、内存不连续、cache 不友好。Java `HashMap` 用的是它。
+
+**Open Addressing（开放寻址）**：整张表就是一个扁平数组，一格只放一个元素。冲突了就按某个规则去找下一格，直到遇到空位。最简单的规则是 **Linear Probing**：
+
+$$
+index_i = (h(key) + i) \bmod capacity,\quad i = 0, 1, 2, \ldots
+$$
+
+也就是「往右挪一格再看」。CPython 的 `dict` 用的是开放寻址（但探测规则不是线性的，第 5 章讲）。
+
+下面的 Playground 执行的是真实的数据结构：输入 key、选操作，逐步看每一次探测停在哪一格、比较了什么、为什么停下来。先点「载入 10, 18, 26」。
+
+<HashCollisionPlayground />
+
+几件值得亲手试的事：
+
+1. 载入 10, 18, 26 后 Search 26：线性探测要比较 3 次才命中（index 2、3 都不等，index 4 才是）。切到 Chaining 做同样的事，也是 3 次比较。冲突的代价在两种方案里都存在，只是形态不同。
+2. Search 一个不存在的 key，比如 34（34 % 8 也是 2）：线性探测一直走到 index 5 的 EMPTY 才敢说「没有」。这就是为什么**表里必须始终留着 EMPTY 格**，否则一次失败的查找会绕整整一圈。
+3. Insert 一个已经存在的 key：它会沿探测链找到原位置、原地更新，size 不变。插入永远先确认 key 是否存在，这一点在第 3 章处理 tombstone 时会变得关键。
+
+## 3. Delete 和 Tombstone
+
+**问题**：开放寻址里，删除 18 能不能直接把 index 3 清成 EMPTY？
+
+不能。回到 `[2]=10, [3]=18, [4]=26`：26 当初是因为 index 2、3 都被占了才被推到 index 4 的。如果把 index 3 清成 EMPTY，之后 Search 26 走到 index 3 看见 EMPTY，就会按第 2 章的规则停下来说「不存在」。**26 还在表里，但再也找不到了。** 链表没有这个问题，因为链表上的其他节点的位置不依赖被删的节点，这是 Chaining 的一个实在优势。
+
+所以开放寻址的槽位需要三种状态，而不是两种：
+
+| 状态 | 含义 | 查找遇到它 | 插入遇到它 |
+| --- | --- | --- | --- |
+| EMPTY | 从来没人住过 | 停：key 一定不在更后面 | 可以放（如果前面没见过 DELETED） |
+| OCCUPIED | 有一对 (key, value) | 比较 key，相等就命中 | 比较 key，相等就更新 |
+| DELETED | 住过人，后来删了（tombstone） | **跨过去继续** | 记住它，确认 key 不存在后可复用 |
+
+在 Playground 里走一遍这个 Dry Run：载入 10, 18, 26 → Delete 18 → Search 26。你会看到 index 3 变成斜纹的 DELETED，Search 26 在 index 3 上显示 `skip`，然后在 index 4 命中。再试 Insert 34：它跨过 index 3、在 index 4 比较 26、在 index 5 看到 EMPTY，确认 34 不存在，然后**回头**把 34 放进 index 3。
+
+两个常被写错的细节：
+
+- **复用 tombstone 之前必须先探测到 EMPTY**。如果看到第一个 DELETED 就立刻放进去，`Insert 26`（26 已经在 index 4）会在 index 3 再放一个 26，表里出现两份同一个 key，之后更新和删除都只碰得到前一份。
+- **tombstone 不是免费的**。它对查找来说和 OCCUPIED 一样要走过去，所以一张反复插入删除的表会越来越慢，哪怕 size 一直很小。真正清理 tombstone 的时机是 resize（第 4 章）。CPython 的注释原话："Dummy slots cannot be made Unused again else the probe sequence in case of collision would have no way to know they were once active."
+
+## 4. Load Factor、Resize 和 Rehash
+
+**问题**：表越满，冲突越多；多到什么程度该换一张更大的表？
+
+负载因子：
+
+$$
+\alpha = \frac{n}{capacity}
+$$
+
+对线性探测，α 升高时探测长度不是线性增长，而是急剧恶化：α = 0.5 时一次成功查找平均约 1.5 次探测，α = 0.9 时约 5.5 次，失败查找更糟（Knuth 的经典估计分别是 $\tfrac{1}{2}(1 + \tfrac{1}{1-\alpha})$ 和 $\tfrac{1}{2}(1 + \tfrac{1}{(1-\alpha)^2})$）。原因是线性探测会形成 **primary clustering**：连续被占的格子连成一片，新 key 一旦落进这片区域就要走到它尽头，而这又让这片区域更长。
+
+所以实现会设一个阈值，α 超过就 **resize**：分配一张更大的表（通常翻倍），把每个 key **重新计算** `hash % new_capacity`，逐个插进新表。这一步叫 **rehash**。注意它不是复制数组：容量变了，几乎每个 key 的 index 都会变。
+
+<LoadFactorSimulator />
+
+在模拟器里值得观察的：
+
+- 把阈值切到 0.9，拖大 n，看离开 home slot 的 key 和「最长探测」怎么失控；切回 0.5 再比较同一个 n。
+- 盯住一次 resize：点一个 key，看它从 `key % 8` 挪到 `key % 16`。容量翻倍后，每个 key 要么留在原 index，要么去「原 index + 旧容量」，由 hash 新多出来的那一位决定。Java 的 `resize()` 正是利用这一点，用 `(e.hash & oldCap) == 0` 把一条链拆成 lo / hi 两条，而不是逐个重新取模。
+- 右下的柱状图：resize 那一次插入要写 n 格，是 O(n)；但下一次 resize 要等到 n 再翻倍之后才来。把所有写入加起来除以 n，一直是个常数。这就是**均摊 O(1)**：几何扩容保证总搬家次数 $n + n/2 + n/4 + \cdots < 2n$。如果改成每次只加固定大小（比如 +8），均摊就退化成 O(n)。
+
+不同实现的阈值并不一样，而且含义不完全相同，讨论时要说清楚是哪一个：
+
+| 实现 | 阈值 | 触发时机 | 新容量 |
+| --- | --- | --- | --- |
+| 本文手写版 | 0.5 | `(size + tombstones) / capacity > 0.5` | 翻倍 |
+| CPython `dict` | 2/3 | entry 数组用满 `USABLE_FRACTION(n) = (n << 1) / 3` | `used * 3` 向上取到 2 的幂（无删除时约等于翻倍） |
+| Java `HashMap` | 0.75 | `++size > threshold`，`threshold = capacity * 0.75` | 翻倍 |
+
+CPython 把 tombstone 也算进「用掉的」entry（删除不会把 `dk_usable` 还回去），Java 的 `size` 只数活着的节点。这两个差别决定了「反复插入删除」在两种实现里的表现不一样。
+
+## 5. Python Dict 的真实实现
+
+**问题**：CPython 的 `dict` 是开放寻址，但如果它就是一个 `[(hash, key, value)] * capacity` 的数组，α ≤ 2/3 意味着至少三分之一的格子空着，每个空格浪费 24 字节；而且遍历顺序会是 hash 顺序，不是插入顺序。它是怎么做到既省内存又保序的？
+
+答案是 2012 年 Raymond Hettinger 提出、Python 3.6 落地的 **Compact Dict**：把表拆成两层。
+
+- `dk_indices`：真正的哈希表，长度是 2 的幂。里面不存 key，只存一个小整数：指向 entry 的下标，或者 `DKIX_EMPTY (-1)`、`DKIX_DUMMY (-2)`。表 ≤ 128 格时每格只要 **1 字节**（`int8`），再大才换 `int16`、`int32`、`int64`。
+- `dk_entries`：紧凑的 entry 数组，长度只有 `USABLE_FRACTION(dk_size)`，也就是 2/3 容量。每条是 `(me_hash, me_key, me_value)`，**按插入顺序追加**。
+
+<CompactDictVisualizer />
+
+对照上面的图，几个关键机制：
+
+**探测序列不是线性的。** CPython 查找时的递推（`Objects/dictobject.c`）：
+
+```c
+perturb = hash;
+i = hash & mask;
+/* 每次冲突后 */
+perturb >>= PERTURB_SHIFT;   /* PERTURB_SHIFT = 5 */
+i = (i*5 + perturb + 1) & mask;
+```
+
+`i*5 + 1` 在 2 的幂大小的表上是一个完整周期的线性同余序列，保证所有格子都会被访问到（这就是为什么表大小必须是 2 的幂）；`perturb` 把 hash 的高位逐步掺进来，让 hash 只在低位不同的 key 也能很快分开，避免线性探测的 primary clustering。`perturb` 最终会变成 0，之后序列退化为纯 `i*5 + 1`，仍然能走遍全表。
+
+**插入顺序是 `dk_entries` 追加的副产品。** 遍历 dict 就是从头扫 `dk_entries`、跳过 NULL。CPython 3.6 先在实现上得到了这个性质，Python 3.7 才把「dict 保持插入顺序」写进语言规范。两者要分开说：**保序是语言承诺，compact dict 是 CPython 的实现手段**，PyPy 更早就用类似布局实现了同样的语义。
+
+**删除留下两样东西。** 在图里删掉一个 key：`dk_indices` 里对应的格子变成 `DUMMY`（作用和第 3 章的 tombstone 一样，探测要跨过去），`dk_entries` 里那条 entry 的 key 和 value 被置为 NULL，但**位置不回收**，其他 entry 不挪动，所以剩下的顺序不变。删除不会把 `dk_usable` 加回去，因此反复插入删除最终会触发一次 resize；resize 时重建两个数组，DUMMY 和 NULL entry 一起消失。重新插入一个删过的 key 会追加到末尾，这就是 `del d[k]; d[k] = v` 之后 k 排到最后的原因。
+
+**扩容。** entry 数组用满时，新表大小从 `GROWTH_RATE = ma_used * 3` 算起，向上取到 2 的幂。只插入不删除时相当于翻倍；删除很多时 `ma_used` 小，新表反而可能和旧表一样大甚至更小，这是在「给删除腾头寸」。最小表 `PyDict_MINSIZE = 8`，能放 5 个 key，CPython 注释说这足以覆盖大多数 dict。
+
+**可哈希的 key。** `__hash__` 和 `__eq__` 必须一致（第 1 章）。查找时先比 hash 值（整数比较，便宜），hash 相等再比 `is`、最后才 `==`，所以自定义 `__eq__` 很慢的对象也只会在真正可能相等时被调用。
+
+图里是简化模型，真实 `dictobject.c` 还有几层：**Split Table / Shared Keys**（同一个类的多个实例的 `__dict__` 共享一份 keys，各自只存 values 数组，只允许 str key，最多 16 个）、针对全 str key 的 `PyDictUnicodeEntry`（省掉 `me_hash` 字段）、以及 free-threaded 构建里不复用 DUMMY 以便无锁读。这些细节在不同 CPython 版本间会变，引用时注明版本，不要把某个版本的内部行为当成所有 Python 实现的规范。
+
+## 6. Java HashMap 为什么使用红黑树？
+
+**问题**：Chaining 的最坏情况是所有 key 挤进同一个 bucket，查找退化成 O(n)。随机 hash 下这几乎不会发生；但 key 的 `hashCode()` 是用户写的，可能很差，也可能被故意构造（hash flooding 攻击）。Java 8 的 `HashMap` 怎么兜底？
+
+答案是：**单个 bucket 太长时，把那条链表换成红黑树。** 查找这个 bucket 从 O(n) 变成 O(log n)。其他 bucket 不受影响，依然是链表。
+
+<ChainingVsTreeVisualizer />
+
+三个常量（`java.util.HashMap`）：
+
+```java
+static final int TREEIFY_THRESHOLD = 8;
+static final int UNTREEIFY_THRESHOLD = 6;
+static final int MIN_TREEIFY_CAPACITY = 64;
+```
+
+它们的实际判断逻辑比「到 8 个就树化」细：
+
+- `putVal` 沿链走到尾部追加新节点后，检查 `binCount >= TREEIFY_THRESHOLD - 1`。`binCount` 是走过的节点数，所以这个条件在 **bucket 原来有 8 个、现在变成 9 个**时成立，然后才调用 `treeifyBin`。
+- `treeifyBin` 先看表的大小：`if (tab == null || (n = tab.length) < MIN_TREEIFY_CAPACITY) resize();`。表小于 64 时**不树化，改为扩容**。原因是表小的时候长链多半是因为表小，扩容一次就能把它们拆开，比维护一棵树便宜；只有表已经够大、链还很长，才说明 hash 分布真的有问题。
+- 树太小时会变回链表：`resize()` 拆分一个树 bucket 时，若一侧节点数 `<= UNTREEIFY_THRESHOLD`（6）就 `untreeify`；删除节点时如果树的形状显示它「太小」（源码注释说在 2 到 6 个节点之间触发，取决于树的结构），也退回链表。6 和 8 之间留出差距，是为了避免在 8 附近反复树化、退化。
+
+为什么默认不全用树？源码的 Implementation notes 给了数字：在 0.75 的负载因子下，一个 bucket 的节点数近似服从参数 0.5 的泊松分布，出现 8 个节点的概率约 0.00000006。树节点大约是普通节点的两倍大，为这种概率付出内存不值得，所以树只是最坏情况的保险。
+
+最后两个边界要分清：
+
+- **Java `HashMap` 不是所有 bucket 都是树**，绝大多数时候一棵都没有。
+- **Python `dict` 完全没有树**，它靠开放寻址 + 扰动探测 + 随机加盐的 SipHash 来对付坏 hash。两种语言对同一个问题给了不同的工程答案，不能混为一谈。
+
+## 7. 手写 HashMap
+
+把前面的东西落成代码：Open Addressing + Linear Probing + Tombstone，阈值 0.5，几何扩容。完整文件和测试在仓库的 `examples/hashmap/`。
+
+```python
+EMPTY = object()     # 从没住过人
+DELETED = object()   # tombstone
+
+class HashMap:
+    INITIAL_CAPACITY = 8
+    MAX_LOAD = 0.5
+
+    def __init__(self, capacity=INITIAL_CAPACITY):
+        self._keys = [EMPTY] * capacity
+        self._values = [None] * capacity
+        self._size = 0        # 只数 OCCUPIED
+        self._tombstones = 0  # DELETED 也占探测链，所以要单独计数
+
+    @property
+    def capacity(self):
+        return len(self._keys)
+
+    def _find(self, key):
+        """返回 (found_index, insert_index)。
+
+        found_index  : key 所在的格子，不存在则为 None
+        insert_index : 新 key 应该放的位置：路上第一个 DELETED，否则是停下来的 EMPTY
+        """
+        cap = self.capacity
+        start = hash(key) % cap
+        first_tombstone = None
+        for i in range(cap):
+            idx = (start + i) % cap
+            slot = self._keys[idx]
+            if slot is EMPTY:
+                return None, (first_tombstone if first_tombstone is not None else idx)
+            if slot is DELETED:
+                if first_tombstone is None:
+                    first_tombstone = idx
+                continue
+            if slot is key or slot == key:
+                return idx, idx
+        return None, first_tombstone  # 只有表里没有 EMPTY 时才会到这里
+
+    def put(self, key, value):
+        found, idx = self._find(key)
+        if found is not None:
+            self._values[found] = value   # 已存在：原地更新，size 不变
+            return
+        if self._keys[idx] is DELETED:
+            self._tombstones -= 1         # 复用 tombstone
+        self._keys[idx] = key
+        self._values[idx] = value
+        self._size += 1
+        if (self._size + self._tombstones) / self.capacity > self.MAX_LOAD:
+            self._resize(self.capacity * 2)
+
+    def get(self, key, default=None):
+        found, _ = self._find(key)
+        return default if found is None else self._values[found]
+
+    def delete(self, key):
+        found, _ = self._find(key)
+        if found is None:
+            return False
+        self._keys[found] = DELETED       # 不是 EMPTY
+        self._values[found] = None
+        self._size -= 1
+        self._tombstones += 1
+        return True
+
+    def _resize(self, new_capacity):
+        old = [(k, v) for k, v in zip(self._keys, self._values)
+               if k is not EMPTY and k is not DELETED]
+        self._keys = [EMPTY] * new_capacity
+        self._values = [None] * new_capacity
+        self._size = self._tombstones = 0
+        for k, v in old:                  # rehash：每个 key 重新算 hash % new_capacity
+            _, idx = self._find(k)
+            self._keys[idx] = k
+            self._values[idx] = v
+            self._size += 1
+```
+
+设计上每一行都对应前面的某一章：
+
+| 要求 | 代码里的体现 | 对应章节 |
+| --- | --- | --- |
+| 正确处理冲突 | `_find` 里 `(start + i) % cap` 线性探测 | 第 2 章 |
+| 更新已有 key 不增加 size | `put` 先 `_find`，找到就只改 value | 第 2 章 |
+| 删除使用 tombstone | `delete` 写 `DELETED` 而不是 `EMPTY` | 第 3 章 |
+| 插入可以复用 tombstone | `_find` 记住 `first_tombstone`，但只有走到 EMPTY 才返回它 | 第 3 章 |
+| 负载超阈值时扩容并重新插入 | `put` 末尾检查 `(size + tombstones) / capacity`，`_resize` 逐个重插 | 第 4 章 |
+| 正确处理不存在的 key | `get` 返回 default，`delete` 返回 False | 第 2、3 章 |
+| 表里始终有 EMPTY | tombstone 计入负载，所以非 EMPTY 格数 ≤ capacity / 2 | 第 2 章 |
+
+### Dry Run
+
+```python
+hm = HashMap()        # capacity 8，hash(10) == 10
+hm.put(10, "A")
+hm.put(18, "B")
+hm.put(26, "C")
+hm.delete(18)
+
+assert hm.get(26) == "C"
+```
+
+每一步底层数组的变化（也就是 Playground 里那张表）：
+
+```text
+put(10, "A")   10 % 8 = 2，index 2 是 EMPTY
+               [_, _, (10,A), _, _, _, _, _]                size 1
+
+put(18, "B")   18 % 8 = 2，被 10 占着；i=1 → index 3 EMPTY
+               [_, _, (10,A), (18,B), _, _, _, _]           size 2
+
+put(26, "C")   26 % 8 = 2，index 2、3 都不是 26；i=2 → index 4 EMPTY
+               [_, _, (10,A), (18,B), (26,C), _, _, _]      size 3
+
+delete(18)     探测到 index 3 命中，标成 DELETED（不是 EMPTY）
+               [_, _, (10,A), DELETED, (26,C), _, _, _]     size 2，tombstones 1
+
+get(26)        index 2 是 10 不等；index 3 是 DELETED，跨过；index 4 命中 → "C"
+```
+
+如果 `delete` 把 index 3 清成 EMPTY，最后一步会在 index 3 停下并返回 None。
+
+再多放一个 key 会发生什么？此时 `(size + tombstones) / capacity = 3 / 8`，再 `put(34, "D")`：34 % 8 = 2，探测跨过 index 3 的 DELETED、比较 index 4 的 26、在 index 5 看到 EMPTY，确认 34 不存在，回头放进 index 3，tombstone 被复用。负载变成 3 / 8，还不扩容。继续放到第 5 个 key 时 5 / 8 > 0.5，触发 `_resize(16)`，所有 key 按 `% 16` 重新落位，tombstone 归零。
+
+### 测试
+
+`examples/hashmap/test_hashmap.py` 用 `unittest` 覆盖了上面每一条要求，另外有一个 5000 步随机操作的测试，把每一步的 `put` / `get` / `delete` 结果和内置 `dict` 对照，并检查负载因子从不超过阈值、表里始终留有 EMPTY：
+
+```bash
+cd examples/hashmap
+python3 -m unittest -v test_hashmap
+```
+
+## Key Takeaways
+
+1. HashMap = 数组随机访问 + 一个把 key 变成下标的函数。O(1) 是**平均 / 期望**，前提是 hash 分布好、负载因子受控；最坏情况仍然是 O(n)（Java 树化后 O(log n)）。
+2. 不同 key 允许 hash 相同，相等的 key 必须 hash 相同。可变对象不能当 key，不是语法限制，而是 hash 一变就找不到了。
+3. 开放寻址的删除必须留 tombstone，插入复用 tombstone 前必须先探测到 EMPTY 确认 key 不存在；tombstone 在 resize 时才真正消失。
+4. 单次 resize 是 O(n)，几何扩容让插入均摊 O(1)。阈值各家不同（本文 0.5、CPython 2/3、Java 0.75），而且 CPython 的「用量」包含删除过的 entry。
+5. CPython `dict`：开放寻址 + `i*5 + perturb + 1` 探测 + 两层 compact 布局。插入顺序来自 entry 追加，3.7 起是语言保证；它没有红黑树。
+6. Java `HashMap`：Chaining，链长到 9 且表 ≥ 64 时该 bucket 单独树化，≤ 6 时退回链表；绝大多数 bucket 永远是短链表。
+
+参考：CPython `Objects/dictobject.c`（文件头注释和 `do_lookup`、`insertdict`、`delitem_common`、`dictresize`）；Python Data Model 关于 `object.__hash__` 与 3.7 What's New；OpenJDK `java.util.HashMap`（Implementation notes、`putVal`、`treeifyBin`、`TreeNode.split`、`removeTreeNode`）。

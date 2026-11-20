@@ -537,7 +537,6 @@ button.mod-card { cursor: pointer; }
 .ads-region.is-zombie { border-color: var(--vcrit); }
 .ads-region b { font-size: 13px; }
 .ads-steps { display: flex; flex-wrap: wrap; gap: 6px; }
-.ads-quiz { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .ads-inline-detail { display: none; margin: 4px 0 2px; border-color: var(--v1); }
 @media (max-width: 760px) { .ads-explorer { grid-template-columns: minmax(0, 1fr); } .ads-detail { display: none; } .ads-inline-detail { display: block; } }
 @media (max-width: 580px) { .ads-regions { grid-template-columns: minmax(0, 1fr); } .ads-kv { grid-template-columns: 56px minmax(0, 1fr); } }
