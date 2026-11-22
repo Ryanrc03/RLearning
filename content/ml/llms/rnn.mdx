@@ -39,4 +39,4 @@ $$
 
 ## 再往下看
 
-每一步都在等上一步，这条链能不能打断？[Transformer vs RNN](/notes/ml/llms/transformer-vs-rnn/) 比较两种模型沿序列的依赖，解释 Transformer 为什么能一次矩阵乘法算完一整层。
+读完整句只剩一个 h，拿它去翻译长句够不够？[Attention (I)：从 Seq2Seq 到 Bahdanau Attention](/notes/ml/llms/seq2seq-bahdanau-attention/) 让 Decoder 每一步回看 Encoder 的全部状态。另一个问题是每一步都在等上一步，这条链能不能打断？[Transformer vs RNN](/notes/ml/llms/transformer-vs-rnn/) 比较两种模型沿序列的依赖，解释 Transformer 为什么能一次矩阵乘法算完一整层。

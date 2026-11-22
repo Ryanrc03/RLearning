@@ -1,0 +1,245 @@
+import Seq2SeqBottleneckFigure from "@/components/visualization/ml/llms/bahdanau/Seq2SeqBottleneckFigure";
+import AttentionThreeStepsFigure from "@/components/visualization/ml/llms/bahdanau/AttentionThreeStepsFigure";
+import SharedParamsFigure from "@/components/visualization/ml/llms/bahdanau/SharedParamsFigure";
+import TwoStepDecodeFigure from "@/components/visualization/ml/llms/bahdanau/TwoStepDecodeFigure";
+import TrainVsInferenceFigure from "@/components/visualization/ml/llms/bahdanau/TrainVsInferenceFigure";
+
+# Attention (I)：从 Seq2Seq 到 Bahdanau Attention
+
+Bahdanau Attention（也叫 Additive Attention）出自 Bahdanau、Cho 和 Bengio 2014 年的论文 *Neural Machine Translation by Jointly Learning to Align and Translate*（ICLR 2015）。它解决的是 RNN 翻译模型的一个具体问题：整句原文被压进一个定长向量。这篇笔记接着 [RNN](/notes/ml/llms/rnn/) 往下讲，只用一个例子 `I love machine learning` → 「我 爱 机器 学习」，按这个顺序走：为什么需要、数据怎么流、三步计算、参数怎么学、两个 Decoder step、代价。
+
+读完要能回答两个问题：
+
+1. Attention 本身能训练吗？
+2. 不同位置用的是各自一套 Attention 参数，还是共享一套？
+
+## 传统 Seq2Seq：为什么最后一个 Hidden State 不够？
+
+**一句话：基础 Seq2Seq 让 Decoder 只凭一个定长向量翻译整句，句子一长这个向量就装不下。**
+
+机器翻译的输入和输出长度不一样，所以用两个 RNN（或 LSTM）：Encoder 读原文，Decoder 写译文。Encoder 依次读入 $x_1, x_2, \ldots, x_m$，每读一个词更新一次 hidden state，得到 $h_1, h_2, \ldots, h_m$。基础 Seq2Seq 只把最后的状态（或由它得到的一个定长编码）交给 Decoder，Decoder 从它出发一个词一个词地生成。
+
+<Seq2SeqBottleneckFigure />
+
+这就像**一篇很长的文章只允许写一张固定长度的便签，然后只看着便签完成翻译**。$h_1$ 到 $h_{m-1}$ 都算出来了，但在这个结构里 Decoder 读不到它们；早先的词只能靠被压进最后那个状态的部分间接起作用。
+
+这里不要说得太绝对。RNN 不是一定会把前面的词全忘掉，LSTM 的门就是为了让信息多留一会儿；后面要讲的 Attention 也不是加上就绝不遗忘。准确的说法是：定长向量是一个信息瓶颈，Attention 缓解它。论文用实验说明了这个瓶颈：没有 Attention 的基线模型（RNNencdec）的翻译质量随句子变长明显下降，加了 Attention 的模型（RNNsearch-50）在 50 词以上的句子上没有出现这种下降。
+
+## Attention 的直觉：让 Decoder 重新查看全部 Encoder Hidden States
+
+**一句话：便签不够写，就不要只留便签；把 Encoder 的每个状态都留着，Decoder 每写一个词之前回头查一遍。**
+
+改动只有一处。Encoder 的全部状态都保留下来：
+
+$$
+H = (h_1, h_2, \ldots, h_m)
+$$
+
+Decoder 在生成每一个目标位置时，拿自己当前的状态当作「查询」，和每个 $h_i$ 比一比相关程度，再按相关程度把所有 $h_i$ 混合成一个向量 $c_j$。这个 $c_j$ 叫 context vector，每个目标位置都重新算一次，所以译「爱」的时候可以多看 love，译「机器」的时候可以多看 machine。
+
+整篇笔记用下面这组符号：
+
+| 符号 | 含义 | 形状 |
+| --- | --- | --- |
+| $m$ | 源序列长度（例子里是 4） | 一个整数 |
+| $t$ | 目标序列长度 | 一个整数 |
+| $h_i$ | Encoder 第 $i$ 个 hidden state，论文叫 annotation | 向量 |
+| $s_{j-1}$ | 生成第 $j$ 个目标词之前的 Decoder 状态 | 向量 |
+| $e_{j,i}$ | 第 $j$ 步对第 $i$ 个源位置的 alignment score，未归一化 | 一个实数 |
+| $\alpha_{j,i}$ | 第 $j$ 步对第 $i$ 个源位置的 attention weight | 0 到 1 之间的一个数 |
+| $c_j$ | 第 $j$ 步的 context vector | 和 $h_i$ 一样长的向量 |
+
+> 论文原文的下标字母和这里相反：它用 $i$ 表示目标位置、$j$ 表示源位置。这里统一成 $j$ 是目标、$i$ 是源，对照论文时把两个字母对调。另外，原论文的 Encoder 是双向 RNN（BiRNN），$h_i$ 是前向和后向两个 hidden state 拼接成的向量，所以每个 $h_i$ 同时带有第 $i$ 个词前后的信息。本页的图为了方便讲解把 Encoder 画成一条简化的链，不是论文结构的精确复刻。
+
+## Bahdanau Attention 的三步：Score → Softmax → Context Vector
+
+**一句话：Score 判断哪些源位置相关，Softmax 把分数变成权重，Weighted Sum 按权重取出这一步需要的信息。**
+
+<AttentionThreeStepsFigure />
+
+### Step 1：计算 Alignment Score
+
+对每个源位置 $i$，用上一个 Decoder 状态 $s_{j-1}$ 和 $h_i$ 算一个分数：
+
+$$
+e_{j,i} = v_a^{\top} \tanh\left(W_a\, s_{j-1} + U_a\, h_i + b_a\right)
+$$
+
+可以把它看成一个很小的神经网络：两个向量各过一个线性层，相加，过 tanh，再用 $v_a$ 压成一个实数。「Additive」这个名字就来自中间那个加号。论文为了公式简洁没有写出偏置项，这里把 $b_a$ 写出来。
+
+它和「先拼接再过一个线性层」的写法是同一个东西：
+
+$$
+e_{j,i} = v_a^{\top} \tanh\left(W\,[\,s_{j-1};\, h_i\,] + b_a\right), \qquad W = [\,W_a \;\; U_a\,]
+$$
+
+把 $W$ 按列切成左右两块，左块乘 $s_{j-1}$，右块乘 $h_i$，结果就是上一式。
+
+### Step 2：Softmax
+
+一步里的 $m$ 个分数一起做 [softmax](/notes/ml/classifiers/softmax-cross-entropy/)：
+
+$$
+\alpha_{j,i} = \frac{\exp(e_{j,i})}{\sum_{k=1}^{m} \exp(e_{j,k})}, \qquad \sum_{i=1}^{m} \alpha_{j,i} = 1
+$$
+
+分数 $e$ 可以是负数，也不要求和为 1，它不是概率。权重 $\alpha$ 一定不小于 0，并且加起来等于 1。
+
+### Step 3：加权求和得到 Context
+
+$$
+\boxed{\,c_j = \sum_{i=1}^{m} \alpha_{j,i}\, h_i\,}
+$$
+
+注意是**所有**源位置一起加权求和，不是只取权重最大的那个词。$c_j$ 和 $h_i$ 一样长，接下来交给 Decoder 辅助生成第 $j$ 个词。
+
+### 一个数值例子
+
+原文是 `I love machine learning`，假设某一步的四个分数是
+
+$$
+e = [\,0,\; 0,\; 2,\; 0\,]
+$$
+
+$\exp$ 之后是 $[1, 1, 7.389, 1]$，总和 10.389，每项除以总和：
+
+$$
+\alpha \approx [\,0.096,\; 0.096,\; 0.711,\; 0.096\,]
+$$
+
+这一步最关注 machine，但 I、love、learning 各自还有约 0.096 的权重，都会进入 $c_j$。这组分数是为了好算而构造的教学数据，不是实际模型的预测。图 2 里的四条柱就是这组数。
+
+还有一点要留意：$\alpha$ 经常被画成「对齐图」，但不要把它当成真实、唯一、可以直接解释的词对齐概率。它是模型为了把词预测对而算出的中间量。
+
+## 为什么它是「可学习」的？Additive Alignment Network
+
+**一句话：打分用的那个小网络有参数，参数是训练学出来的；分数和权重没有被存下来，每次都是现算的。**
+
+「Attention 是学出来的，还是每次直接算出来的？」答案是：
+
+> **两者都有：Alignment 打分网络的参数是通过训练学出来的；每次前向传播的 Attention Score、Softmax Weight 和 Context Vector 都是根据当前输入动态算出来的。**
+
+逐项分开看：
+
+| 概念 | 是可训练参数吗？ | 说明 |
+| --- | --- | --- |
+| $W_a,\ U_a,\ v_a,\ b_a$ | 是 | Additive 打分网络的参数，只有一套，共享 |
+| Encoder / Decoder 的 RNN 或 LSTM 权重 | 是 | 负责学会怎样产生 $h_i$ 和 $s_j$ |
+| $e_{j,i}$ | 否 | 由当前的 $s_{j-1}$、$h_i$ 和上面的参数算出的分数 |
+| $\alpha_{j,i}$ | 否 | 对这一步的全部 $e_{j,i}$ 做 softmax 得到的权重 |
+| $c_j$ | 否 | 对 $h_i$ 的加权和 |
+
+模型文件里存着 $W_a$、$U_a$、$v_a$、$b_a$，没有存任何一个 $\alpha$。换一句原文，$h_i$ 变了，$\alpha$ 就全部重算。
+
+## 共享的是参数，动态变化的是 Attention Weight
+
+**一句话：所有源位置、所有 Decoder step 用的是同一个打分函数；输入不同，所以算出的权重不同。**
+
+- 每个源位置都用同一套 $W_a, U_a, v_a, b_a$ 打分。没有「位置 $i$ 专用的一套参数」。
+- 每个 Decoder step 也用这同一套。没有「第 $j$ 步专用的一套参数」。
+- 同一个函数，送进不同的 $h_i$ 和 $s_{j-1}$，得到不同的 $e_{j,i}$ 和 $\alpha_{j,i}$。
+- 这和 RNN / LSTM 本身一样：[递推用的权重](/notes/ml/llms/rnn/) 在所有 time step 之间共享。
+
+所以参数量不随句子长度变化：原文 4 个词还是 40 个词，Attention 的参数都是那一套。
+
+<SharedParamsFigure />
+
+在 Step A 和 Step B 之间切换，绿色的参数框和四个打分模块完全不动；变的只有橙色的查询状态，以及由它算出的分数、权重和 context。两组权重如下，每列和为 1，是示意值：
+
+| Encoder Token | Step A（关注 love） | Step B（关注 machine） |
+| --- | --- | --- |
+| I | 0.08 | 0.05 |
+| love | 0.70 | 0.10 |
+| machine | 0.12 | 0.70 |
+| learning | 0.10 | 0.15 |
+
+> 旁注：有的课程会提到另一种打分写法，先投影再做点积，$k_i = W_K h_i$、$q_j = W_Q s_j$。那里的 $W_Q$、$W_K$ 同样在所有位置之间共享，道理和这里一样。本页只讲 Bahdanau 的 $W_a, U_a, v_a$。
+
+## Attention 怎样与 RNN Decoder 一起工作？逐步演示两个 Time Steps
+
+**一句话：每生成一个词之前，先用上一个 Decoder 状态做一次 Attention 得到 context，再用 context 更新状态。**
+
+在生成第 $j$ 个目标词时，原论文的顺序是：
+
+1. 手里有上一个 Decoder 状态 $s_{j-1}$。
+2. 用 $s_{j-1}$ 和全部 $h_i$ 算出 $e_{j,i}$、$\alpha_{j,i}$、$c_j$。
+3. 用 $s_{j-1}$、上一个输出词的 embedding 和 $c_j$ 更新出 $s_j$，再预测第 $j$ 个词。
+
+写成公式：
+
+$$
+s_j = f\left(s_{j-1},\ \mathrm{Emb}(y_{j-1}),\ c_j\right)
+$$
+
+$$
+p\left(y_j \mid y_{<j},\, x\right) = g\left(s_j,\ c_j,\ \mathrm{Emb}(y_{j-1})\right)
+$$
+
+$f$ 是 Decoder 的 RNN 单元（论文用的是带门的 hidden unit），$g$ 是输出层。这两式是论文的抽象写法，具体实现各家不完全相同，不要把它当成唯一的实现方式。
+
+<TwoStepDecodeFigure />
+
+图里的顺序是 $s_0 \to c_1 \to s_1 \to c_2 \to s_2$。两次 Attention 读的是同一组 Encoder 状态，用的是同一套打分参数，区别只在查询从 $s_0$ 换成了 $s_1$。Encoder 只跑一次，$H$ 算好之后在整个解码过程里不再变。
+
+> **和课堂板书的时间索引对照。** 有些课程用 SimpleRNN 演示时采用另一种调度：先算 $s_1 = \tanh(A'\,[\,x'_1;\, s_0\,] + b)$，再用 $s_1$（而不是 $s_0$）去算 $c_1$，下一步是 $s_2 = \tanh(A'\,[\,x'_2;\, s_1;\, c_1\,] + b)$。也就是用**当前**状态 $s_j$ 做查询，算出的 $c_j$ 喂给**下一步**。它和原论文的 $s_{j-1} \to c_j \to s_j$ 不是同一个时序，只是下标约定和执行顺序不同，三步计算本身完全一样。本页的正文和图一律用原论文的时序。
+
+## 训练与反向传播：Loss 如何影响 Attention？
+
+**一句话：训练只需要「原文 → 译文」的句对；翻译的 Loss 沿着 context、softmax、score 一路传回打分参数。**
+
+训练目标是每个目标位置上的 cross-entropy，把正确的词的概率推高：
+
+$$
+\mathcal{L} = -\sum_{j=1}^{t} \log p\left(y_j \mid y_{<j},\, x\right)
+$$
+
+数据里没有「love 对应 爱」这样的对齐标注，也不需要。$\alpha$ 是 Loss 计算路径上的一环，梯度会经过它。
+
+<TrainVsInferenceFigure />
+
+梯度的路径是：词的预测 → Loss → 输出层与 Decoder 状态 → $c_j = \sum_i \alpha_{j,i} h_i$ → softmax 得到的 $\alpha_{j,i}$ → 分数 $e_{j,i}$ → 共享的 $W_a, U_a, v_a, b_a$，最后由 optimizer 更新。这就是普通的 [反向传播](/notes/ml/dl-blocks/backprop-chain-rule/)，没有为 Attention 单独设计的训练方法。
+
+三个容易想错的地方：
+
+1. **没有每个源位置各自一套的 Attention 参数。** 所有源位置、所有 Decoder step 算出的梯度都加在同一套参数上。
+2. **$\alpha$ 不是参数，但它可导。** 它是前向计算的中间结果，Loss 的梯度穿过它传到打分网络。训练改的是打分的规则，不是某一次的 $\alpha$。
+3. **不保证学出和人的直觉一致的一一词对齐。** 训练目标是把词预测对，权重像不像对齐表是副产品。
+
+一个形象的说法：某个词预测得不好，Loss 会推动模型以后改变「该从原文哪些位置取信息」的打分规则，而不是有人去手动改这一次的 $\alpha$。
+
+推理时没有 Loss，也没有梯度下降。参数固定，每个 Decoder step 只做前向计算，现算出自己那一组 $\alpha$。
+
+## 计算开销、限制及本节总结
+
+**一句话：Attention 用更多的计算和内存换掉了信息瓶颈。**
+
+只看序列长度：
+
+| | 主导规模 | 原因 |
+| --- | --- | --- |
+| 基础 RNN Seq2Seq | $O(m + t)$ | Encoder 走 $m$ 步，Decoder 走 $t$ 步 |
+| 加上 Attention | 额外 $O(m\,t)$ | 每个 Decoder step 都要和 $m$ 个 Encoder 状态各算一个分数，一共约 $m \times t$ 个 |
+
+例子里 $m = 4$、$t = 4$，一共 16 个分数；原文 50 词、译文 40 词就是 2000 个。
+
+这两个记号只比较序列长度上的主导规模，省略了隐藏维度、矩阵乘法、输出层和各种实现上的常数，不是整个模型实际计算量（FLOPs）的精确描述。Additive 打分本身还要算一层小网络。论文也提到这一点：打分函数要对每个句对算 $m \times t$ 次，其中 $U_a h_i$ 和 $j$ 无关，可以提前算好。
+
+好处和代价：
+
+- 好处：Decoder 每一步都能直接读全部 Encoder 状态，不再只依赖一个定长向量，长句的翻译质量不再明显下降。
+- 代价：这 $m$ 个状态要一直留在内存里；解码每一步多出 $m$ 次打分和一次加权求和。
+- 没解决的：Encoder 和 Decoder 仍然是 RNN，[每一步还是要等上一步](/notes/ml/llms/rnn/)。
+
+本节要记住的五句话：
+
+1. 基础 Seq2Seq 的问题是定长向量这个瓶颈，Attention 缓解它，不是让遗忘彻底消失。
+2. 三步是 Score → Softmax → Weighted Sum：$e_{j,i} = v_a^{\top}\tanh(W_a s_{j-1} + U_a h_i + b_a)$，$\alpha_j = \mathrm{softmax}(e_j)$，$c_j = \sum_i \alpha_{j,i} h_i$。
+3. 可训练的是 $W_a, U_a, v_a, b_a$ 和 RNN 自己的权重；$e$、$\alpha$、$c$ 是每次前向现算的。
+4. 打分参数只有一套，所有源位置和所有 Decoder step 共用；权重不同是因为输入不同。
+5. 训练不需要对齐标注，翻译的 Loss 经过 $c$、$\alpha$、$e$ 传回打分参数；代价是约 $m \times t$ 次打分。
+
+后续章节将介绍其他 Attention 形式，下一章是 [Attention (II)：RNN 中的 Self-Attention](/notes/ml/llms/rnn-self-attention/)。
+
+## Further reading
+
+- [Neural Machine Translation by Jointly Learning to Align and Translate](https://arxiv.org/abs/1409.0473)（Bahdanau, Cho, Bengio，2014 / ICLR 2015）：本页的公式和时序都来自这篇论文的 3.1 节和附录 A。

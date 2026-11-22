@@ -66,6 +66,8 @@ import PrCurvePrecisionAtK from "@/content/ml/evaluation/pr-curve-precision-at-k
 import AbTestPValue from "@/content/ml/evaluation/ab-test-p-value.mdx";
 import LlmsOverview from "@/content/ml/llms/overview.mdx";
 import Rnn from "@/content/ml/llms/rnn.mdx";
+import Seq2seqBahdanauAttention from "@/content/ml/llms/seq2seq-bahdanau-attention.mdx";
+import RnnSelfAttention from "@/content/ml/llms/rnn-self-attention.mdx";
 import AttentionQkv from "@/content/ml/llms/attention-qkv.mdx";
 import MultiHeadAttention from "@/content/ml/llms/multi-head-attention.mdx";
 import TransformerBlock from "@/content/ml/llms/transformer-block.mdx";
@@ -221,6 +223,8 @@ export const noteComponents = {
   "ml/evaluation/ab-test-p-value": AbTestPValue,
   "ml/llms/overview": LlmsOverview,
   "ml/llms/rnn": Rnn,
+  "ml/llms/seq2seq-bahdanau-attention": Seq2seqBahdanauAttention,
+  "ml/llms/rnn-self-attention": RnnSelfAttention,
   "ml/llms/attention-qkv": AttentionQkv,
   "ml/llms/multi-head-attention": MultiHeadAttention,
   "ml/llms/transformer-block": TransformerBlock,
