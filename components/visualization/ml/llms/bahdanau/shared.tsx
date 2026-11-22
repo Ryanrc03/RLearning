@@ -22,19 +22,26 @@ export const P = {
   dynFill: "var(--bah-t4)",
   /** Parts that exist only during training. */
   grey: "var(--bah-grey)",
+  /** Attention weights, where a note needs them apart from the other computed values. */
+  att: "var(--bah-c5)",
+  attFill: "var(--bah-t5)",
 } as const;
 
-export type Tone = "enc" | "dec" | "par" | "dyn" | "grey";
+export type Tone = "enc" | "dec" | "par" | "dyn" | "grey" | "att" | "neu";
 
-const FILL: Record<Tone, string> = { enc: P.encFill, dec: P.decFill, par: P.parFill, dyn: P.dynFill, grey: P.surface };
+const FILL: Record<Tone, string> = { enc: P.encFill, dec: P.decFill, par: P.parFill, dyn: P.dynFill, grey: P.surface, att: P.attFill, neu: P.surface };
+const STROKE: Record<Tone, string> = { enc: P.enc, dec: P.dec, par: P.par, dyn: P.dyn, grey: P.grey, att: P.att, neu: P.sub };
+
+export const toneFill = (t: Tone) => FILL[t];
+export const toneStroke = (t: Tone) => STROKE[t];
 
 export function Markers({ id }: { id: string }) {
-  const tones: Tone[] = ["enc", "dec", "par", "dyn", "grey"];
+  const tones: Tone[] = ["enc", "dec", "par", "dyn", "grey", "att", "neu"];
   return (
     <defs>
       {tones.map((t) => (
         <marker key={t} id={`${id}-${t}`} viewBox="0 0 6 6" refX={5} refY={3} markerWidth={6} markerHeight={6} orient="auto">
-          <path d="M0 0 L6 3 L0 6 z" fill={P[t]} />
+          <path d="M0 0 L6 3 L0 6 z" fill={STROKE[t]} />
         </marker>
       ))}
     </defs>
@@ -66,7 +73,7 @@ type BoxProps = {
 export function Box({ x, y, w, h, tone, title, sub, bold, dim, dashed, size = 10.5 }: BoxProps) {
   return (
     <g transform={`translate(${x} ${y})`} opacity={dim ? 0.28 : 1} className="bah-fade">
-      <rect width={w} height={h} rx={6} fill={FILL[tone]} stroke={P[tone]} strokeWidth={bold ? 2.2 : 1.3} strokeDasharray={dashed ? "4 3" : undefined} />
+      <rect width={w} height={h} rx={6} fill={FILL[tone]} stroke={STROKE[tone]} strokeWidth={bold ? 2.2 : 1.3} strokeDasharray={dashed ? "4 3" : undefined} />
       <text x={w / 2} y={sub ? h / 2 - 2 : h / 2 + 4} fontSize={size} fontWeight={600} textAnchor="middle" fill={P.ink}>{title}</text>
       {sub && <text x={w / 2} y={h / 2 + 11} fontSize={8.5} textAnchor="middle" fill={P.sub}>{sub}</text>}
     </g>
@@ -86,7 +93,7 @@ type ArrowProps = {
 
 export function Arrow({ d, id, tone, bold, dim, dashed, head = true }: ArrowProps) {
   return (
-    <path d={d} fill="none" stroke={P[tone]} strokeWidth={bold ? 2 : 1.3} strokeDasharray={dashed ? "4 3" : undefined} markerEnd={head ? `url(#${id}-${tone})` : undefined} opacity={dim ? 0.28 : 1} className="bah-fade" />
+    <path d={d} fill="none" stroke={STROKE[tone]} strokeWidth={bold ? 2 : 1.3} strokeDasharray={dashed ? "4 3" : undefined} markerEnd={head ? `url(#${id}-${tone})` : undefined} opacity={dim ? 0.28 : 1} className="bah-fade" />
   );
 }
 
@@ -105,7 +112,7 @@ export function Legend({ items }: { items: { tone: Tone; label: string }[] }) {
   return (
     <div className="viz-legend">
       {items.map((it) => (
-        <span key={it.label}><i style={{ background: FILL[it.tone], border: `1px ${it.tone === "grey" ? "dashed" : "solid"} ${P[it.tone]}` }} />{it.label}</span>
+        <span key={it.label}><i style={{ background: FILL[it.tone], border: `1px ${it.tone === "grey" ? "dashed" : "solid"} ${STROKE[it.tone]}` }} />{it.label}</span>
       ))}
     </div>
   );

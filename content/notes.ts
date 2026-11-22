@@ -800,7 +800,7 @@ export const noteEntries: NoteEntry[] = [
     slug: "ml/llms/overview",
     title: "LLMs Overview",
     description:
-      "这一章回答「模型怎么读一串 token」：从 RNN 的递推到 attention 的矩阵，再到一层的全部零件、训练目标和生成策略，最后把 BERT 微调到自己的任务上。十三页的问题链和阅读顺序。",
+      "这一章回答「模型怎么读一串 token」：从 RNN 的递推到 attention 的矩阵，再到一层的全部零件、训练目标和生成策略，最后把 BERT 微调到自己的任务上。十四页的问题链和阅读顺序。",
     categoryId: "ml",
     category: "ML & LLM",
     section: "LLMs",
@@ -856,6 +856,21 @@ export const noteEntries: NoteEntry[] = [
     series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 3 },
   },
   {
+    slug: "ml/llms/attention-layer",
+    title: "Attention (III)：从 Cross-Attention 到 Self-Attention Layer",
+    description:
+      "把 Attention 从 RNN 里拿出来写成一个独立的层：X 提供 Key 和 Value，X′ 提供 Query，C = Softmax(QKᵀ)V。六张图讲清 Q、K、V 从哪来、一个 Query 怎样得到一个 context、5 × 4 的权重与 5 × 32 的输出为什么是这个形状，以及令 X′ = X 得到 Self-Attention。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "LLMs",
+    created: "2026-11-22",
+    updated: "2026-11-22",
+    status: "growing",
+    readingMinutes: 14,
+    tags: ["ml-fundamentals", "llms", "attention", "cross-attention", "self-attention", "interactive"],
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 4 },
+  },
+  {
     slug: "ml/llms/transformer-vs-rnn",
     title: "Transformer 为什么比 RNN 更容易并行？",
     description:
@@ -868,7 +883,7 @@ export const noteEntries: NoteEntry[] = [
     status: "growing",
     readingMinutes: 12,
     tags: ["transformer", "rnn", "self-attention", "parallelism", "causal-mask", "rope", "interactive"],
-    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 4 },
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 5 },
   },
   {
     slug: "ml/llms/attention-qkv",
@@ -883,7 +898,7 @@ export const noteEntries: NoteEntry[] = [
     status: "growing",
     readingMinutes: 11,
     tags: ["ml-fundamentals", "llms", "transformer", "self-attention", "cross-attention", "interactive"],
-    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 5 },
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 6 },
   },
   {
     slug: "ml/llms/multi-head-attention",
@@ -898,7 +913,7 @@ export const noteEntries: NoteEntry[] = [
     status: "seed",
     readingMinutes: 5,
     tags: ["ml-fundamentals", "llms", "interactive"],
-    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 6 },
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 7 },
   },
   {
     slug: "ml/llms/transformer-block",
@@ -913,7 +928,7 @@ export const noteEntries: NoteEntry[] = [
     status: "seed",
     readingMinutes: 6,
     tags: ["ml-fundamentals", "llms", "interactive"],
-    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 7 },
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 8 },
   },
   {
     slug: "ml/llms/pretraining-objectives",
@@ -928,7 +943,7 @@ export const noteEntries: NoteEntry[] = [
     status: "seed",
     readingMinutes: 6,
     tags: ["ml-fundamentals", "llms", "interactive"],
-    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 8 },
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 9 },
   },
   {
     slug: "ml/llms/deepseek-moe",
@@ -943,7 +958,7 @@ export const noteEntries: NoteEntry[] = [
     status: "growing",
     readingMinutes: 14,
     tags: ["ml-fundamentals", "llms", "DeepSeekMoE", "moe", "interactive"],
-    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 9 },
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 10 },
   },
   {
     slug: "ml/llms/decoding-strategies",
@@ -958,7 +973,7 @@ export const noteEntries: NoteEntry[] = [
     status: "seed",
     readingMinutes: 7,
     tags: ["ml-fundamentals", "llms", "interactive"],
-    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 10 },
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 11 },
   },
   {
     slug: "ml/llms/bert",
@@ -973,7 +988,7 @@ export const noteEntries: NoteEntry[] = [
     status: "growing",
     readingMinutes: 15,
     tags: ["BERT", "llms", "transformer", "pre-training", "fine-tuning", "GPT", "interactive"],
-    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 11 },
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 12 },
   },
   {
     slug: "ml/llms/bert-vs-macbert",
@@ -988,7 +1003,7 @@ export const noteEntries: NoteEntry[] = [
     status: "seed",
     readingMinutes: 5,
     tags: ["BERT", "MacBERT", "llms", "pre-training", "chinese", "ml-fundamentals", "interactive"],
-    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 12 },
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 13 },
   },
   {
     slug: "ml/llms/bert-finetuning",
@@ -1003,7 +1018,7 @@ export const noteEntries: NoteEntry[] = [
     status: "growing",
     readingMinutes: 16,
     tags: ["BERT", "MacBERT", "fine-tuning", "llms", "classification", "interactive"],
-    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 13 },
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 14 },
   },
   {
     slug: "ml/llm-engineering/overview",

@@ -68,6 +68,7 @@ import LlmsOverview from "@/content/ml/llms/overview.mdx";
 import Rnn from "@/content/ml/llms/rnn.mdx";
 import Seq2seqBahdanauAttention from "@/content/ml/llms/seq2seq-bahdanau-attention.mdx";
 import RnnSelfAttention from "@/content/ml/llms/rnn-self-attention.mdx";
+import AttentionLayer from "@/content/ml/llms/attention-layer.mdx";
 import AttentionQkv from "@/content/ml/llms/attention-qkv.mdx";
 import MultiHeadAttention from "@/content/ml/llms/multi-head-attention.mdx";
 import TransformerBlock from "@/content/ml/llms/transformer-block.mdx";
@@ -225,6 +226,7 @@ export const noteComponents = {
   "ml/llms/rnn": Rnn,
   "ml/llms/seq2seq-bahdanau-attention": Seq2seqBahdanauAttention,
   "ml/llms/rnn-self-attention": RnnSelfAttention,
+  "ml/llms/attention-layer": AttentionLayer,
   "ml/llms/attention-qkv": AttentionQkv,
   "ml/llms/multi-head-attention": MultiHeadAttention,
   "ml/llms/transformer-block": TransformerBlock,

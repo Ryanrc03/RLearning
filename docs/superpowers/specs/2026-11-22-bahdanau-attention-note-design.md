@@ -37,3 +37,22 @@
 | G7 | `HistoryTriangleFigure` | 下三角：每步打分的历史位置，共 n(n−1)/2 个 | 静态 |
 
 颜色和主题沿用第一章的 `.bah-note` 令牌与 `bahdanau/shared.tsx`。
+
+## 第三章：Attention (III)：从 Cross-Attention 到 Self-Attention Layer
+
+已按第三份交接文档确定并实施。范围：Q / K / V、共享的 W_Q、W_K、W_V、单个 Query 与整层的输出、Cross 与 Self 的输入输出和形状。不含 Multi-Head、缩放点积的推导（只有一条脚注）、Transformer Block、位置编码、Causal Mask。不加 Quiz。已有的 `ml/llms/attention-qkv`（跟着 Attention Is All You Need 读）没有改动。
+
+- 路由：`/notes/ml/llms/attention-layer/`，LLMs 章节第 4 个节点。
+- 正文：`content/ml/llms/attention-layer.mdx`，十节。推导用课堂的列向量写法（α_ij：Key i、Query j），标形状时换成每行一个 token 的写法，并用一张对照表写明 `A[j, i] = α_ij`。
+- 数字：`lib/ml/attentionLayer.ts`（测试 `tests/attention-layer.test.ts`）。形状由形状乘法推出；两种写法在测试里对同一组小矩阵算出相同结果；`A_cross`、`A_self` 是交接文档给的构造数据，测试校验每行和为 1。
+
+| 图 | 组件（`components/visualization/ml/llms/attention-layer/`） | 画什么 | 交互 |
+| --- | --- | --- | --- |
+| G1 | `QkvSourceFigure` | Q / K / V 的来源：RNN 状态与通用输入 X、X′ | 两个聚焦按钮 / 重置 |
+| G2 | `SingleQueryFigure` | 一个 Query：Key 打分 → softmax → 加权 Value → c | 全部 / ① / ② / ③ |
+| G3 | `CrossAttentionLayerFigure` | 两组输入、5 个 context、5 × 4 热力图 | 选 q₁ … q₅ |
+| G4 | `ShapeExplorerFigure` | Q · Kᵀ → A，A · V → C，矩形按比例画，A 是真实热力图 | Cross / Self |
+| G5 | `CrossToSelfFigure` | Attn(X, X′) 到 Attn(X, X) 的接线变化 | 两个聚焦按钮 / 重置 |
+| G6 | `SelfAttentionHeatmapFigure` | The cat eats fish 的 4 × 4 热力图与选中行的加权和 | 选 Query |
+
+颜色：Query 橙、Key 绿、Value 蓝、权重紫、输出金，输入与投影矩阵用中性色。紫色是新加的 `--bah-c5` / `--bah-t5` 令牌。热力图 `Heatmap.tsx` 由 G3 和 G6 共用。
