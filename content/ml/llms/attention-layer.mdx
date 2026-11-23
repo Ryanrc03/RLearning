@@ -348,6 +348,6 @@ Cross-Attention：$Q = X' W_Q$，$K = X W_K$，$V = X W_V$。Self-Attention：$Q
 | 这一层必须先跑 Encoder / Decoder RNN | 输入可以直接是 embedding 或别的表示 |
 | 第二章的 RNN Self-Attention 就是这一章的层 | 第二章仍有递推，这一章的层不需要 |
 
-下一章再研究 Transformer 如何把 Attention 与位置表示、前馈网络等组件组合起来。
+下一章再研究 Transformer 如何把 Attention 与位置表示、前馈网络等组件组合起来：[Attention (IV)：从 Multi-Head Attention 到完整 Transformer](/notes/ml/llms/transformer-architecture/)。
 
 [^scale]: Transformer 会在点积上再除以一个缩放因子 $\sqrt{d_k}$，这属于后面章节的内容，本页的公式和图都按课堂的未缩放形式写。

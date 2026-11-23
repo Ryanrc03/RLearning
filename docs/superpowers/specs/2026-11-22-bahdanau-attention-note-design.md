@@ -56,3 +56,21 @@
 | G6 | `SelfAttentionHeatmapFigure` | The cat eats fish 的 4 × 4 热力图与选中行的加权和 | 选 Query |
 
 颜色：Query 橙、Key 绿、Value 蓝、权重紫、输出金，输入与投影矩阵用中性色。紫色是新加的 `--bah-c5` / `--bah-t5` 令牌。热力图 `Heatmap.tsx` 由 G3 和 G6 共用。
+
+## 第四章：Attention (IV)：从 Multi-Head Attention 到完整 Transformer
+
+已按第四份交接文档确定并实施。一篇完整长文，位置编码和 √d_k 并入主线，没有另建页面。不含 BERT / GPT、RoPE、FlashAttention 专章，不加 Quiz。已有的 `multi-head-attention`、`transformer-block`、`attention-qkv`、`transformer-vs-rnn` 没有改动，正文链接过去。
+
+- 路由：`/notes/ml/llms/transformer-architecture/`，LLMs 章节第 5 个节点。
+- 正文：`content/ml/llms/transformer-architecture.mdx`，十二节。列向量写法贯穿全文（每个 token 一列，Score = KᵀQ）；行向量代码的转置关系在形状总表后说明。课堂主线与补充的原论文细节在开头列出，并在各节标注。
+- 数字：`lib/ml/transformerArch.ts`（测试 `tests/transformer-arch.test.ts`）。所有形状由 `BASE` 配置推出；除数实验、位置编码、因果 mask 都是算出来的；测试用固定种子的随机数验证了 Var(qᵀk) ≈ d_k。
+
+| 图 | 组件（`components/visualization/ml/llms/transformer-arch/`） | 画什么 | 交互 |
+| --- | --- | --- | --- |
+| A | `MultiHeadFigure` | X → h 个独立 head → Concat → W_O | head 数 1 / 2 / 4 / 8 |
+| B | `ScaledDivisorFigure` | softmax([8/c, 0]) 的两条概率条 | 除数滑杆与预设 |
+| C | `PositionalEncodingFigure` | 两个塔入口的数据流；sin / cos 热力图 | 选位置 0 … 7 |
+| D | `EncoderBlockFigure` | Self-Attn → Add & Norm → FFN → Add & Norm；× 6 堆叠 | 三个聚焦按钮 / 重置 |
+| E | `DecoderBlockFigure` | 三个子层，U 只接 Cross-Attn；4 × 4 因果 mask | 选 Query 1 … 4 |
+| F | `TransformerFigure` | 两个塔，U 连到每个 Decoder Block | 三个聚焦按钮 / 重置 |
+| G | `StageShapeFigure` | 三处 Attention 的 Q / K / V / Score / 输出形状 | 三个阶段 |

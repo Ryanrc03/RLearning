@@ -1,0 +1,420 @@
+import MultiHeadFigure from "@/components/visualization/ml/llms/transformer-arch/MultiHeadFigure";
+import ScaledDivisorFigure from "@/components/visualization/ml/llms/transformer-arch/ScaledDivisorFigure";
+import PositionalEncodingFigure from "@/components/visualization/ml/llms/transformer-arch/PositionalEncodingFigure";
+import EncoderBlockFigure from "@/components/visualization/ml/llms/transformer-arch/EncoderBlockFigure";
+import DecoderBlockFigure from "@/components/visualization/ml/llms/transformer-arch/DecoderBlockFigure";
+import TransformerFigure from "@/components/visualization/ml/llms/transformer-arch/TransformerFigure";
+import StageShapeFigure from "@/components/visualization/ml/llms/transformer-arch/StageShapeFigure";
+
+# Attention (IV)：从 Multi-Head Attention 到完整 Transformer
+
+[上一章](/notes/ml/llms/attention-layer/) 得到了一个不依赖 RNN 的 Attention Layer。这一章用它当积木，一块一块搭出 2017 年原论文 *Attention Is All You Need* 里的 Transformer：一个只用 Attention 和全连接层、没有任何 RNN 的 Encoder–Decoder。
+
+每一节都按同一个节奏走：手里已有的模块还缺什么，这一节加上哪个部件，形状怎么变。
+
+内容有两个来源，正文里会分开标注：
+
+- **课堂讲的主线**：Single-Head → Multi-Head → 接一个 Dense → 堆成 Encoder → Decoder 的两种 Attention → 完整 Transformer。
+- **补充的原论文细节**：课堂的图为了简洁省掉了一些东西，要把模型说准确就得补上。包括除以 $\sqrt{d_k}$、输出投影 $W_O$、位置编码、因果 mask、residual 与 LayerNorm、两层的 FFN、最后的词表投影，以及训练和推理的区别。
+
+## 这一章要解决什么：从 RNN Seq2Seq 到非递归 Transformer
+
+**一句话：前三章已经有了 Self-Attention 和 Cross-Attention 两种层，现在的问题是能不能只靠堆叠它们来做完整的 Seq2Seq。**
+
+回顾一下走过的路。[第一章](/notes/ml/llms/seq2seq-bahdanau-attention/) 的 Seq2Seq 用 RNN 做 Encoder 和 Decoder，Bahdanau Attention 让 Decoder 回头读 Encoder 的全部状态，但状态本身仍然靠 $h_i = f(x_i, h_{i-1})$ 一步步递推。[第二章](/notes/ml/llms/rnn-self-attention/) 让一条 RNN 回看自己的历史，递推还在。第三章把 Attention 写成了独立的层：Self-Attention 让一条序列的各个位置直接交换信息，Cross-Attention 让一条序列去读另一条。
+
+原论文的回答是可以：Encoder 用 Self-Attention 堆出来，Decoder 用 Self-Attention 加 Cross-Attention 堆出来，RNN 一个都不留。
+
+用词上要准确：Transformer 可以**替代** RNN 完成机器翻译这类 Seq2Seq 任务，这不等于两者在数学上是等价的模型。它们是两种不同的建模结构。
+
+### 记号
+
+沿用课堂的列向量写法：**每个 token 是一列**。一条 $n$ 个 token、每个 $d$ 维的序列写成 $d \times n$ 的矩阵。
+
+| 符号 | 含义 | 例子里的值 |
+| --- | --- | --- |
+| $m$ | Source（Encoder 一侧）的 token 数 | 4 |
+| $t$ | Target（Decoder 输入）的 token 数 | 3 |
+| $d_{model}$ | 主干的向量维度 | 512 |
+| $h$ | head 的个数 | 8 |
+| $d_k$、$d_v$ | 每个 head 的 Key / Value 维度 | 64 / 64 |
+| $X$ | Encoder 一侧的输入表示 | $512 \times m$ |
+| $X'$ | Decoder 一侧的输入表示 | $512 \times t$ |
+| $U$ | 整个 Encoder 的输出 | $512 \times m$ |
+| $D$ | Decoder 里的中间表示 | $512 \times t$ |
+
+这一章里 $h$ 只表示 head 的个数，不再表示 RNN 的隐藏状态；上标 $(r)$ 表示第 $r$ 个 head。数值取的是原论文 base 模型的设置。
+
+## Single-Head → Multi-Head Attention
+
+**一句话：同一个输入同时做好几次 Attention，每次用自己的一套投影，结果拼在一起。**
+
+上一章的 Attention 只有一组 $W_Q, W_K, W_V$，所以只能学到一种「谁该看谁」的方式。Multi-Head 的做法是并排放 $h$ 个这样的 Attention，每个叫一个 head，各有各的三个矩阵：
+
+$$
+Q^{(r)} = W_Q^{(r)} X, \qquad K^{(r)} = W_K^{(r)} X, \qquad V^{(r)} = W_V^{(r)} X.
+$$
+
+第 $r$ 个 head 的输出（Self-Attention 的情形）：
+
+$$
+H^{(r)} = V^{(r)} \operatorname{Softmax}\!\left(\frac{(K^{(r)})^{\top} Q^{(r)}}{\sqrt{d_k}}\right).
+$$
+
+softmax 对每一列（每个 Query）在 Key 的方向上归一化，和上一章一样。分母里的 $\sqrt{d_k}$ 下一节解释。形状：$Q^{(r)}, K^{(r)}, V^{(r)}$ 都是 $64 \times m$，score 是 $m \times m$，单个 head 的输出 $H^{(r)}$ 是 $64 \times m$。
+
+把 8 个 head 的输出沿特征维叠起来，再过一个输出投影：
+
+$$
+H_{cat} = \operatorname{Concat}\left(H^{(1)}, \ldots, H^{(8)}\right) \in \mathbb{R}^{512 \times m},
+\qquad
+\boxed{\,\operatorname{MultiHead}(X) = W_O\, H_{cat} \in \mathbb{R}^{512 \times m}\,}
+$$
+
+<MultiHeadFigure />
+
+课堂的通用说法是：单头输出 $d \times m$，$l$ 个头拼接后是 $ld \times m$。base 模型里 $d = 64$、$l = 8$，所以是 $512 \times m$。输出投影 $W_O$ 是补充的原论文细节，它也是可训练的。
+
+参数怎么共享，分三层说：
+
+- **同一个 head 内**：$W_Q^{(r)}, W_K^{(r)}, W_V^{(r)}$ 对所有 token 位置共用，和上一章一样。
+- **不同 head 之间**：不共用。8 个 head 是 8 套独立的投影，不是把同一个 Attention 复制 8 遍。
+- **不同 Block 之间**：后面堆叠时，每个 Block 也有自己的一整套参数。
+
+两个容易想错的地方。第一，head 多了，输出的 token 数不变，还是 $m$ 列；变多的是通道，而且拼完又被 $W_O$ 映射回 512。第二，不能说「8 个 head 的计算量就是 8 倍」：每个 head 的宽度从 512 缩到了 64，总的投影宽度没变。参数量的具体算法见 [Multi-head 与参数量](/notes/ml/llms/multi-head-attention/)。
+
+为什么多个 head 有用？直觉上，不同的 head 可以在不同的投影子空间里各自形成一种注意力模式。但不要把它说成「某个 head 专管主谓关系、另一个专管指代」：那只是帮助理解的说法，真实模型里的 head 未必有这么干净的分工。
+
+Cross-Attention 的多头版本做法完全相同，只是 Query 来自一条序列，Key 和 Value 来自另一条，后面搭 Decoder 时会用到。
+
+## 为什么要除以 √d_k？
+
+**一句话：点积的幅度会随维度变大，除以 $\sqrt{d_k}$ 把它拉回到 softmax 好用的范围。**
+
+这是补充的原论文细节，课堂的公式用的是不缩放的点积。
+
+一个 Query 和一个 Key 的点积是 $d_k$ 项之和：$q^{\top}k = \sum_{r=1}^{d_k} q_r k_r$。做一个简化假设：各分量相互独立，均值 0，方差 1。那么每一项 $q_r k_r$ 的均值是 0、方差是 1，$d_k$ 项相加：
+
+$$
+\operatorname{Var}\left(q^{\top}k\right) = d_k, \qquad \operatorname{Std}\left(q^{\top}k\right) = \sqrt{d_k}.
+$$
+
+维度越高，分数的典型幅度越大。除以标准差：
+
+$$
+\operatorname{Var}\!\left(\frac{q^{\top}k}{\sqrt{d_k}}\right) \approx 1.
+$$
+
+分数幅度大有什么坏处？softmax 的输入差距一大，输出就几乎是 one-hot，落在很平的区域里，梯度很小，不好训练。
+
+base 模型里 $d_{model} = 512$、8 个 head，每个 head 的 $d_k = 64$，所以除的是 $\sqrt{64} = 8$，不是 $\sqrt{512}$。换一个模型尺寸，这个数也跟着变。
+
+<ScaledDivisorFigure />
+
+固定两个 Key 的分数为 $[8, 0]$，换不同的除数 $c$，看 $\operatorname{Softmax}([8/c,\ 0])$ 的第一个分量：
+
+| 除数 $c$ | 第一个 Key 的权重 | 直觉 |
+| ---: | ---: | --- |
+| 1 | 99.97% | 特别尖锐 |
+| 4 | 88.08% | 较尖锐 |
+| 8（$\sqrt{d_k}$） | 73.11% | 论文的缩放 |
+| 16 | 62.25% | 更平 |
+| 100 | 52.00% | 接近均匀 |
+
+两点边界。这是固定分数下的示例，不能由它断言用别的缩放方式训练出来的模型一定更好或更差。上面的推导也依赖那个简化假设：它说明了为什么选 $\sqrt{d_k}$ 是合理的，没有说数学上非除它不可，训练之后的分量也不保证一直满足独立、单位方差。
+
+## Attention 后接 FFN / Dense 的原因
+
+**一句话：Attention 负责在 token 之间搬运信息，FFN 负责把每个 token 自己的表示再加工一遍。**
+
+Attention 的输出是 Value 的加权和。加权求和是线性的混合，它擅长的是「从别的位置取信息」，对取回来的东西本身没有做多少非线性的加工。所以课堂在 Attention 后面接了一个 Dense 层，对每个位置的向量 $c_i$ 做同样的变换：
+
+$$
+u_i = \operatorname{ReLU}\left(W_U\, c_i\right).
+$$
+
+注意分工：
+
+- **Attention**：不同 token 之间交换信息。
+- **Dense / FFN**：每个 token 各自做非线性变换。所有位置用同一套参数，但位置之间互不相干。
+
+课堂的图画的是一层 Dense，这是教学简化。原论文的 FFN（feed-forward network）是两层线性变换，中间一个 ReLU：
+
+$$
+\boxed{\,\operatorname{FFN}(x) = W_2 \operatorname{ReLU}\left(W_1 x + b_1\right) + b_2\,}
+$$
+
+base 模型里是 $512 \to 2048 \to 512$：先升到 4 倍宽，过 ReLU，再降回来。对 $m$ 个 token 逐个应用，整体仍是 $512 \times m \to 512 \times m$。
+
+Attention 加 Dense 可以反复堆叠：下一层的 Attention 读的是上一层加工过的表示。堆叠之前，还有两样东西要补。
+
+### Residual 与 LayerNorm
+
+这是补充的原论文细节，课堂的 Block 图里没有画。原论文在每个子层外面套了一圈：把子层的输入加回到输出上（residual），再做 LayerNorm。把 Attention 子层和 FFN 子层连起来：
+
+$$
+A = \operatorname{LayerNorm}\left(X + \operatorname{MultiHeadSelfAttn}(X)\right),
+$$
+
+$$
+Y = \operatorname{LayerNorm}\left(A + \operatorname{FFN}(A)\right).
+$$
+
+这里省略了 dropout。Residual 要求相加的两项形状相同，这正是 $W_O$ 要把输出映射回 512、FFN 要降回 512 的原因之一：主干上的向量宽度处处都是 $d_{model}$，才能一路加下去。[Residual Connection](/notes/ml/dl-blocks/residual-connection/) 和 [Normalization](/notes/ml/dl-blocks/normalization/) 各有一页讲它们为什么有用。
+
+这个「先相加、再 LayerNorm」的顺序叫 Post-LN，是 2017 年原论文的布局。后来很多实现改成先 LayerNorm 再进子层（Pre-LN，$X + \operatorname{Attn}(\operatorname{LN}(X))$）。那是后续的变体，本页的图和公式都按原论文的 Post-LN 画。
+
+## Positional Encoding：去掉 RNN 后，顺序信息从哪来？
+
+**一句话：Self-Attention 自己分不清先后，所以在输入里直接加上一份只跟位置有关的向量。**
+
+这是补充的原论文细节。
+
+RNN 一个词一个词地读，顺序就藏在递推里。Self-Attention 不一样：它对每个位置做同样的投影，再按内容算权重，哪个 token 排在第几位，在计算里根本没有出现。把 `Dog bites man` 换成 `Man bites dog`，词还是那三个，裸的 Self-Attention 给出的只是把同样的三个结果换了个顺序。可这两句话的意思完全不同。
+
+原论文的办法是在两个塔的入口各加一次位置编码。设词嵌入 $E$ 和位置矩阵 $P$ 都是 $512 \times m$（或 $512 \times t$）：
+
+$$
+\boxed{\,Z_{src} = \sqrt{512}\,E_{src} + P_{src} \in \mathbb{R}^{512 \times m}\,}
+\qquad
+\boxed{\,Z_{tgt} = \sqrt{512}\,E_{tgt} + P_{tgt} \in \mathbb{R}^{512 \times t}\,}
+$$
+
+embedding 先乘 $\sqrt{d_{model}}$ 再相加，是原论文的设置。$P$ 的每一列由正弦和余弦给出，$pos$ 是位置（从 0 开始），$i$ 是维度对的编号：
+
+$$
+PE(pos,\ 2i) = \sin\!\left(\frac{pos}{10000^{2i/d_{model}}}\right),
+\qquad
+PE(pos,\ 2i+1) = \cos\!\left(\frac{pos}{10000^{2i/d_{model}}}\right).
+$$
+
+<PositionalEncodingFigure />
+
+这份编码是按公式直接算出来的，没有可训练的参数；模型的其余部分学着去利用它。后来还有可学习的位置向量、RoPE 等别的设计，这里不展开。
+
+最要紧的是**加在哪里**：
+
+- Source token → embedding + 位置编码 → Encoder Block 1 → …
+- 右移后的 target token → embedding + 位置编码 → Decoder Block 1 → …
+
+只在第一个 Block 之前加一次。它不是在每个 head 里单独加的，也不是 Encoder 把输出交给 Decoder 时才加的，更不是 Q、K、V 投影的一部分。
+
+## 搭建 Encoder Block
+
+**一句话：Self-Attention 子层加 FFN 子层，各套一圈 Add & Norm，输入输出都是 $512 \times m$。**
+
+现在零件齐了。原论文的一个 Encoder Block，从下往上：
+
+| 步骤 | 做什么 | 形状 |
+| --- | --- | --- |
+| 输入 | 上一块的输出，或 $Z_{src}$ | $512 \times m$ |
+| Multi-Head Self-Attention | 8 个 head，每个 64 维；位置之间交换信息 | $512 \times m$ |
+| Add & Norm | 加回输入，LayerNorm | $512 \times m$ |
+| Position-wise FFN | $512 \to 2048 \to 512$，每个位置各自变换 | $512 \times m$ |
+| Add & Norm | 加回 FFN 的输入，LayerNorm | $512 \times m$ |
+
+<EncoderBlockFigure />
+
+和课堂的图对照：课堂的 Block 是「Attention + Dense」，这里多出来的两个 Add & Norm 和两层的 FFN 是补上的原论文细节。主线没有变。一个 Block 里各个零件的数值例子见 [Transformer Block：一层里有什么](/notes/ml/llms/transformer-block/)。
+
+## Stacked Encoder × 6
+
+**一句话：同样的 Block 叠 6 层，最上面一层的输出 $U$ 就是 Encoder 交给 Decoder 的全部东西。**
+
+$$
+U = \operatorname{EncoderBlock}_6\left(\cdots \operatorname{EncoderBlock}_1\left(Z_{src}\right) \cdots\right),
+\qquad
+\boxed{\,U \in \mathbb{R}^{512 \times m}\,}
+$$
+
+- 进去 $m$ 个位置，出来还是 $m$ 个位置；变的是每个位置上的向量，它逐层吸收了更多上下文。
+- 6 个 Block 结构相同，参数各自独立。
+- $U$ 是整条序列的表示，一共 $m$ 列。最早的 RNN Seq2Seq 只把一个最终的 hidden state 交给 Decoder，这里交出去的是全部位置。
+
+## 搭建 Decoder Block
+
+**一句话：Decoder 既要看自己已经写出的前缀，又要看原文，所以一个 Block 里有两种 Attention。**
+
+Decoder 生成第 $j$ 个词时需要两类信息：已经生成的目标前缀，以及 source 的内容。原论文的 Decoder Block 因此按顺序有三个子层，每个子层后面同样接 Add & Norm：
+
+1. **Masked Multi-Head Self-Attention**：Q、K、V 都来自 Decoder 自己的表示 $D$。加一个因果 mask（causal mask），让每个位置读不到它后面的目标位置。
+2. **Multi-Head Cross-Attention**：Query 来自刚过完第一个子层的 Decoder 表示，Key 和 Value 来自 Encoder 的输出 $U$。
+3. **FFN**：和 Encoder 里的一样，每个目标位置各自变换。
+
+<DecoderBlockFigure />
+
+### Masked Self-Attention
+
+$D \in \mathbb{R}^{512 \times t}$。每个 head 里 $Q_d, K_d, V_d \in \mathbb{R}^{64 \times t}$，score 是 $t \times t$。Concat 再过 $W_O$ 之后，输出仍是 $512 \times t$。
+
+因果 mask 是补充的原论文细节。4 个目标位置时，谁能读谁（行是 Query，列是 Key）：
+
+| Query \ Key | 1 | 2 | 3 | 4 |
+| --- | :---: | :---: | :---: | :---: |
+| 1 | ✓ | × | × | × |
+| 2 | ✓ | ✓ | × | × |
+| 3 | ✓ | ✓ | ✓ | × |
+| 4 | ✓ | ✓ | ✓ | ✓ |
+
+做法是把被挡住的位置的 score 设成 $-\infty$，再做 softmax，这些位置的权重就恰好是 0。为什么要挡？生成第 3 个词时，第 4 个词还不存在；训练时为了和生成时一致，也不能让第 3 个位置偷看第 4 个位置的答案。
+
+这个 mask 只挡目标序列里的未来位置。它和 padding mask 是两件事：一批句子长短不一时会补上占位符，padding mask 挡的是这些占位符，source 一侧和 target 一侧都可能用到。
+
+### Encoder–Decoder Cross-Attention
+
+这就是上一章的 Cross-Attention，换成了多头。在第 $r$ 个 head 里：
+
+$$
+Q_c = W_Q^{(r)} D \in \mathbb{R}^{64 \times t},
+\qquad
+K_c = W_K^{(r)} U \in \mathbb{R}^{64 \times m},
+\qquad
+V_c = W_V^{(r)} U \in \mathbb{R}^{64 \times m}.
+$$
+
+Score 是 $K_c^{\top} Q_c$，形状 $m \times t$；softmax 沿 $m$ 个 source Key 归一化；每个 head 的输出是 $64 \times t$；8 个 head 拼接再过 $W_O$：
+
+$$
+\boxed{\,C_{cross} \in \mathbb{R}^{512 \times t}\,}
+$$
+
+为什么输出是 $t$ 列而不是 $m$ 列？还是上一章的结论：**输出的 token 数由 Query 的个数决定，不由 Key / Value 的个数决定。** 来源也不能弄反：Query 来自 Decoder，Key 和 Value 来自 Encoder 的 $U$。
+
+Cross-Attention 不加因果 mask，每个目标位置都可以读 source 的全部 $m$ 个位置。
+
+一个 Decoder Block 整体接收 $512 \times t$ 的 Decoder 表示和 $512 \times m$ 的 $U$，输出 $512 \times t$。
+
+## Stacked Decoder × 6 + Encoder–Decoder 连线
+
+**一句话：6 个 Decoder Block 叠起来，每一块的 Cross-Attention 都去读同一个 $U$。**
+
+<TransformerFigure />
+
+连线是这张图的重点，也是最容易画错的地方：
+
+- $U$ 是 Encoder **最后一层**的输出，只有这一个。
+- 它被送到**每一个** Decoder Block 的 Cross-Attention，充当 Key 和 Value。不是只在最底下那一块读一次。
+- 每个 Decoder Block 有自己的投影矩阵，但读的是同一个 $U$。
+- $U$ 不进 Decoder 的 Masked Self-Attention；那个子层只看 Decoder 自己。
+
+$m$ 和 $t$ 可以不同，两条序列的长度没有关系。
+
+## 完整 Transformer 的训练 / 推理
+
+**一句话：Decoder 的输出还要过一个词表投影才是词的概率；训练时所有位置一起算，生成时仍然一个词一个词来。**
+
+这一节是补充的原论文细节。
+
+### 从向量到词
+
+6 个 Decoder Block 之后得到 $S \in \mathbb{R}^{512 \times t}$。它还是向量，不是词。再过一个线性层，把每一列映射成词表大小的一列分数，然后 softmax：
+
+$$
+L = W_{vocab}\, S + b \in \mathbb{R}^{|Vocab| \times t},
+\qquad
+P\left(y_j \mid y_{<j},\ X\right) = \operatorname{Softmax}\left(L_{:,j}\right).
+$$
+
+第 $j$ 列给出的是「看过目标前 $j-1$ 个词和整句 source 之后，第 $j$ 个词是什么」的分布。
+
+### 训练：Teacher Forcing
+
+训练时正确的译文是已知的。把它右移一位（前面补一个起始标记）作为 Decoder 的输入，让第 $j$ 个位置去预测第 $j$ 个真实的词，这叫 teacher forcing。因为有因果 mask，第 $j$ 个位置只能看到它前面的真实词，所以 $t$ 个位置的预测可以在一次前向里并行算完。损失是每个位置上的 [cross-entropy](/notes/ml/classifiers/softmax-cross-entropy/)：
+
+$$
+\mathcal{L} = -\sum_{j=1}^{t} \log P\left(y_j \mid y_{<j},\ X\right).
+$$
+
+和第一章的 loss 是同一个式子。
+
+### 推理：仍然逐 token
+
+生成时没有正确答案可以右移。流程是：
+
+1. Encoder 把 source 算一遍，得到 $U$。这一步只做一次。
+2. Decoder 从起始标记开始，算出第 1 个词的分布，选一个或采样一个。
+3. 把这个词接到前缀后面，再算第 2 个词。如此反复，直到生成结束标记。
+
+所以去掉 RNN 之后，训练可以在序列维度上并行，生成却仍然是一个 token 接一个 token。区别在于每一步不再是「旧状态 → 新状态」的递推，而是拿当前的整个前缀去做 Attention。怎样从分布里选词见 [Decoding](/notes/ml/llms/decoding-strategies/)。
+
+## 一张 Shape 流程总表 + 原版 RNN Seq2Seq 对比
+
+**一句话：把形状从头到尾走一遍；所有的数都能由 $m$、$t$、$d_{model}$、head 数推出来。**
+
+固定 $m = 4$，$t = 3$，$d_{model} = 512$，8 个 head，每个 head $d_k = d_v = 64$，FFN 中间层 2048。每个 token 一列。
+
+| 阶段 | 输出形状 | 为什么 |
+| --- | --- | --- |
+| Source Embedding + Position | 512 × 4 | 4 个输入位置 |
+| Encoder 单 head 的 Q / K / V | 各 64 × 4 | 512 维投影到每头 64 维 |
+| Encoder 单 head 的 Score | 4 × 4 | 4 个 Key × 4 个 Query |
+| Encoder 8 head Concat | 512 × 4 | 8 × 64 = 512 |
+| Encoder Block 1（含 FFN） | 512 × 4 | token 数和主干维度都不变 |
+| Encoder Block × 6 的输出 $U$ | 512 × 4 | 提供给 Decoder 的 source memory |
+| Decoder Embedding + Position | 512 × 3 | 3 个 target 前缀位置 |
+| Decoder Masked Self-Attn 单 head 的 Score | 3 × 3 | 目标序列内部，带因果 mask |
+| Decoder Cross-Attn 单 head 的 Q | 64 × 3 | Query 来自 Decoder |
+| Decoder Cross-Attn 单 head 的 K、V | 各 64 × 4 | Key / Value 来自 Encoder 输出 $U$ |
+| Decoder Cross-Attn 单 head 的 Score | 4 × 3 | 4 个 source Key × 3 个 target Query |
+| Decoder Cross-Attn 合并输出 | 512 × 3 | 输出 token 数跟 Query，是 3 |
+| Decoder Block × 6 的输出 | 512 × 3 | 每一块都保持目标长度 |
+| Vocabulary Logits | \|Vocab\| × 3 | 每个目标位置一列词表分数 |
+
+<StageShapeFigure />
+
+**关于两种写法。** 上表的 Cross-Attention score 是 $4 \times 3$，这是列向量写法的 $K^{\top}Q$：行是 Key，列是 Query。PyTorch、NumPy 的代码习惯每个 token 一行，张量形状是 `[batch, seq_len, d_model]`，算的是 $QK^{\top}$，形状是 $3 \times 4$。两者互为转置，内容相同。前面图 5 的 mask 表按「行是 Query」画，是代码里常见的方向；图 7 按本章的列向量写法画，行是 Key。
+
+### 和 RNN Seq2Seq 对比
+
+| 项目 | RNN Seq2Seq | 原始 Transformer |
+| --- | --- | --- |
+| token 之间怎么交换信息 | 靠隐藏状态递推；Attention 可以额外检索 Encoder 状态 | Attention 直接在位置之间建立联系 |
+| Encoder | RNN / LSTM | Multi-Head Self-Attention + FFN 堆叠 |
+| Decoder | RNN / LSTM，可加 Cross-Attention | Masked Self-Attn + Cross-Attn + FFN 堆叠 |
+| 顺序信息 | 递推结构本身带有顺序 | 显式加位置编码 |
+| 训练时的并行 | 时间维度上有递推依赖 | 整条已知序列可以一起算 |
+| 随序列长度的代价 | 每步一次状态更新，整体随长度线性 | 全量 Attention 的 score 矩阵随长度平方增长 |
+
+Transformer 换来了并行和直接的长距离连接，付出的是平方级的 Attention 代价和一份额外的位置编码。生成时两者都是逐 token 的。更细的比较见 [Transformer vs RNN](/notes/ml/llms/transformer-vs-rnn/)。
+
+## 本章四个关键公式与常见误区
+
+**四个公式**（列向量写法）：
+
+$$
+\boxed{\,H^{(r)} = V^{(r)} \operatorname{Softmax}\!\left(\frac{(K^{(r)})^{\top} Q^{(r)}}{\sqrt{d_k}}\right)\,}
+\qquad
+\boxed{\,\operatorname{MultiHead}(X) = W_O \operatorname{Concat}\left(H^{(1)}, \ldots, H^{(h)}\right)\,}
+$$
+
+$$
+\boxed{\,\operatorname{FFN}(x) = W_2 \operatorname{ReLU}\left(W_1 x + b_1\right) + b_2\,}
+\qquad
+\boxed{\,Y = \operatorname{LayerNorm}\left(X + \operatorname{Sublayer}(X)\right)\,}
+$$
+
+**常见误区：**
+
+| 容易说错的 | 正确的 |
+| --- | --- |
+| Multi-Head 是同一套 $W_Q, W_K, W_V$ 重复用多次 | 不同 head 有各自独立的投影参数 |
+| 每个 token 有自己的一套 $W_Q, W_K, W_V$ | 同一个 head 内所有位置共用；输入不同，所以输出不同 |
+| 8 个 head 会输出 8 倍的 token | 只是通道维拼接，序列长度不变 |
+| 课堂的一个 Dense 就是原论文的 FFN | base 模型的 FFN 是两层，$512 \to 2048 \to 512$ |
+| Block 里只有 Attention 和 Dense | 原论文每个子层外还有 Add & Norm（Post-LN） |
+| Decoder 的 Self-Attention 和 Encoder 的一样 | Decoder 的带因果 mask，读不到未来位置 |
+| Cross-Attention 里 Q 来自 Encoder | Q 来自 Decoder；K、V 来自 Encoder 的 $U$ |
+| Cross-Attention 输出 $m$ 个向量 | 输出个数跟 Query，是 $t$ 个 |
+| 位置编码是 Q、K、V 投影的一部分 | 它在第一个 Block 之前加到输入上，只加一次 |
+| Scaled Dot-Product 总是除以 8 | 除的是 $\sqrt{d_k}$；base 模型每头 $d_k = 64$ 才是 8 |
+| Attention 的输出就是词 | 还要经过 Decoder 最后的词表投影和 softmax |
+| 没有 RNN，生成就能一步完成 | 自回归生成仍然逐 token |
+| 所有 Transformer 都有 Encoder 和 Decoder 两个塔 | 这里讲的是 2017 年的原始结构；后来有只用其中一个塔的模型 |
+
+到这里，从 Bahdanau Attention 开始的四章走完了：先在 RNN 之间加 Attention，再让 RNN 回看自己，再把 Attention 独立成层，最后只用这个层搭出整个模型。
+
+## Further reading
+
+- [Attention Is All You Need](https://arxiv.org/abs/1706.03762)（Vaswani 等，2017）：本章的结构、base 模型的尺寸、$\sqrt{d_k}$ 缩放、正弦位置编码和 Post-LN 都出自这篇论文的第 3 节。
+- [Attention：Q、K、V](/notes/ml/llms/attention-qkv/)：按论文原图重画 Figure 1 和 Figure 2，并用一组小数值算一遍。
+- [Multi-head 与参数量](/notes/ml/llms/multi-head-attention/)、[Transformer Block：一层里有什么](/notes/ml/llms/transformer-block/)：这两页各用一个可算的小例子展开本章的一个零件。
