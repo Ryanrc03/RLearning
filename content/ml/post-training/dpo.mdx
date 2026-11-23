@@ -1,4 +1,4 @@
-import { KlToyFigure, BradleyTerryFigure, DpoDerivationFigure, DpoLossFigure, DpoDistributionFigure, DpoPipelineFigure } from "@/components/visualization/ml/post-training/dpo/DpoFigures";
+import { KlToyFigure, BradleyTerryFigure, DpoDerivationFigure, DpoLossFigure, DpoDistributionFigure, DpoPipelineFigure, DpoTokenLogProbFigure, DpoWorkedLossFigure, DpoCasesFigure, DpoGradientFigure, DpoToyUpdateFigure } from "@/components/visualization/ml/post-training/dpo/DpoFigures";
 
 # DPO：从成对偏好直接优化策略
 
@@ -207,6 +207,282 @@ Teacher forcing 把数据中的回答 token 逐个送入模型；仅对 response
 
 实现不先连乘概率，也不直接算 $-\log(\sigma(m))$：用 $\operatorname{softplus}(-m)=\max(0,-m)+\log(1+e^{-|m|})$，大正负 margin 都不会因 exp 溢出而变成 NaN。初始 $\pi_\theta=\pi_{\mathrm{ref}}$ 时，两种 log ratio 都为 0，$m=0$，单对 loss 是 $\ln 2\approx0.6931$。
 
+### 完整计算实例：DPO 如何从 Loss 更新模型参数？
+
+上面的推导给出了 loss 的形式。这一节用一组具体的数从头走到尾：四个 log 概率怎么来，怎么算出 loss，loss 怎么产生梯度，梯度怎么改参数。
+
+#### 场景：生成 PPT 大纲
+
+Prompt：「生成一份面向企业管理层的 AI 行业分析 PPT 大纲，要求 5 页。」
+
+| 页 | Chosen | Rejected |
+| ---: | --- | --- |
+| 1 | AI 行业现状与市场规模 | 什么是人工智能 |
+| 2 | 核心技术发展趋势 | 人工智能的发展历史 |
+| 3 | 主要商业化应用场景 | 人工智能是什么 |
+| 4 | 企业机会与风险 | AI 的未来 |
+| 5 | 战略建议与实施路线 | 总结 |
+
+Chosen 更符合需求：读者是管理层，它讲市场、商业化、机会与风险，并以可执行的建议收尾，五页各有分工。Rejected 是面向入门读者的科普，第 1 页和第 3 页重复，也没有行业分析和结论。
+
+DPO 的一条训练数据是 `(prompt, chosen, rejected)` 三元组，表达的是「同一个 prompt 下这个比那个好」，不是给单个回答贴一个 0/1 的质量标签。如果手里只有「每个 prompt 一个回答加一个 0/1 标签」，它不能直接当作标准 DPO 的成对偏好数据：要么另外构造偏好对（比如给同一个 prompt 配一个好回答和一个差回答），要么改用适合二元反馈的训练方法。
+
+#### Step 1 · 四个 log 概率从哪里来
+
+Chosen 和 rejected 都是数据里已经写好的回答。训练时用 teacher forcing 把它们逐 token 送进模型，让模型给每个 token 打一个条件概率，不在每个训练步重新采样回答。整段回答的 log 概率是逐 token 相加：
+
+$$
+\log\pi(y\mid x)=\sum_{t=1}^{T}\log\pi(y_t\mid x,y_{<t}).
+$$
+
+用一个只有两个 token 的回答演示。第 1 个 token 的概率是 0.20，第 2 个 token 在给定第 1 个之后的条件概率是 0.0337：
+
+$$
+\log P(y\mid x)=\log(0.20)+\log(0.0337)\approx-1.609-3.390\approx-5.
+$$
+
+<DpoTokenLogProbFigure />
+
+计算链路是：Transformer forward → logits → log softmax → 取出目标 token 的 log 概率 → 对 response token 求和。几点要记住：
+
+- 只累加 response token，不包括 prompt 和 padding。
+- log 概率通常是负数；越接近 0，这整段序列的概率越大。
+- Policy 和 reference 各自对 chosen、rejected 算一遍，一共四个数。
+
+下面这四个数是人为设定的教学数据，不是某个模型实际跑出来的结果。之后所有计算都围绕这张表：
+
+| Model | Chosen | Rejected |
+| --- | ---: | ---: |
+| Policy Model | −5 | −7 |
+| Reference Model | −6 | −7 |
+
+#### Step 2 · 手算 DPO loss
+
+取 $\beta=0.1$。把上面的 loss 写成四个 log 概率的形式：
+
+$$
+\mathcal L=-\log\sigma\Big(\beta\big[(\log\pi_\theta(y_w\mid x)-\log\pi_\theta(y_l\mid x))-(\log\pi_{\mathrm{ref}}(y_w\mid x)-\log\pi_{\mathrm{ref}}(y_l\mid x))\big]\Big).
+$$
+
+| 步骤 | 计算 | 含义 |
+| --- | --- | --- |
+| 1 · Policy preference margin | $-5-(-7)=2$ | Policy 自己偏好 chosen 多少 |
+| 2 · Reference preference margin | $-6-(-7)=1$ | Reference 原本就偏好 chosen 多少 |
+| 3 · Relative margin $\Delta$ | $2-1=1$ | Policy 比 reference **多**偏好了多少 |
+| 4 · Scaled margin $z$ | $0.1\times1=0.1$ | 换算到 sigmoid 的输入尺度 |
+| 5 · Sigmoid | $\sigma(0.1)\approx0.5250$ | 偏好模型预测 chosen 胜出的概率 |
+| 6 · DPO loss | $-\log(0.5250)\approx0.6444$ | 这一对样本的 loss |
+
+<DpoWorkedLossFigure />
+
+第 2 步是关键：reference 本来就偏好 chosen 1 个单位，这部分不算 policy 学到的东西。DPO 只对 policy 比 reference 多出来的那部分 $\Delta$ 计分。
+
+第 5 步的 $\sigma(z)$ 是偏好模型在 Bradley–Terry 这套建模假设下的预测概率，不是业务上实测的 GSB 胜率。
+
+在前面的 [DPO Loss Calculator](#step-5-final-dpo-loss) 里点「PPT 大纲示例」，会载入这四个数，算出同样的 0.6444。
+
+#### Step 3 · Loss 为什么会下降
+
+DPO 希望 policy **相对于 reference** 更偏好 chosen。Reference 是冻结的，它的 margin 固定为 1，所以对这条样本来说，降低 loss 等价于增大
+
+$$
+\log\pi_\theta(y_w\mid x)-\log\pi_\theta(y_l\mid x).
+$$
+
+注意它是一个差。**DPO 不保证 chosen 的绝对 log 概率在每次参数更新后都增加。** 看三种假设的状态，reference 始终是 $(-6,-7)$，$\beta$ 始终是 0.1：
+
+| 状态 | Policy chosen | Policy rejected | Policy margin | Loss |
+| --- | ---: | ---: | ---: | ---: |
+| 初始 | −5 | −7 | 2 | 0.6444 |
+| 情况 A | −4 | −7 | 3 | 0.5981 |
+| 情况 B | −5 | −8 | 3 | 0.5981 |
+| 情况 C | −5.5 | −9 | 3.5 | 0.5759 |
+
+<DpoCasesFigure />
+
+三种情况的 loss 都比初始低。A 只抬高 chosen，B 只压低 rejected，两者的 margin 一样，loss 也一样。情况 C 最值得看：chosen 的 log 概率从 −5 降到了 −5.5，但 rejected 降得更多，相对偏好差反而扩大到 3.5，loss 是三者里最低的。
+
+这些是假设的模型状态，用来说明 loss 的性质，不代表真实的优化器一定会走出这样的更新路径。
+
+#### Step 4 · 从 loss 到梯度
+
+给四个数起名字：
+
+$$
+a=\log\pi_\theta(y_w\mid x)=-5,\quad
+b=\log\pi_\theta(y_l\mid x)=-7,\quad
+c=\log\pi_{\mathrm{ref}}(y_w\mid x)=-6,\quad
+d=\log\pi_{\mathrm{ref}}(y_l\mid x)=-7.
+$$
+
+$$
+z=\beta\big[(a-b)-(c-d)\big],\qquad \mathcal L=-\log\sigma(z).
+$$
+
+先对 $z$ 求导。因为 $\frac{d}{dz}\log\sigma(z)=1-\sigma(z)=\sigma(-z)$：
+
+$$
+\frac{\partial\mathcal L}{\partial z}=-\sigma(-z).
+$$
+
+$z$ 对 $a$ 的导数是 $\beta$，对 $b$ 的导数是 $-\beta$。用 chain rule：
+
+$$
+\frac{\partial\mathcal L}{\partial a}=-\beta\,\sigma(-z),\qquad
+\frac{\partial\mathcal L}{\partial b}=+\beta\,\sigma(-z).
+$$
+
+代入 $\beta=0.1$、$z=0.1$，$\sigma(-0.1)\approx0.4750$：
+
+$$
+\frac{\partial\mathcal L}{\partial a}\approx-0.0475,\qquad
+\frac{\partial\mathcal L}{\partial b}\approx+0.0475.
+$$
+
+- Chosen 的梯度是负的：单看这个变量，把 $a$ 调大能降低 loss，所以倾向于**提高** chosen 的 log 概率。
+- Rejected 的梯度是正的：单看这个变量，把 $b$ 调小能降低 loss，所以倾向于**降低** rejected 的 log 概率。
+
+但 $a$ 和 $b$ 不是可以直接改的数。它们都是同一个 Transformer 算出来的，实际被更新的是共享的权重 $\theta$。再往回传一层：
+
+$$
+\nabla_\theta\mathcal L
+=-0.0475\,\nabla_\theta\log\pi_\theta(y_w\mid x)
++0.0475\,\nabla_\theta\log\pi_\theta(y_l\mid x).
+$$
+
+两项作用在同一组权重上，一次更新之后 $a$、$b$ 各自变成多少，要重新前向才知道，这就是 Step 3 里「chosen 不一定上升」的来源。$c$ 和 $d$ 来自冻结的 reference，是常量，不参与反向传播。
+
+<DpoGradientFigure />
+
+#### Step 5 · 单参数玩具模型：真正更新一次参数
+
+直接看 Transformer 太复杂。先造一个只有一个可训练参数 $\theta$ 的模型，人为规定：
+
+$$
+a(\theta)=-5+\theta,\qquad b(\theta)=-7-\theta,\qquad \theta_0=0.
+$$
+
+$\theta$ 变大时 chosen 上升、rejected 下降。这个关系只用来演示局部的梯度和更新，不是一个归一化的语言模型概率分布。Reference 不变，$c=-6$，$d=-7$。于是：
+
+$$
+z(\theta)=0.1\,(1+2\theta),\qquad
+\mathcal L(\theta)=-\log\sigma(0.1+0.2\theta).
+$$
+
+求导，在 $\theta=0$ 处：
+
+$$
+\frac{\partial\mathcal L}{\partial\theta}=-0.2\,\sigma(-0.1)\approx-0.0950.
+$$
+
+它正好等于 $\frac{\partial\mathcal L}{\partial a}\cdot1+\frac{\partial\mathcal L}{\partial b}\cdot(-1)=-0.0475-0.0475$：两路梯度汇到了同一个参数上。用 SGD，learning rate 取 0.1：
+
+$$
+\theta_{\text{new}}=\theta_{\text{old}}-\text{lr}\times\frac{\partial\mathcal L}{\partial\theta}
+=0-0.1\times(-0.0950)\approx0.0095.
+$$
+
+| 量 | 更新前 | 更新后 |
+| --- | ---: | ---: |
+| $\theta$ | 0 | 0.0095 |
+| Policy chosen $a$ | −5 | −4.9905 |
+| Policy rejected $b$ | −7 | −7.0095 |
+| Policy margin $a-b$ | 2 | 2.0190 |
+| Relative margin $\Delta$ | 1 | 1.0190 |
+| DPO loss | 0.6444 | 0.6435 |
+
+<DpoToyUpdateFigure />
+
+一步只把 loss 从 0.6444 降到 0.6435。训练就是把这样的小步重复很多次，每一步都重新前向、重新算梯度。
+
+换到真实的 LLM：
+
+- $\theta$ 是模型的权重矩阵，有几十亿个数，不是一个标量。
+- 反向传播穿过整个 Transformer，算出每个参数的梯度。
+- 用 [LoRA](/notes/ml/post-training/lora/) 时，通常只有 LoRA 的 A、B 矩阵接收更新，底座权重冻结。
+- AdamW 或 SGD 按参数梯度执行更新。
+- Reference 始终冻结。
+
+#### Step 6 · PyTorch 最小演示
+
+下面这段代码实现的就是 Step 5 的玩具模型，可以直接运行：
+
+```python
+import torch
+import torch.nn.functional as F
+
+beta, lr = 0.1, 0.1
+ref_chosen, ref_rejected = -6.0, -7.0      # frozen reference: constants
+
+theta = torch.nn.Parameter(torch.tensor(0.0))
+optimizer = torch.optim.SGD([theta], lr=lr)
+
+def forward(theta):
+    policy_chosen = -5.0 + theta           # a(theta)
+    policy_rejected = -7.0 - theta         # b(theta)
+    z = beta * ((policy_chosen - policy_rejected) - (ref_chosen - ref_rejected))
+    loss = -F.logsigmoid(z)
+    return policy_chosen, policy_rejected, loss
+
+for step in range(4):
+    policy_chosen, policy_rejected, loss = forward(theta)
+    print(f"step {step}: theta={theta.item():.4f}  "
+          f"chosen={policy_chosen.item():.4f}  rejected={policy_rejected.item():.4f}  "
+          f"loss={loss.item():.4f}")
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+```
+
+按同样的公式，前四步的数值是：
+
+| step | theta | Policy chosen | Policy rejected | DPO loss |
+| ---: | ---: | ---: | ---: | ---: |
+| 0 | 0.0000 | −5.0000 | −7.0000 | 0.6444 |
+| 1 | 0.0095 | −4.9905 | −7.0095 | 0.6435 |
+| 2 | 0.0190 | −4.9810 | −7.0190 | 0.6426 |
+| 3 | 0.0285 | −4.9715 | −7.0285 | 0.6417 |
+
+真实的 DPO 训练步骤结构相同，只是四个 log 概率来自模型的前向计算。下面是伪代码，`sequence_logprob` 指「对 response token 的 log 概率求和」：
+
+```python
+for prompt, chosen, rejected in dataloader:
+    # 1. Policy forward: keeps the computation graph
+    pi_chosen = sequence_logprob(policy, prompt, chosen)
+    pi_rejected = sequence_logprob(policy, prompt, rejected)
+
+    # 2. Reference forward: no gradient
+    with torch.no_grad():
+        ref_chosen = sequence_logprob(reference, prompt, chosen)
+        ref_rejected = sequence_logprob(reference, prompt, rejected)
+
+    # 3-4. Relative margin and DPO loss
+    z = beta * ((pi_chosen - pi_rejected) - (ref_chosen - ref_rejected))
+    loss = -F.logsigmoid(z).mean()
+
+    # 5-6. Backpropagate into the policy weights only
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+```
+
+不要把手写的 −5、−7 当成可训练参数直接去优化。真实训练里 `pi_chosen`、`pi_rejected` 必须从 policy 的前向计算图里得到，梯度才能沿着图回到权重上；手动填进去的常数没有计算图，`backward()` 到不了任何模型参数。
+
+#### SFT vs DPO
+
+| | SFT | DPO |
+| --- | --- | --- |
+| Loss | $\mathcal L_{\mathrm{SFT}}=-\log\pi_\theta(y_w\mid x)$ | $\mathcal L_{\mathrm{DPO}}=-\log\sigma\big(\beta(\Delta_{\mathrm{policy}}-\Delta_{\mathrm{reference}})\big)$ |
+| 数据 | prompt 加一个好回答 | prompt 加 chosen 和 rejected |
+| 目标 | 提高好回答的 log 概率 | 提高 chosen **相对于** rejected 的偏好优势 |
+| chosen 的梯度 | 系数恒为 −1，一直往上推 | 系数是 $-\beta\sigma(-z)$，margin 够大后变小 |
+| rejected | 不出现在 loss 里 | 系数是 $+\beta\sigma(-z)$，被往下压 |
+| Reference | 不需要 | 需要一个冻结的 reference |
+
+两者都用反向传播和 optimizer 更新 LLM 的参数，更新机制没有区别；区别在 loss 让梯度往哪个方向走。[SFT](/notes/ml/post-training/sft/) 只知道「这个回答是好的」，DPO 还知道「那个回答更差」，并且用 reference 做基准。DPO 不需要单独训练 reward model，在经典的离线设定里也不需要每一步重新采样回答。
+
+回到开头的问题：给定 Policy 的 chosen = −5、rejected = −7，Reference 的 chosen = −6、rejected = −7，$\beta=0.1$。Policy margin 是 2，reference margin 是 1，$\Delta=1$，$z=0.1$，$\sigma(0.1)\approx0.5250$，loss $\approx0.6444$。Loss 对两个 policy log 概率的梯度是 $\mp0.0475$，经反向传播汇到共享的权重上，optimizer 按它更新参数。Loss 只看 chosen 与 rejected 的差，所以 chosen 的绝对概率不一定上升。
+
 ## DPO 到底训练了什么？
 
 ### A · Distribution Shift：奖励重加权的理论图景
@@ -225,7 +501,7 @@ Policy 和 Reference 都评估 chosen、rejected；只有 policy 的两条路径
 
 ### C · 相对 margin 变好，不代表 chosen 每一步都涨
 
-在 calculator 点「两者都降、margin 却增」：reference log 概率是 $(-3,-4)$，policy 变成 $(-4,-7)$。Chosen 的绝对概率降低了，但其 log ratio 为 $-1$，rejected 为 $-3$，相对差 $\Delta=2$；β = 0.1 时 $m=0.2$、loss 约 0.5981，比初始的 0.6931 小。
+上面「完整计算实例」的情况 C 已经见过这个现象，这里是 calculator 默认数值下的另一组。在 calculator 点「两者都降、margin 却增」：reference log 概率是 $(-3,-4)$，policy 变成 $(-4,-7)$。Chosen 的绝对概率降低了，但其 log ratio 为 $-1$，rejected 为 $-3$，相对差 $\Delta=2$；β = 0.1 时 $m=0.2$、loss 约 0.5981，比初始的 0.6931 小。
 
 这个例子说明目标关心相对偏好。它不是对某个优化器轨迹的预测：神经网络共享参数，多条训练样本的梯度会相互影响，不能保证每一步 chosen 的绝对概率都增加。
 

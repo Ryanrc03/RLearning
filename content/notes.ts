@@ -1987,7 +1987,7 @@ export const noteEntries: NoteEntry[] = [
     category: "ML & LLM",
     section: "Post-training",
     created: "2026-11-10",
-    updated: "2026-11-10",
+    updated: "2026-11-22",
     status: "growing",
     readingMinutes: 25,
     tags: ["ml-fundamentals", "post-training", "DPO", "interactive"],
