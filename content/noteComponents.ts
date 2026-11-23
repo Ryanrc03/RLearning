@@ -117,6 +117,7 @@ import MonotonicStack from "@/content/algorithms/stack/monotonic-stack.mdx";
 import PostTrainingOverview from "@/content/ml/post-training/overview.mdx";
 import Sft from "@/content/ml/post-training/sft.mdx";
 import Lora from "@/content/ml/post-training/lora.mdx";
+import Dpo from "@/content/ml/post-training/dpo.mdx";
 import Rlhf from "@/content/ml/post-training/rlhf.mdx";
 import Ppo from "@/content/ml/post-training/ppo.mdx";
 import Grpo from "@/content/ml/post-training/grpo.mdx";
@@ -276,6 +277,7 @@ export const noteComponents = {
   "ml/post-training/sft": Sft,
   "ml/post-training/lora": Lora,
   "ml/post-training/rlhf": Rlhf,
+  "ml/post-training/dpo": Dpo,
   "ml/post-training/ppo": Ppo,
   "ml/post-training/grpo": Grpo,
   "ml/post-training/reward-hacking": RewardHacking,

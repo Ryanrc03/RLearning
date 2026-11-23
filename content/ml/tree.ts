@@ -176,6 +176,7 @@ export const chapters: TreeChapter[] = [
       n("ml/post-training/sft", "SFT", "预训练完了，怎么让模型照指令回答？", "用（指令, 好回答）对继续训练；loss 还是逐 token 的 cross-entropy，但 prompt 的 token 被 mask 掉，只在回答上算。", "ready"),
       n("ml/post-training/lora", "LoRA", "全量微调太贵，能只训一小部分吗？", "冻结 W，只学 W' = W + BA，B 是 d×r、A 是 r×k、r ≪ d；B 初始化为 0，推理时把 BA 合并回 W 没有额外延迟。", "ready"),
       n("ml/post-training/rlhf", "RLHF：RM、PPO 与 DPO", "好回答很难写出来，但能比出来，怎么用？", "用成对偏好训一个奖励模型（Bradley–Terry），再用 PPO 在和参考模型的 KL 约束下优化；DPO 把这两步合成一个分类式的 loss。", "ready", "RLHF 与 DPO"),
+      n("ml/post-training/dpo", "DPO：从成对偏好直接优化策略", "不单独训练奖励模型，偏好怎么直接更新策略？", "从 KL、Bradley–Terry 到 DPO loss，消去同一 prompt 的 partition function；冻结 reference，只更新 policy 的相对偏好 margin。", "ready", "DPO"),
       n("ml/post-training/ppo", "PPO：从 Actor–Critic 到 LLM 强化学习", "奖励如何变成逐 token 的策略更新？", "Actor 生成、Critic 估值，GAE 计算 advantage，clipping 限制旧采样上更新的激励；参考 KL 另管长期漂移。", "ready", "PPO"),
       n("ml/post-training/grpo", "GRPO", "PPO 的 critic 太贵，能去掉吗？", "每个 prompt 采样 G 个回答各自打分，advantage = (r − 组内均值) / 组内标准差；用组内平均当基线，省掉 critic，其余沿用 PPO 的 clip 和 KL。", "ready"),
       n("ml/post-training/reward-hacking", "奖励设计与 Reward Hacking", "奖励一加上去，模型为什么学歪了？", "策略只优化你写下的奖励，不优化你心里的目标；长度奖励会被堆字刷分，要用正确性门控、上限和 KL 拉住它。", "ready", "Reward Hacking"),

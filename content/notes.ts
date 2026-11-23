@@ -1924,7 +1924,7 @@ export const noteEntries: NoteEntry[] = [
     slug: "ml/post-training/overview",
     title: "Post-training Overview",
     description:
-      "这一章回答「预训练之后怎么教模型听话」：SFT、LoRA、RLHF、PPO、GRPO、奖励设计、KL 散度与 3060 上的 GRPO 实战复盘，共八页。",
+      "这一章回答「预训练之后怎么教模型听话」：SFT、LoRA、RLHF、PPO、GRPO、奖励设计、KL 散度与 3060 上的 GRPO 实战复盘，共九页；DPO 深度教程补齐偏好优化推导。",
     categoryId: "ml",
     category: "ML & LLM",
     section: "Post-training",
@@ -1980,6 +1980,20 @@ export const noteEntries: NoteEntry[] = [
     series: { id: "ml-post-training", title: "Post-training：预训练之后怎么教模型听话", order: 3 },
   },
   {
+    slug: "ml/post-training/dpo",
+    title: "DPO：从成对偏好直接优化策略",
+    description: "三个章节串起 KL、Bradley–Terry 与 DPO 推导：交互计算 loss，观察理论分布移动和只更新 Policy 的训练数据流。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "Post-training",
+    created: "2026-11-10",
+    updated: "2026-11-10",
+    status: "growing",
+    readingMinutes: 25,
+    tags: ["ml-fundamentals", "post-training", "DPO", "interactive"],
+    series: { id: "ml-post-training", title: "Post-training：预训练之后怎么教模型听话", order: 4 },
+  },
+  {
     slug: "ml/post-training/ppo",
     title: "PPO：从 Actor–Critic 到 LLM 强化学习",
     description: "从四种模型角色、Value 和 Advantage 到三步 GAE、正负 Clipping、完整 LLM PPO 训练循环，再用同题示例理解 GRPO 的取舍。",
@@ -1991,7 +2005,7 @@ export const noteEntries: NoteEntry[] = [
     status: "growing",
     readingMinutes: 30,
     tags: ["PPO", "GAE", "post-training", "interactive"],
-    series: { id: "ml-post-training", title: "Post-training：预训练之后怎么教模型听话", order: 4 },
+    series: { id: "ml-post-training", title: "Post-training：预训练之后怎么教模型听话", order: 5 },
   },
   {
     slug: "ml/post-training/grpo",
@@ -2006,7 +2020,7 @@ export const noteEntries: NoteEntry[] = [
     status: "seed",
     readingMinutes: 10,
     tags: ["ml-fundamentals", "post-training", "interactive"],
-    series: { id: "ml-post-training", title: "Post-training：预训练之后怎么教模型听话", order: 5 },
+    series: { id: "ml-post-training", title: "Post-training：预训练之后怎么教模型听话", order: 6 },
     en: {
       title: "GRPO: group comparison in place of a critic",
       description:
@@ -2028,7 +2042,7 @@ export const noteEntries: NoteEntry[] = [
     status: "seed",
     readingMinutes: 6,
     tags: ["ml-fundamentals", "post-training", "interactive"],
-    series: { id: "ml-post-training", title: "Post-training：预训练之后怎么教模型听话", order: 6 },
+    series: { id: "ml-post-training", title: "Post-training：预训练之后怎么教模型听话", order: 7 },
     en: {
       title: "Reward design and reward hacking",
       description: "A length reward gets farmed by padding: whatever the reward is, that is what the policy learns.",
@@ -2049,7 +2063,7 @@ export const noteEntries: NoteEntry[] = [
     status: "seed",
     readingMinutes: 7,
     tags: ["ml-fundamentals", "post-training", "kl-divergence", "interactive"],
-    series: { id: "ml-post-training", title: "Post-training：预训练之后怎么教模型听话", order: 7 },
+    series: { id: "ml-post-training", title: "Post-training：预训练之后怎么教模型听话", order: 8 },
   },
   {
     slug: "ml/post-training/grpo-3060-project",
@@ -2064,7 +2078,7 @@ export const noteEntries: NoteEntry[] = [
     status: "growing",
     readingMinutes: 15,
     tags: ["project", "grpo", "reward-hacking", "kl-divergence", "post-training", "interactive"],
-    series: { id: "ml-post-training", title: "Post-training：预训练之后怎么教模型听话", order: 8 },
+    series: { id: "ml-post-training", title: "Post-training：预训练之后怎么教模型听话", order: 9 },
     en: {
       title: "Project: training GRPO on an RTX 3060 — a reward-hacking post-mortem",
       description:
