@@ -150,6 +150,9 @@ export const chapters: TreeChapter[] = [
     overview: "ml/llms/overview",
     nodes: [
       n("ml/llms/rnn", "RNN：hidden state 一步一步传", "序列怎么被一步步读？", "h_t = tanh(W_hh h_{t−1} + W_xh x_t)：每读一个 token 就把它揉进同一个 hidden state，输出 y_t = softmax(W_hy h_t)。", "ready", "RNN"),
+      n("ml/llms/seq2seq-bahdanau-attention", "Attention (I)：从 Seq2Seq 到 Bahdanau Attention", "一个 hidden state 装不下整句怎么办？", "基础 Seq2Seq 只把 Encoder 最后一个状态交给 Decoder；Bahdanau Attention 保留全部 h_i，每个 Decoder step 用同一套打分参数算 score、softmax 成权重、加权求和出 context c_j。参数共享且可训练，权重每步现算。", "ready", "Bahdanau Attention"),
+      n("ml/llms/rnn-self-attention", "Attention (II)：RNN 中的 Self-Attention", "同一条序列能不能回看自己前面的状态？", "把 h_t = tanh(A[x_t; h_{t−1}] + b) 里的 h_{t−1} 换成 c_{t−1}：c_{t−1} 是 h_1 … h_{t−1} 的加权汇总，权重仍由 Score → Softmax 算出。打分参数跨位置共享，权重每步现算；代价是约 n(n−1)/2 次打分，计算仍是顺序的。", "ready", "RNN Self-Attention"),
+      n("ml/llms/attention-layer", "Attention (III)：从 Cross-Attention 到 Self-Attention Layer", "Attention 能不能脱离 RNN，单独成为一个层？", "X 经 W_K、W_V 给出 Key 和 Value，X′ 经 W_Q 给出 Query，C = Softmax(QKᵀ)V：输出的行数等于 Query 的个数，宽度等于 d_v。令 X′ = X 就是 Self-Attention；学的是三个共享的投影矩阵，Q、K、V 和权重都是现算的。", "ready", "Attention Layer"),
       n("ml/llms/transformer-vs-rnn", "Transformer vs RNN", "怎么并行地读一串 token？", "RNN 每一步都在等上一步；Transformer 同一层的所有位置只依赖上一层，一次矩阵乘法算完一整层。", "ready"),
       n("ml/llms/attention-qkv", "Attention：Q、K、V", "一个 token 怎么看别的 token？", "每个 token 投影出 query、key、value；用 QKᵀ/√d 算相关性，softmax 成权重，再把 value 加权求和加回自己。Q、K、V 同源是 self-attention，Q 来自 decoder、K/V 来自 encoder 是 cross-attention。", "ready", "Attention Q/K/V"),
       n("ml/llms/multi-head-attention", "Multi-head 与参数量", "为什么要多个头，参数有多少？", "把 d_model 拆成 h 份，每个头在自己的 d_k 维里做一次 attention 再拼回来；W_Q、W_K、W_V、W_O 共 4 d_model² 个参数，与头数无关。", "ready", "Multi-head"),

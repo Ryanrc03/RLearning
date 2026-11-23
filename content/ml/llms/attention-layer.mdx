@@ -1,0 +1,353 @@
+import QkvSourceFigure from "@/components/visualization/ml/llms/attention-layer/QkvSourceFigure";
+import SingleQueryFigure from "@/components/visualization/ml/llms/attention-layer/SingleQueryFigure";
+import CrossAttentionLayerFigure from "@/components/visualization/ml/llms/attention-layer/CrossAttentionLayerFigure";
+import ShapeExplorerFigure from "@/components/visualization/ml/llms/attention-layer/ShapeExplorerFigure";
+import CrossToSelfFigure from "@/components/visualization/ml/llms/attention-layer/CrossToSelfFigure";
+import SelfAttentionHeatmapFigure from "@/components/visualization/ml/llms/attention-layer/SelfAttentionHeatmapFigure";
+
+# Attention (III)：从 Cross-Attention 到 Self-Attention Layer
+
+前两章的 Attention 都长在 RNN 上：[第一章](/notes/ml/llms/seq2seq-bahdanau-attention/) 接在 Encoder 和 Decoder 两个 RNN 之间，[第二章](/notes/ml/llms/rnn-self-attention/) 接在一条 RNN 内部。这一章把 Attention 从 RNN 里拿出来，写成一个独立的层：给它输入，它给出输出，里面不需要任何递推。
+
+整章只回答一件事：**这个层的输入是什么，输出是什么，形状为什么是那样。** 先写出有两个输入的 Cross-Attention Layer，再令两个输入相同，得到 Self-Attention Layer。
+
+## 为什么要把 Attention 从 RNN Seq2Seq 中抽离？
+
+**一句话：Attention 的三步计算本身不需要 RNN，只需要「一组用来发问的向量」和「一组被读的向量」。**
+
+回看前两章，Attention 做的事一直是 Score → Softmax → Weighted Sum。RNN 只负责提供被比较的向量：$h_i$、$s_j$。如果把「这些向量由谁算出来」和「拿到向量之后怎么算」分开，后一半就可以单独成为一个层，前一半换成什么都行。
+
+这和第二章不是一回事。第二章的 Self-Attention 仍然嵌在 RNN 的递推里，$h_t$ 要等 $c_{t-1}$；这一章的层不要求输入来自 RNN，也没有时间步之间的等待。
+
+## 先回顾 Encoder–Decoder Attention：谁提供 Q，谁提供 K/V？
+
+**一句话：Decoder 一侧提供 Query，Encoder 一侧同时提供 Key 和 Value。**
+
+Seq2Seq 里 Encoder 有 $m$ 个隐藏状态 $h_1, h_2, \ldots, h_m$，Decoder 第 $j$ 步的状态是 $s_j$。把打分写成点积的形式，需要三个投影：
+
+$$
+\boxed{\,q_j = W_Q\, s_j\,}, \qquad \boxed{\,k_i = W_K\, h_i\,}, \qquad \boxed{\,v_i = W_V\, h_i\,}
+$$
+
+- **Query** $q_j$：Decoder 当前「想找什么」。
+- **Key** $k_i$：Encoder 每个位置「可以拿什么来匹配」。
+- **Value** $v_i$：匹配上之后「实际提供什么信息」。
+
+和第一章对照：Bahdanau 原来的打分是一个加性的小网络，并且直接对 $h_i$ 加权求和。这里换成了点积打分，外加一个 Value 投影，这是课堂为了过渡到通用的层而采用的写法，不是 Bahdanau 论文的原式。
+
+<QkvSourceFigure />
+
+图的右半边是这一章的关键一步，下面第六节展开。
+
+**下标约定。** 这一章沿用课堂的记号：$\alpha_{ij}$ 是第 $i$ 个 Key 对第 $j$ 个 Query 的权重，第一个下标是 Key，第二个是 Query。（第一章的 $\alpha_{j,i}$ 把 Query 写在前面，两章的顺序相反，对照时留意。）
+
+## Q、K、V 分别负责什么？参数学习与共享
+
+**一句话：学的是三个投影矩阵，Q、K、V 和权重都是拿输入现算的。**
+
+| 对象 | 是可训练参数吗？ | 说明 |
+| --- | --- | --- |
+| $W_Q,\ W_K,\ W_V$ | 是 | 由下游的 Loss 反向传播一起训练；层内所有位置共用 |
+| $q_j,\ k_i,\ v_i$ | 否 | 输入乘上投影矩阵得到 |
+| $\alpha_{ij}$ | 否 | Score 加 Softmax 得到 |
+| $c_j$ | 否 | Value 的加权和 |
+
+三点要分清：
+
+- $W_Q$、$W_K$、$W_V$ 在这一层里对所有 token 位置共享。不是第 1 个词一套、第 2 个词又一套。
+- Q、K、V 不是存在模型里的一张向量表，是每次根据输入算出来的。
+- $\alpha$ 也不是存下来的一张「注意力参数表」。换一句输入，或者换一个 Query，$\alpha$ 就变，即使三个矩阵一个数都没动。
+
+## 一个 Decoder Query 如何生成一个 Context Vector？
+
+**一句话：Query 只和 Key 比较，算出的权重拿去加权 Value。**
+
+把 Key 和 Value 各排成一个矩阵，每一列是一个向量：$K = [k_1, \ldots, k_m]$，$V = [v_1, \ldots, v_m]$。这是课堂用的列向量写法。
+
+**Step 1，Score。** Query 和每个 Key 做点积：
+
+$$
+e_{ij} = k_i^{\top} q_j, \qquad K^{\top} q_j \in \mathbb{R}^{m}
+$$
+
+**Step 2，Softmax。** 在 Key 这个方向上归一化：
+
+$$
+\boxed{\,\alpha_{:j} = \operatorname{Softmax}\left(K^{\top} q_j\right)\,}, \qquad \sum_{i=1}^{m} \alpha_{ij} = 1
+$$
+
+$\alpha_{:j}$ 是 $m$ 个数：一个 Query 对 $m$ 个 Key 的分布。
+
+**Step 3，加权汇总 Value。**
+
+$$
+\boxed{\,c_j = \sum_{i=1}^{m} \alpha_{ij}\, v_i = V \alpha_{:j}\,}
+$$
+
+<SingleQueryFigure />
+
+Key 决定「关注谁」，Value 决定「取回什么」。最终的输出是向量 $c_j$，不是权重 $\alpha$，更不是一个词。
+
+## 所有 Query 一次计算：得到 C = [c₁, …, cₜ]
+
+**一句话：每个 Query 各算一遍，有几个 Query 就有几个 context。**
+
+上面是一个 Query 的结果。对 $t$ 个 Query 都做同样的事：
+
+$$
+q_1 \to c_1, \quad q_2 \to c_2, \quad \ldots, \quad q_t \to c_t
+$$
+
+整层的输出把它们排在一起：
+
+$$
+\boxed{\,C = [\,c_1,\ c_2,\ \ldots,\ c_t\,]\,}
+$$
+
+这一章最重要的形状结论：
+
+> **输出 context 的个数 = Query 的个数 $t$，不是 Key / Value 的个数 $m$。每个 context 的维数 = Value 的维数 $d_v$。**
+
+（这里说的是这一层本身的输出，不算后面可能再接的输出投影。）
+
+## 通用 Cross-Attention Layer 的输入、输出与 Shape
+
+**一句话：层有两个输入口，X 接 Key 和 Value，X′ 接 Query；输出的行数跟 X′。**
+
+到这里输入还是 RNN 的状态 $h_i$、$s_j$。现在把这一层直接定义在两组输入向量上：
+
+- Source 一侧：$X = [x_1, \ldots, x_m]$
+- Target 一侧：$X' = [x'_1, \ldots, x'_t]$
+
+它们可以是 embedding，也可以是别的网络算出的表示，不要求经过 RNN。
+
+$$
+\boxed{\,q_j = W_Q\, x'_j\,}, \qquad \boxed{\,k_i = W_K\, x_i\,}, \qquad \boxed{\,v_i = W_V\, x_i\,}
+$$
+
+后面的 Score → Softmax → Weighted Sum 一个字都不用改：$\alpha_{:j} = \operatorname{Softmax}(K^{\top} q_j)$，$c_j = V \alpha_{:j}$。
+
+这一步是把结构推广了，不是在说 $h_i = x_i$ 或 $s_j = x'_j$。意思是：这一层不再关心输入是谁算的。
+
+把整个数据流记成一个函数：
+
+$$
+\boxed{\,C = \operatorname{Attn}(X,\ X')\,}
+$$
+
+按课堂的约定，第一个参数 $X$ 提供 Key 和 Value，第二个参数 $X'$ 提供 Query。这只是课堂的记号，不是哪个库的参数顺序；很多工程接口写的是 `attention(query, key, value)`。在一个完整的 Encoder–Decoder 网络里，这一层的上游和下游仍然可以是 RNN 或别的网络，只是层本身不包含它们。
+
+<CrossAttentionLayerFigure />
+
+### 换成每行一个 token 的写法
+
+上面的推导每个向量是一列。NumPy 和 PyTorch 的代码习惯每个 token 占一行，下面标形状时换成这种写法，两种不要混着用：
+
+| | 课堂的列向量写法 | 工程的行向量写法 |
+| --- | --- | --- |
+| 一个向量 | 矩阵的一列 | 矩阵的一行 |
+| 投影 | $q_j = W_Q\, x'_j$ | $Q = X' W_Q$ |
+| 权重 | $\alpha_{:j} = \operatorname{Softmax}(K^{\top} q_j)$，每列和为 1 | $A = \operatorname{Softmax}(Q K^{\top})$，每行和为 1 |
+| 输出 | $c_j = V \alpha_{:j}$ | $C = A V$ |
+| 同一个数 | $\alpha_{ij}$ | $A[j, i]$ |
+
+行向量写法里，行是 Query、列是 Key，所以 $A[j, i] = \alpha_{ij}$。本页所有热力图都按这个方向画。
+
+$$
+X \in \mathbb{R}^{m \times d_{src}}, \qquad X' \in \mathbb{R}^{t \times d_{tgt}}
+$$
+
+$$
+Q = X' W_Q \in \mathbb{R}^{t \times d_k}, \quad K = X W_K \in \mathbb{R}^{m \times d_k}, \quad V = X W_V \in \mathbb{R}^{m \times d_v}
+$$
+
+$$
+\boxed{\,A = \operatorname{Softmax}\left(Q K^{\top}\right) \in \mathbb{R}^{t \times m}\,}, \qquad \boxed{\,C = A V \in \mathbb{R}^{t \times d_v}\,}
+$$
+
+这里的点积没有缩放，和课堂一致[^scale]。
+
+### 一组具体的数
+
+设 $X$ 是 4 个源 token（I / love / machine / learning）的表示，$X'$ 是 5 个目标侧位置的表示。取 $m = 4$，$t = 5$，$d_{src} = d_{tgt} = 128$，$d_k = 64$，$d_v = 32$：
+
+| 变量 | 形状（每行一个 token） | 含义 |
+| --- | --- | --- |
+| $X$ | 4 × 128 | Source 一侧的输入 |
+| $X'$ | 5 × 128 | Target 一侧的输入 |
+| $W_Q$ | 128 × 64 | Query 投影 |
+| $W_K$ | 128 × 64 | Key 投影 |
+| $W_V$ | 128 × 32 | Value 投影 |
+| $Q$ | 5 × 64 | 5 个 Query |
+| $K$ | 4 × 64 | 4 个 Key |
+| $V$ | 4 × 32 | 4 个 Value |
+| $Q K^{\top}$ | 5 × 4 | 每个 Query 对 4 个 Key 的分数 |
+| $A = \operatorname{Softmax}(Q K^{\top})$ | 5 × 4 | 每行归一化为 1 |
+| $C = A V$ | 5 × 32 | 5 个 context |
+
+两次矩阵乘法：
+
+$$
+(5 \times 64)(64 \times 4) = 5 \times 4, \qquad (5 \times 4)(4 \times 32) = 5 \times 32
+$$
+
+**Cross-Attention 的输出长度跟随 Query 一侧，输出维度跟随 Value 一侧。**
+
+## 从 Attn(X, X′) 到 Attn(X, X)：Self-Attention 的输入、输出与 Shape
+
+**一句话：把同一个 X 同时接到两个输入口上，就是 Self-Attention。**
+
+改动只有一处，令 $X' = X$：
+
+$$
+\boxed{\,C = \operatorname{Attn}(X,\ X)\,}
+$$
+
+于是每个位置自己投影出三样东西：
+
+$$
+q_i = W_Q\, x_i, \qquad k_i = W_K\, x_i, \qquad v_i = W_V\, x_i
+$$
+
+来自同一个 $x_i$ 不等于 $q_i = k_i = v_i$。三个投影矩阵不同，三个向量各管各的用途。
+
+<CrossToSelfFigure />
+
+每个 Query 和同一条序列的全部 Key 比较，再从全部 Value 里汇总：
+
+$$
+c_j = \sum_{i=1}^{m} \alpha_{ij}\, v_i
+$$
+
+这里是不加任何限制的 Self-Attention，每个 Query 都能读所有位置，包括它自己。
+
+沿用 $m = 4$，输入宽度 128，$d_k = 64$，$d_v = 32$：
+
+| 变量 | 形状 |
+| --- | --- |
+| $X$ | 4 × 128 |
+| $Q$ | 4 × 64 |
+| $K$ | 4 × 64 |
+| $V$ | 4 × 32 |
+| $Q K^{\top}$ | 4 × 4 |
+| $A$ | 4 × 4 |
+| $C$ | 4 × 32 |
+
+Self-Attention 的输入和输出序列长度相同，向量宽度却不一定相同：这里输入是 128 维，输出是 $d_v = 32$ 维。所以不能说「Self-Attention 的输入输出形状一定完全一样」。
+
+从功能上看：输入 `The cat eats fish`，对 eats 这个 Query，
+
+$$
+c_{eats} = \alpha_1 v_{The} + \alpha_2 v_{cat} + \alpha_3 v_{eats} + \alpha_4 v_{fish}
+$$
+
+$c_{eats}$ 是整句话按权重融合出来的一个表示。它不是预测出的词 eats，也不是词表上的概率。
+
+## 完整数值例子与互动矩阵：输出长度为什么等于 Query 长度？
+
+**一句话：A 有几行，C 就有几行；A 的行就是 Query。**
+
+<ShapeExplorerFigure />
+
+Cross-Attention 的示例权重，行是 5 个 Query，列是 4 个 Key（I, love, machine, learning）：
+
+$$
+A_{cross} =
+\begin{bmatrix}
+0.65 & 0.15 & 0.10 & 0.10 \\
+0.10 & 0.70 & 0.10 & 0.10 \\
+0.05 & 0.10 & 0.60 & 0.25 \\
+0.10 & 0.10 & 0.30 & 0.50 \\
+0.20 & 0.15 & 0.15 & 0.50
+\end{bmatrix}
+\in \mathbb{R}^{5 \times 4}
+$$
+
+Self-Attention 的示例权重，行和列都是 The, cat, eats, fish：
+
+$$
+A_{self} =
+\begin{bmatrix}
+0.60 & 0.20 & 0.10 & 0.10 \\
+0.15 & 0.55 & 0.20 & 0.10 \\
+0.05 & 0.35 & 0.35 & 0.25 \\
+0.10 & 0.10 & 0.60 & 0.20
+\end{bmatrix}
+\in \mathbb{R}^{4 \times 4}
+$$
+
+两个矩阵都是示意的 softmax 后权重，每行和为 1，是教学构造数据，不是真实训练结果，也不是由某组 $W_Q$、$W_K$、$W_V$ 算出来的。
+
+输出长度等于 Query 长度，原因就写在 $C = AV$ 里：$A$ 的每一行是一个 Query 对所有 Key 的权重，这一行乘上 $V$ 得到一个 context。$A$ 有 $t$ 行，$C$ 就有 $t$ 行。Key 的个数 $m$ 是 $A$ 的列数，在 $A V$ 这次乘法里和 $V$ 的行数对上、被消掉了。
+
+<SelfAttentionHeatmapFigure />
+
+## 为什么可以不用 RNN？它不解决什么问题？
+
+**一句话：层里只有矩阵乘法和 softmax，没有「下一步等上一步」；但它也因此不知道顺序。**
+
+普通 RNN 靠递推传信息：
+
+$$
+h_t = f\left(x_t,\ h_{t-1}\right)
+$$
+
+相距很远的两个位置，信息要穿过中间所有的状态；$h_t$ 依赖 $h_{t-1}$，整条序列难以一起算。
+
+独立的 Attention Layer 直接算：
+
+$$
+Q = X W_Q, \quad K = X W_K, \quad V = X W_V, \quad C = \operatorname{Softmax}\left(Q K^{\top}\right) V
+$$
+
+每个位置的输出都直接从整条输入序列里加权取信息。只要全部输入已经给定，就不需要按顺序产生中间状态；投影和点积都是矩阵运算，可以一起算。
+
+不要把这句话说过头：
+
+- **没有位置信息。** 去掉 RNN 之后，这一层分不清 token 的先后，顺序要靠别的设计来表达。
+- **不等于整个模型只有 Attention。** 完整的模型里还会有别的组件。
+- **有代价。** 不加限制的 Self-Attention 要算一个 $n \times n$ 的权重矩阵，计算和内存随长度二次增长。
+- **不等于生成也能一步到位。** 这一层能并行，不代表自回归的语言生成可以一次吐出所有未来的 token。
+
+## 最终小结：2 张图 + 3 个公式 + 常见误区
+
+**两张图。** 图 3 是有两个输入口的 Cross-Attention Layer；图 5 是把同一个 $X$ 接到两个口上的 Self-Attention Layer。
+
+**三个公式**（课堂的列向量写法）：
+
+$$
+\boxed{\,q_j = W_Q\, x'_j, \quad k_i = W_K\, x_i, \quad v_i = W_V\, x_i\,}
+$$
+
+$$
+\boxed{\,c_j = V \operatorname{Softmax}\left(K^{\top} q_j\right)\,}
+$$
+
+$$
+\boxed{\,C = \operatorname{Attn}(X,\ X') \quad \xrightarrow{\ X' = X\ } \quad C = \operatorname{Attn}(X,\ X)\,}
+$$
+
+对应的工程行向量写法：
+
+$$
+\boxed{\,\operatorname{Attention}(Q, K, V) = \operatorname{Softmax}\left(Q K^{\top}\right) V\,}
+$$
+
+Cross-Attention：$Q = X' W_Q$，$K = X W_K$，$V = X W_V$。Self-Attention：$Q = X W_Q$，$K = X W_K$，$V = X W_V$。
+
+**常见误区：**
+
+| 容易说错的 | 正确的 |
+| --- | --- |
+| Cross-Attention 的输出长度等于 Encoder 长度 $m$ | 等于 Query 的个数 $t$ |
+| 输出维度等于 Key 的维度 $d_k$ | 这一层的输出维度是 $d_v$ |
+| Q、K、V 是每个位置各自学出来的向量 | 学的是共享的投影矩阵，Q、K、V 由输入现算 |
+| Attention 的输出就是权重 $A$ | $A$ 是中间结果，输出是 $C = AV$ |
+| Self-Attention 里 $Q = K = V$ | 它们来自同一个 $X$，但三个投影矩阵一般不同 |
+| Cross 和 Self 用的是两套公式 | 都是 Score → Softmax → Weighted Sum，只是输入的来源不同 |
+| 这一层必须先跑 Encoder / Decoder RNN | 输入可以直接是 embedding 或别的表示 |
+| 第二章的 RNN Self-Attention 就是这一章的层 | 第二章仍有递推，这一章的层不需要 |
+
+下一章再研究 Transformer 如何把 Attention 与位置表示、前馈网络等组件组合起来。
+
+[^scale]: Transformer 会在点积上再除以一个缩放因子 $\sqrt{d_k}$，这属于后面章节的内容，本页的公式和图都按课堂的未缩放形式写。

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeWeights, btExample, dpoPair, optimalDistribution } from "@/lib/ml/dpo";
+import { normalizeWeights, btExample, dpoPair, optimalDistribution, sequenceLogProb, dpoGradients, toyDpo, toySgd, PPT_EXAMPLE, PPT_BETA, PPT_CASES } from "@/lib/ml/dpo";
 import { klDivergence, klTerms } from "@/lib/ml/klDivergence";
 const close = (a: number, b: number, eps = 1e-10) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
 
@@ -51,4 +51,40 @@ test("reward reweighting normalizes stably, respects reference support, and beta
   const shifted = optimalDistribution(ref, rewards.map(r => r+10), 1);
   optimalDistribution(ref, rewards, 1).forEach((p,i) => close(p, shifted[i]));
   assert.throws(() => optimalDistribution(ref, rewards, 0));
+});
+test("two-token example: log 0.20 + log 0.0337 is about -5", () => {
+  close(sequenceLogProb([0.2, 0.0337]), Math.log(0.2 * 0.0337));
+  assert.equal(sequenceLogProb([0.2, 0.0337]).toFixed(2), "-5.00");
+  assert.throws(() => sequenceLogProb([0.2, 0]));
+});
+test("worked example: margins 2 and 1, z = 0.1, sigma 0.5250, loss 0.6444", () => {
+  const r = dpoPair(PPT_EXAMPLE, PPT_BETA);
+  close(PPT_EXAMPLE[0] - PPT_EXAMPLE[1], 2); close(PPT_EXAMPLE[2] - PPT_EXAMPLE[3], 1);
+  close(r.relativeMargin, 1); close(r.margin, 0.1);
+  assert.equal(r.probability.toFixed(4), "0.5250");
+  assert.equal(r.loss.toFixed(4), "0.6444");
+});
+test("three hypothetical states all lower the loss, including one where chosen drops", () => {
+  const loss = (key: string) => { const c = PPT_CASES.find(x => x.key === key)!; return dpoPair([c.policy[0], c.policy[1], PPT_EXAMPLE[2], PPT_EXAMPLE[3]], PPT_BETA).loss; };
+  assert.deepEqual(["a", "b", "c"].map(k => loss(k).toFixed(4)), ["0.5981", "0.5981", "0.5759"]);
+  assert.ok(PPT_CASES[3].policy[0] < PPT_CASES[0].policy[0] && loss("c") < loss("init"));
+});
+test("chain rule: gradients are -0.0475 and +0.0475 and match finite differences", () => {
+  const g = dpoGradients(PPT_EXAMPLE, PPT_BETA);
+  assert.equal(g.dChosen.toFixed(4), "-0.0475"); assert.equal(g.dRejected.toFixed(4), "0.0475");
+  const f = (a: number, b: number) => dpoPair([a, b, -6, -7], PPT_BETA).loss, h = 1e-5;
+  close((f(-5 + h, -7) - f(-5 - h, -7)) / (2 * h), g.dChosen, 1e-8);
+  close((f(-5, -7 + h) - f(-5, -7 - h)) / (2 * h), g.dRejected, 1e-8);
+});
+test("toy one-parameter model: gradient -0.0950, one SGD step gives theta 0.0095 and loss 0.6435", () => {
+  const s0 = toyDpo(0);
+  assert.equal(s0.grad.toFixed(4), "-0.0950");
+  const h = 1e-5;
+  close((toyDpo(h).loss - toyDpo(-h).loss) / (2 * h), s0.grad, 1e-8);
+  const [, s1] = toySgd(1, 0.1);
+  assert.equal(s1.theta.toFixed(4), "0.0095");
+  assert.equal(s1.chosen.toFixed(4), "-4.9905"); assert.equal(s1.rejected.toFixed(4), "-7.0095");
+  assert.equal(s1.loss.toFixed(4), "0.6435");
+  const run = toySgd(20, 0.1);
+  for (let i = 1; i < run.length; i++) assert.ok(run[i].loss < run[i - 1].loss);
 });

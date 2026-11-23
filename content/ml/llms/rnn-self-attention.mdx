@@ -1,0 +1,234 @@
+import RnnVsAttentionRnnFigure from "@/components/visualization/ml/llms/rnn-self-attention/RnnVsAttentionRnnFigure";
+import UnrolledSelfAttentionFigure from "@/components/visualization/ml/llms/rnn-self-attention/UnrolledSelfAttentionFigure";
+import ScoreSoftmaxContextFigure from "@/components/visualization/ml/llms/rnn-self-attention/ScoreSoftmaxContextFigure";
+import SharedAlignParamsFigure from "@/components/visualization/ml/llms/rnn-self-attention/SharedAlignParamsFigure";
+import SentenceHistoryFigure from "@/components/visualization/ml/llms/rnn-self-attention/SentenceHistoryFigure";
+import BahdanauVsSelfFigure from "@/components/visualization/ml/llms/rnn-self-attention/BahdanauVsSelfFigure";
+import HistoryTriangleFigure from "@/components/visualization/ml/llms/rnn-self-attention/HistoryTriangleFigure";
+
+# Attention (II)：RNN 中的 Self-Attention
+
+[上一章](/notes/ml/llms/seq2seq-bahdanau-attention/) 的 Attention 接在 Encoder 和 Decoder 之间：Decoder 回头读原文的状态。这一章把同一套计算用在一条 RNN 自己身上：读到第 $t$ 个词时，回头读这条序列前面已经算出的 hidden state。
+
+这一章讲的是课堂上的简化版：SimpleRNN + Self-Attention。它的学术来源是 Cheng、Dong 和 Lapata 2016 年的论文 *Long Short-Term Memory-Networks for Machine Reading*（EMNLP 2016）。论文的模型建立在 LSTM 上，叫 LSTMN，把这个机制称为 intra-attention；课堂为了讲清思路把 LSTM 换成了 SimpleRNN。下面的公式和图都是课堂简化版，不是论文模型的完整形式，两者的差别在第三节末尾说明。
+
+## 回顾：普通 RNN 为什么可能遗忘较早信息？
+
+**一句话：普通 RNN 每一步只直接接上一个状态，更早的信息要一站一站传过来。**
+
+普通 SimpleRNN 从左到右读 token。每个时间步用当前输入 $x_t$ 和上一个 hidden state $h_{t-1}$ 算出新的 hidden state：
+
+$$
+h_t = \tanh\left(A\,[\,x_t;\, h_{t-1}\,] + b\right)
+$$
+
+$[\,x_t;\, h_{t-1}\,]$ 表示把两个向量拼接起来，$A$ 和 $b$ 是 RNN 的权重和偏置，每个时间步用的是同一套（和 [RNN 那一页](/notes/ml/llms/rnn/) 的 $W_{xh}$、$W_{hh}$ 是同一回事，只是拼成了一个矩阵）。
+
+例如输入 `The FBI is chasing a criminal`，处理第三个词 is 时：
+
+$$
+h_3 = \tanh\left(A\,[\,x_3;\, h_2\,] + b\right)
+$$
+
+$h_2$ 里可能带着 $h_1$ 的信息，但这一步不能直接重新读 $h_1$。较早的输入要靠状态一次次递推才能传到当前，隔得越远，传过来的越少，长距离依赖因此难学。这不等于「RNN 一定会把过去全忘掉」，只是说它没有一条直达的路。
+
+<RnnVsAttentionRnnFigure />
+
+## Self-Attention 的想法：让 RNN 不只依赖上一步状态
+
+**一句话：把「只读上一个状态」换成「读前面所有状态的加权汇总」。**
+
+对比两条公式。普通 RNN：
+
+$$
+h_t = \tanh\left(A\,[\,x_t;\, h_{t-1}\,] + b\right)
+$$
+
+课堂简化版的 SimpleRNN + Self-Attention：
+
+$$
+\boxed{\,h_t = \tanh\left(A\,[\,x_t;\, c_{t-1}\,] + b\right)\,}
+$$
+
+唯一的改动是 $h_{t-1}$ 换成了 $c_{t-1}$。$c_{t-1}$ 是到第 $t-1$ 步为止已经算出的全部 hidden state 的加权汇总：
+
+$$
+\boxed{\,c_{t-1} = \sum_{i=1}^{t-1} \alpha_{t-1,i}\, h_i\,}, \qquad \sum_{i=1}^{t-1} \alpha_{t-1,i} = 1
+$$
+
+$\alpha_{t-1,i}$ 是第 $i$ 个历史状态分到的权重，下标的第一个数表示这组权重是在第几步算出来的。
+
+两个量的区别：
+
+- $h_{t-1}$：上一步 RNN 对过去的压缩记录，只有一份，怎么压的已经定了。
+- $c_{t-1}$：从多个历史状态里按当前的需要重新分配关注程度得到的汇总。
+
+把 $h_{t-1}$ 换成 $c_{t-1}$，不是说 Attention 能无损保存全部信息，而是给了模型一条更直接的路去取历史信息。
+
+## Step-by-Step：从 h₁ 到 h₃，理解 c₀、c₁、c₂
+
+**一句话：每算出一个新的 h，就把到目前为止的 h 汇总成一个 c，留给下一步用。**
+
+<UnrolledSelfAttentionFigure />
+
+按时间顺序：
+
+1. 开始时有一个初始 context $c_0$。这里把它取成零向量，这是演示用的假设。
+2. 读入 $x_1$：$h_1 = \tanh(A\,[\,x_1;\, c_0\,] + b)$。
+3. 用目前能看到的 $h_1$ 算 $c_1$。只有一个位置可看，softmax 的权重只能是 1，所以 $c_1 = h_1$。
+4. 读入 $x_2$：$h_2 = \tanh(A\,[\,x_2;\, c_1\,] + b)$。
+5. 用 $h_1$、$h_2$ 算 $c_2 = \alpha_{2,1} h_1 + \alpha_{2,2} h_2$。
+6. 读入 $x_3$：$h_3 = \tanh(A\,[\,x_3;\, c_2\,] + b)$。
+7. 以此类推。
+
+最容易想错的一点：**$c_2$ 是为了算下一步的 $h_3$ 而准备的，它只来自 $h_1$ 和 $h_2$。** $h_3$ 不在生成 $c_2$ 的那组状态里；如果在，$h_3$ 就要依赖一个包含它自己的量，成了循环。图里没有从 $h_3$ 指回 $c_2$ 的箭头。
+
+> **课堂简化版和论文的差别。** 论文的 LSTMN 基于 LSTM：每个 token 除了 hidden state 还有一个 memory cell，Attention 对两者都做加权汇总，再送进 LSTM 的门。论文里读第 $t$ 个词时的打分还用到当前输入 $x_t$，形式是 $a_i^t = v^{\top}\tanh(W_h h_i + W_x x_t + W_{\tilde h}\tilde h_{t-1})$，汇总范围是 $i = 1$ 到 $t-1$。本页的 $h_t = \tanh(A[x_t; c_{t-1}] + b)$ 是课堂为了教学做的简化，保留了「读前面所有状态的加权汇总」这个核心，去掉了门和 memory cell。
+
+## Attention 的内部三步：Score → Softmax → Weighted Sum
+
+**一句话：和上一章完全一样的三步，只是被打分的换成了这条序列自己的历史状态。**
+
+$$
+\boxed{\ \text{Score} \rightarrow \text{Softmax} \rightarrow \text{Weighted Sum}\ }
+$$
+
+算出 $h_t$ 之后，为了得到 $c_t$：
+
+$$
+e_{t,i} = \operatorname{align}\left(h_i,\ \text{query}_t\right), \qquad \alpha_{t,i} = \frac{\exp(e_{t,i})}{\sum_{k=1}^{t} \exp(e_{t,k})}
+$$
+
+$$
+c_t = \sum_{i=1}^{t} \alpha_{t,i}\, h_i
+$$
+
+$e_{t,i}$ 是第 $i$ 个历史状态的分数，$\text{query}_t$ 是第 $t$ 步用来发问的向量，$\operatorname{align}$ 是打分函数。课堂只讲了 $c_t$ 的用途和时间展开，没有给出 $\operatorname{align}$ 的具体公式，所以这里把它当成一个抽象的函数。
+
+<ScoreSoftmaxContextFigure />
+
+一个数值例子，假设算 $c_2$ 时两个分数是
+
+$$
+[\,e_{2,1},\ e_{2,2}\,] = [\,1.2,\ 0.4\,]
+$$
+
+softmax 之后：
+
+$$
+[\,\alpha_{2,1},\ \alpha_{2,2}\,] = \operatorname{softmax}([\,1.2,\ 0.4\,]) \approx [\,0.690,\ 0.310\,]
+$$
+
+$$
+\boxed{\,c_2 \approx 0.690\, h_1 + 0.310\, h_2\,}
+$$
+
+这组分数是假设的教学示例，不代表实际模型的训练结果。注意不是只选权重最大的那个状态：$h_2$ 的权重小，但仍然占了约 31%。
+
+<details>
+<summary>可选补充：一种可以实现的打分方式</summary>
+
+如果想要一个能动手算的 $\operatorname{align}$，可以用投影后做点积：
+
+$$
+q_t = W_Q\, h_t, \qquad k_i = W_K\, h_i, \qquad e_{t,i} = q_t^{\top} k_i \quad (1 \le i \le t)
+$$
+
+先有 $h_t$，再算 $c_t$，留给下一个时间步。同一对 $W_Q$、$W_K$ 在所有历史位置和所有时间步上共用。这只是一种便于理解「同一套参数、不同的输入、不同的权重」的写法，不是课堂给出的打分定义，也不是 Cheng 等人论文里的公式。
+
+</details>
+
+## Attention 的 Weight 能学习吗？参数共享吗？
+
+**一句话：打分函数的参数是学出来的、共享的；分数、权重和 context 是每一步现算的。**
+
+> **Attention 打分机制中的参数是通过任务 Loss 学到的；每一步的 Score、Softmax 权重 α、Context c 则根据输入动态计算。一个注意力模块的参数通常跨位置、跨 Time Step 共享。**
+
+| 对象 | 是可训练参数吗？ | 说明 |
+| --- | --- | --- |
+| RNN 的 $A,\ b$ | 是 | 所有时间步复用同一套 |
+| $\operatorname{align}$ 的参数 $\theta_{att}$ | 是（打分函数可学习时） | 和历史状态、查询一起决定分数 |
+| 补充示例里的 $W_Q,\ W_K$ | 是 | 只属于上面那个可选的点积示例 |
+| $e_{t,i}$ | 否 | 由当前输入现算的分数 |
+| $\alpha_{t,i}$ | 否 | 分数经 softmax 得到 |
+| $c_t$ | 否 | 加权和 |
+
+$h_1$ 和 $h_2$ 用的是同一个 $\operatorname{align}(\cdot\,;\theta_{att})$；送进去的状态不同，分数和权重就不同。训练时，任务的 Loss 对 $\theta_{att}$ 求梯度，各个时间步、各个历史位置的梯度加在一起，更新这同一套参数。不需要给每个历史位置单独学一套矩阵。梯度怎么穿过 $c$、$\alpha$、$e$ 传回去，和 [上一章的训练一节](/notes/ml/llms/seq2seq-bahdanau-attention/) 是同一回事。
+
+<SharedAlignParamsFigure />
+
+## 句子案例：The FBI is chasing a criminal（逐词关注历史）
+
+**一句话：读到每个词时，模型可以按需要回看前面任何一个已读的词，不必只看紧挨着的那个。**
+
+按顺序读 `The FBI is chasing a criminal`。读到某个词时，前面的词都已经有了 hidden state，可以回看；后面的词还没读到，看不到。
+
+<SentenceHistoryFigure />
+
+图里用的模拟权重如下，每一行和为 1：
+
+| 当前输入 | 可访问的历史位置 | 模拟权重 |
+| --- | --- | --- |
+| is（$t = 3$） | The, FBI | 0.30, 0.70 |
+| chasing（$t = 4$） | The, FBI, is | 0.10, 0.70, 0.20 |
+| a（$t = 5$） | The, FBI, is, chasing | 0.05, 0.25, 0.15, 0.55 |
+| criminal（$t = 6$） | The, FBI, is, chasing, a | 0.04, 0.20, 0.10, 0.55, 0.11 |
+
+比如读到 chasing 时，这组数把最大的权重放在隔了一个词的 FBI 上，而不是紧挨着的 is：「谁在追」比「is」更有用。这些数字是为了讲解设定的，不是论文或任何模型的实际输出，也不保证是这句话语义上唯一正确的对应；它们和上一节 $c_2 \approx 0.690\,h_1 + 0.310\,h_2$ 那个例子也是各自独立的两组示意值。
+
+## 和 Bahdanau Attention 比较：跨序列 vs 同一序列
+
+**一句话：计算一样，接线不同。**
+
+| 对照维度 | Bahdanau Attention（上一章） | RNN Self-Attention（本章） |
+| --- | --- | --- |
+| Attention 用在哪里 | Encoder 与 Decoder 之间 | 同一条 RNN 序列内部 |
+| 被读的状态来自哪里 | Encoder 的全部 $h_i$ | 当前时刻之前已经算出的 $h_i$ |
+| 查询用来做什么 | 给当前 Decoder step 找相关的源位置 | 给下一个 RNN 状态更新找相关的历史 |
+| Context 的用途 | 参与 Decoder 的状态更新和输出 | 参与新的 RNN hidden state 的更新 |
+| 核心计算 | Score → Softmax → Weighted Sum | 相同 |
+
+<BahdanauVsSelfFigure />
+
+> **Bahdanau Attention 是跨 Encoder / Decoder 的检索；本章是同一条 RNN 序列内部对历史状态的检索。二者可以用相似的数学机制，但接入网络的位置不同。**
+
+「Self」的意思是查询和被读的状态属于同一条序列。它不表示每个位置都能看到整句：这里的 RNN 从左往右读，每一步只能看已经算出来的历史状态，看不到后面的词。
+
+## 代价与限制：额外 O(n²) 对齐计算，但仍是顺序 RNN
+
+**一句话：回看历史不是免费的，而且 RNN 还是得一步一步算。**
+
+一条长度为 $n$ 的序列，每一步都给前面所有的 hidden state 打分，分数的个数是：
+
+$$
+0 + 1 + 2 + \cdots + (n-1) = \frac{n(n-1)}{2} = O(n^2)
+$$
+
+<HistoryTriangleFigure />
+
+这个数只统计随序列长度增长的分数个数，不等于实际运行时间；每个分数的成本还受隐藏维度和打分函数结构的影响。
+
+局限：
+
+1. **仍然是顺序计算。** $h_t$ 要等 $c_{t-1}$，$c_{t-1}$ 要等 $h_{t-1}$。加了 Attention 之后 RNN 没有变成可以并行的编码器。
+2. **要多存、多算。** 历史状态都得留着；对所有历史位置打分的计算量随长度二次增长。
+3. **不是保证。** Self-Attention 缓解了取历史信息的困难，但不保证模型绝不遗忘，学出来的权重也不是唯一的语言学解释。
+
+## 章节总结与衔接
+
+传统 RNN 计算 $h_t$ 时直接依赖 $h_{t-1}$，历史信息要经过多次状态更新才能传到当前。课堂里的 SimpleRNN + Self-Attention 在每一步汇总过去的 hidden state，得到动态的 context $c_{t-1}$，再和当前输入 $x_t$ 一起更新 $h_t$。Attention 的打分参数可以学习，并且跨位置共享；attention weight 随输入和时间步动态变化。这让模型能更直接地利用历史信息，但 RNN 仍然按时间顺序计算，Attention 本身也带来额外开销。
+
+要记住的五句话：
+
+1. 改动只有一处：$h_t = \tanh(A[x_t; h_{t-1}] + b)$ 里的 $h_{t-1}$ 换成 $c_{t-1}$。
+2. $c_{t-1} = \sum_{i=1}^{t-1} \alpha_{t-1,i} h_i$，只来自已经算出的历史状态；$c_2$ 里没有 $h_3$。
+3. 权重还是 Score → Softmax → Weighted Sum 算出来的，所有历史状态都参与。
+4. 打分参数只有一套，跨位置、跨时间步共享，由任务的 Loss 训练；$e$、$\alpha$、$c$ 每步现算。
+5. 代价是约 $n(n-1)/2$ 次打分，而且计算仍然是顺序的。
+
+下一章将讨论如何进一步摆脱递归结构：[Attention (III)：从 Cross-Attention 到 Self-Attention Layer](/notes/ml/llms/attention-layer/)。
+
+## Further reading
+
+- [Long Short-Term Memory-Networks for Machine Reading](https://aclanthology.org/D16-1053/)（Cheng, Dong, Lapata，EMNLP 2016）：本章机制的来源。论文的模型是基于 LSTM 的 LSTMN，把这个机制叫 intra-attention；例句 The FBI is chasing a criminal on the run 出自论文的图 1。
+- [Attention (I)：从 Seq2Seq 到 Bahdanau Attention](/notes/ml/llms/seq2seq-bahdanau-attention/)：三步计算、参数共享和梯度路径在那一章讲得更细。
