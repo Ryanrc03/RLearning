@@ -800,7 +800,7 @@ export const noteEntries: NoteEntry[] = [
     slug: "ml/llms/overview",
     title: "LLMs Overview",
     description:
-      "这一章回答「模型怎么读一串 token」：从 RNN 的递推到 attention 的矩阵，再到一层的全部零件、训练目标和生成策略，最后把 BERT 微调到自己的任务上。十四页的问题链和阅读顺序。",
+      "这一章回答「模型怎么读一串 token」：从 RNN 的递推到 attention 的矩阵，再到一层的全部零件、训练目标和生成策略，最后把 BERT 微调到自己的任务上。十六页的问题链和阅读顺序。",
     categoryId: "ml",
     category: "ML & LLM",
     section: "LLMs",
@@ -871,6 +871,21 @@ export const noteEntries: NoteEntry[] = [
     series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 4 },
   },
   {
+    slug: "ml/llms/transformer-architecture",
+    title: "Attention (IV)：从 Multi-Head Attention 到完整 Transformer",
+    description:
+      "用上一章的 Attention Layer 一块块搭出 2017 年的 Transformer：Multi-Head 与 W_O、除以 √d_k、FFN、Add & Norm、位置编码、Encoder × 6、Decoder 的 Masked Self-Attention 与 Cross-Attention、词表投影、训练与逐 token 生成。七张图加一张从 512 × m 到 |Vocab| × t 的形状总表。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "LLMs",
+    created: "2026-11-23",
+    updated: "2026-11-23",
+    status: "growing",
+    readingMinutes: 18,
+    tags: ["ml-fundamentals", "llms", "transformer", "attention", "multi-head", "interactive"],
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 5 },
+  },
+  {
     slug: "ml/llms/transformer-vs-rnn",
     title: "Transformer 为什么比 RNN 更容易并行？",
     description:
@@ -883,7 +898,7 @@ export const noteEntries: NoteEntry[] = [
     status: "growing",
     readingMinutes: 12,
     tags: ["transformer", "rnn", "self-attention", "parallelism", "causal-mask", "rope", "interactive"],
-    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 5 },
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 6 },
   },
   {
     slug: "ml/llms/attention-qkv",
@@ -898,7 +913,7 @@ export const noteEntries: NoteEntry[] = [
     status: "growing",
     readingMinutes: 11,
     tags: ["ml-fundamentals", "llms", "transformer", "self-attention", "cross-attention", "interactive"],
-    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 6 },
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 7 },
   },
   {
     slug: "ml/llms/multi-head-attention",
@@ -913,7 +928,7 @@ export const noteEntries: NoteEntry[] = [
     status: "seed",
     readingMinutes: 5,
     tags: ["ml-fundamentals", "llms", "interactive"],
-    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 7 },
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 8 },
   },
   {
     slug: "ml/llms/transformer-block",
@@ -928,7 +943,7 @@ export const noteEntries: NoteEntry[] = [
     status: "seed",
     readingMinutes: 6,
     tags: ["ml-fundamentals", "llms", "interactive"],
-    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 8 },
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 9 },
   },
   {
     slug: "ml/llms/pretraining-objectives",
@@ -943,7 +958,7 @@ export const noteEntries: NoteEntry[] = [
     status: "seed",
     readingMinutes: 6,
     tags: ["ml-fundamentals", "llms", "interactive"],
-    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 9 },
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 10 },
   },
   {
     slug: "ml/llms/deepseek-moe",
@@ -958,7 +973,7 @@ export const noteEntries: NoteEntry[] = [
     status: "growing",
     readingMinutes: 14,
     tags: ["ml-fundamentals", "llms", "DeepSeekMoE", "moe", "interactive"],
-    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 10 },
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 11 },
   },
   {
     slug: "ml/llms/decoding-strategies",
@@ -973,7 +988,22 @@ export const noteEntries: NoteEntry[] = [
     status: "seed",
     readingMinutes: 7,
     tags: ["ml-fundamentals", "llms", "interactive"],
-    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 11 },
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 12 },
+  },
+  {
+    slug: "ml/llms/bert-pretraining",
+    title: "BERT：双向 Encoder、MLM / NSP 预训练与 Fine-tuning",
+    description:
+      "跟着课程从头讲 BERT：只留 Transformer Encoder，用 MLM 猜回被遮住的 token、用 NSP 判断两段是否相邻，两个任务共用一个 Encoder、loss 相加；再讲标签为什么不用人工标注、Base 与 Large 的尺寸，以及从同一份预训练权重出发各自 fine-tune。七张图，每个 loss 都有可核对的数值例子。",
+    categoryId: "ml",
+    category: "ML & LLM",
+    section: "LLMs",
+    created: "2026-11-23",
+    updated: "2026-11-23",
+    status: "growing",
+    readingMinutes: 15,
+    tags: ["ml-fundamentals", "llms", "BERT", "pre-training", "fine-tuning", "interactive"],
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 13 },
   },
   {
     slug: "ml/llms/bert",
@@ -988,7 +1018,7 @@ export const noteEntries: NoteEntry[] = [
     status: "growing",
     readingMinutes: 15,
     tags: ["BERT", "llms", "transformer", "pre-training", "fine-tuning", "GPT", "interactive"],
-    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 12 },
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 14 },
   },
   {
     slug: "ml/llms/bert-vs-macbert",
@@ -1003,7 +1033,7 @@ export const noteEntries: NoteEntry[] = [
     status: "seed",
     readingMinutes: 5,
     tags: ["BERT", "MacBERT", "llms", "pre-training", "chinese", "ml-fundamentals", "interactive"],
-    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 13 },
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 15 },
   },
   {
     slug: "ml/llms/bert-finetuning",
@@ -1018,7 +1048,7 @@ export const noteEntries: NoteEntry[] = [
     status: "growing",
     readingMinutes: 16,
     tags: ["BERT", "MacBERT", "fine-tuning", "llms", "classification", "interactive"],
-    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 14 },
+    series: { id: "ml-llms", title: "LLMs：模型怎么读一串 token", order: 16 },
   },
   {
     slug: "ml/llm-engineering/overview",

@@ -592,6 +592,9 @@ button.mod-card { cursor: pointer; }
   .bah-note .viz-head h4 { color: var(--ink); }
   .bah-note .viz-narr, .bah-note .viz-btn { background: var(--paper); color: var(--ink); }
   .bah-note .viz-btn { border-color: var(--vline); }
+  .bah-note .viz-bar-track { background: var(--vline); }
+  .bah-note .viz th { color: var(--muted); }
+  .bah-note .viz-slider input[type="range"] { accent-color: var(--bah-c1); }
   .bah-note .viz-btn.is-on { background: var(--accent-soft); border-color: #8f83e0; }
 }
 @media (prefers-reduced-motion: reduce) {

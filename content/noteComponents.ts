@@ -69,12 +69,14 @@ import Rnn from "@/content/ml/llms/rnn.mdx";
 import Seq2seqBahdanauAttention from "@/content/ml/llms/seq2seq-bahdanau-attention.mdx";
 import RnnSelfAttention from "@/content/ml/llms/rnn-self-attention.mdx";
 import AttentionLayer from "@/content/ml/llms/attention-layer.mdx";
+import TransformerArchitecture from "@/content/ml/llms/transformer-architecture.mdx";
 import AttentionQkv from "@/content/ml/llms/attention-qkv.mdx";
 import MultiHeadAttention from "@/content/ml/llms/multi-head-attention.mdx";
 import TransformerBlock from "@/content/ml/llms/transformer-block.mdx";
 import PretrainingObjectives from "@/content/ml/llms/pretraining-objectives.mdx";
 import DeepSeekMoE from "@/content/ml/llms/deepseek-moe.mdx";
 import DecodingStrategies from "@/content/ml/llms/decoding-strategies.mdx";
+import BertPretraining from "@/content/ml/llms/bert-pretraining.mdx";
 import Bert from "@/content/ml/llms/bert.mdx";
 import BertVsMacbert from "@/content/ml/llms/bert-vs-macbert.mdx";
 import BertFinetuning from "@/content/ml/llms/bert-finetuning.mdx";
@@ -228,12 +230,14 @@ export const noteComponents = {
   "ml/llms/seq2seq-bahdanau-attention": Seq2seqBahdanauAttention,
   "ml/llms/rnn-self-attention": RnnSelfAttention,
   "ml/llms/attention-layer": AttentionLayer,
+  "ml/llms/transformer-architecture": TransformerArchitecture,
   "ml/llms/attention-qkv": AttentionQkv,
   "ml/llms/multi-head-attention": MultiHeadAttention,
   "ml/llms/transformer-block": TransformerBlock,
   "ml/llms/pretraining-objectives": PretrainingObjectives,
   "ml/llms/deepseek-moe": DeepSeekMoE,
   "ml/llms/decoding-strategies": DecodingStrategies,
+  "ml/llms/bert-pretraining": BertPretraining,
   "ml/llms/bert": Bert,
   "ml/llms/bert-vs-macbert": BertVsMacbert,
   "ml/llms/bert-finetuning": BertFinetuning,

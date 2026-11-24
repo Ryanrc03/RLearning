@@ -56,3 +56,42 @@
 | G6 | `SelfAttentionHeatmapFigure` | The cat eats fish 的 4 × 4 热力图与选中行的加权和 | 选 Query |
 
 颜色：Query 橙、Key 绿、Value 蓝、权重紫、输出金，输入与投影矩阵用中性色。紫色是新加的 `--bah-c5` / `--bah-t5` 令牌。热力图 `Heatmap.tsx` 由 G3 和 G6 共用。
+
+## 第四章：Attention (IV)：从 Multi-Head Attention 到完整 Transformer
+
+已按第四份交接文档确定并实施。一篇完整长文，位置编码和 √d_k 并入主线，没有另建页面。不含 BERT / GPT、RoPE、FlashAttention 专章，不加 Quiz。已有的 `multi-head-attention`、`transformer-block`、`attention-qkv`、`transformer-vs-rnn` 没有改动，正文链接过去。
+
+- 路由：`/notes/ml/llms/transformer-architecture/`，LLMs 章节第 5 个节点。
+- 正文：`content/ml/llms/transformer-architecture.mdx`，十二节。列向量写法贯穿全文（每个 token 一列，Score = KᵀQ）；行向量代码的转置关系在形状总表后说明。课堂主线与补充的原论文细节在开头列出，并在各节标注。
+- 数字：`lib/ml/transformerArch.ts`（测试 `tests/transformer-arch.test.ts`）。所有形状由 `BASE` 配置推出；除数实验、位置编码、因果 mask 都是算出来的；测试用固定种子的随机数验证了 Var(qᵀk) ≈ d_k。
+
+| 图 | 组件（`components/visualization/ml/llms/transformer-arch/`） | 画什么 | 交互 |
+| --- | --- | --- | --- |
+| A | `MultiHeadFigure` | X → h 个独立 head → Concat → W_O | head 数 1 / 2 / 4 / 8 |
+| B | `ScaledDivisorFigure` | softmax([8/c, 0]) 的两条概率条 | 除数滑杆与预设 |
+| C | `PositionalEncodingFigure` | 两个塔入口的数据流；sin / cos 热力图 | 选位置 0 … 7 |
+| D | `EncoderBlockFigure` | Self-Attn → Add & Norm → FFN → Add & Norm；× 6 堆叠 | 三个聚焦按钮 / 重置 |
+| E | `DecoderBlockFigure` | 三个子层，U 只接 Cross-Attn；4 × 4 因果 mask | 选 Query 1 … 4 |
+| F | `TransformerFigure` | 两个塔，U 连到每个 Decoder Block | 三个聚焦按钮 / 重置 |
+| G | `StageShapeFigure` | 三处 Attention 的 Q / K / V / Score / 输出形状 | 三个阶段 |
+
+## BERT 课程章节：BERT：双向 Encoder、MLM / NSP 预训练与 Fine-tuning
+
+已按 BERT 交接文档确定并实施。新建一页，没有改写已有的 `ml/llms/bert`：那一页是按论文写的模型长文，也是 AGENTS.md 指定的模型长文参考模板，并被五个页面链接。两页互相链接，新页讲课程主线，旧页保留论文细节。不加 Quiz；80/10/10、三种 embedding、消融、RoBERTa 等不展开。
+
+- 路由：`/notes/ml/llms/bert-pretraining/`，LLMs 章节里排在 `bert` 之前。
+- 正文：`content/ml/llms/bert-pretraining.mdx`。BERT 是什么 → Encoder 的输入输出 → MLM → NSP → 联合预训练 → 数据与成本 → Pre-training → Fine-tuning（课程之外的补充，正文标明）。
+- 校注：课件的 BERT Large 235M 有误，页面写 340M 并注明以论文为准。
+- 数字：`lib/ml/bertPretrain.ts`（测试 `tests/bert-pretrain.test.ts`）。所有概率都是假设的教学值，loss 由它们算出：−ln 0.75 ≈ 0.288，−ln 0.8 ≈ 0.223，联合例子 0.308 + 0.223 = 0.531（课件的三项直接相加为 0.839）。
+
+| 图 | 组件（`components/visualization/ml/llms/bert-course/`） | 画什么 | 交互 |
+| --- | --- | --- | --- |
+| 1 | `BertVsTransformerFigure` | 原始 Encoder–Decoder 与 Encoder-only 的 BERT | 两个聚焦按钮 / 重置 |
+| 2 | `EncoderIoFigure` | 6 个 token → Embedding → Encoder → u₁…u₆ | 选一个输出位置 |
+| 3 | `MlmFigure` | [MASK] → u_M → MLM Head → softmax → CE → 梯度 | 遮 cat 或 mat |
+| 4 | `NspFigure` | [CLS] A [SEP] B [SEP] → h_CLS → 二分类 → BCE | 正例 / 负例 |
+| 5 | `JointPretrainFigure` | 一个 Encoder、NSP 头与共用的 MLM 头、loss 汇总、梯度回传 | 前向 / 反向 / 重置 |
+| 6 | `BertSizeFigure` | Base 与 Large 的四项尺寸 | 静态 |
+| 7 | `PretrainToFinetuneFigure` | 预训练 → checkpoint → 三个各自微调的模型 | 阶段与三个任务 |
+
+语义色：输入中性，Encoder 蓝，MLM 紫，NSP 橙，隐藏向量金，下游任务头绿，loss 与梯度灰色虚线。
