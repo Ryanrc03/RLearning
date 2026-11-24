@@ -76,6 +76,7 @@ import TransformerBlock from "@/content/ml/llms/transformer-block.mdx";
 import PretrainingObjectives from "@/content/ml/llms/pretraining-objectives.mdx";
 import DeepSeekMoE from "@/content/ml/llms/deepseek-moe.mdx";
 import DecodingStrategies from "@/content/ml/llms/decoding-strategies.mdx";
+import BertPretraining from "@/content/ml/llms/bert-pretraining.mdx";
 import Bert from "@/content/ml/llms/bert.mdx";
 import BertVsMacbert from "@/content/ml/llms/bert-vs-macbert.mdx";
 import BertFinetuning from "@/content/ml/llms/bert-finetuning.mdx";
@@ -236,6 +237,7 @@ export const noteComponents = {
   "ml/llms/pretraining-objectives": PretrainingObjectives,
   "ml/llms/deepseek-moe": DeepSeekMoE,
   "ml/llms/decoding-strategies": DecodingStrategies,
+  "ml/llms/bert-pretraining": BertPretraining,
   "ml/llms/bert": Bert,
   "ml/llms/bert-vs-macbert": BertVsMacbert,
   "ml/llms/bert-finetuning": BertFinetuning,

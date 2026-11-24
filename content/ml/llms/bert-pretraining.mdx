@@ -1,0 +1,337 @@
+import BertVsTransformerFigure from "@/components/visualization/ml/llms/bert-course/BertVsTransformerFigure";
+import EncoderIoFigure from "@/components/visualization/ml/llms/bert-course/EncoderIoFigure";
+import MlmFigure from "@/components/visualization/ml/llms/bert-course/MlmFigure";
+import NspFigure from "@/components/visualization/ml/llms/bert-course/NspFigure";
+import JointPretrainFigure from "@/components/visualization/ml/llms/bert-course/JointPretrainFigure";
+import BertSizeFigure from "@/components/visualization/ml/llms/bert-course/BertSizeFigure";
+import PretrainToFinetuneFigure from "@/components/visualization/ml/llms/bert-course/PretrainToFinetuneFigure";
+
+# BERT：双向 Encoder、MLM / NSP 预训练与 Fine-tuning
+
+[上一章](/notes/ml/llms/transformer-architecture/) 搭出了完整的 Transformer。BERT（Devlin 等，2019）只拿了其中的 Encoder，换了一种训练方法：先在大量没有标注的文本上做两个「自己出题、自己对答案」的任务，再把学到的 Encoder 拿去做各种具体任务。
+
+这一章按这条线走：BERT 是什么 → 复习 Encoder 的输入输出 → MLM → NSP → 两个任务怎样共用一个 Encoder → 数据和成本 → 从预训练到 fine-tuning。
+
+主线跟的是课程的讲法，最后一节「Pre-training → Fine-tuning」是在课程之外补充的。想看论文层面的细节（输入的三种 embedding、掩码的具体替换规则、和 GPT 的逐项对比、一段 Hugging Face 代码），见 [BERT：双向编码器怎样读懂一句话](/notes/ml/llms/bert/)。
+
+## BERT 是什么？
+
+**一句话：BERT 是一摞 Transformer Encoder，用两个预训练任务教会它读懂上下文。**
+
+BERT 是 **B**idirectional **E**ncoder **R**epresentations from **T**ransformers 的缩写。名字里已经说了三件事：
+
+- **Encoder**：主干是 Transformer Encoder，不是完整的 Encoder–Decoder。
+- **Bidirectional**：Encoder 里的 Self-Attention 没有因果 mask，一个 token 可以同时看它左边和右边的上下文。原始 Transformer 的 Decoder 为了逐词生成，只能看左边。
+- **Representations**：它的产出是每个位置的向量表示，不是生成出来的句子。
+
+原始 BERT 的预训练有两个学习目标：
+
+1. **MLM**（Masked Language Modeling）：预测被遮住的位置原来是哪个 token。
+2. **NSP**（Next Sentence Prediction）：判断两个文本片段在原始语料里是不是前后相邻。
+
+<BertVsTransformerFigure />
+
+不要把 BERT 理解成「把 Transformer 的 Decoder 删掉」就完了。结构上确实只剩 Encoder，但 BERT 的核心在预训练目标和数据的构造方式，也就是下面三节的内容。
+
+## Revisit Transformer Encoder：输入与输出
+
+**一句话：进去几个 token，出来几个向量，每个向量都带着整句的上下文。**
+
+Encoder Block 的内部（Self-Attention、FFN、residual、LayerNorm）上一章已经讲过，这里只复习它的输入和输出。用课程的例句 `the cat sat on the mat`。6 个 token 经过 Embedding Layer 变成 6 个向量：
+
+$$
+X = [\,x_1,\ x_2,\ \ldots,\ x_6\,]
+$$
+
+经过 BERT Encoder，得到 6 个位置一一对应的输出：
+
+$$
+U = \operatorname{BERTEncoder}(X) = [\,u_1,\ u_2,\ \ldots,\ u_6\,]
+$$
+
+<EncoderIoFigure />
+
+三点：
+
+- 输入 6 个位置，输出仍然是 6 个位置。
+- 每个 $u_i$ 融合了整句的信息，它不等于第 $i$ 个 token 的 embedding。同一个词放在不同的句子里，得到的 $u_i$ 不同。
+- BERT 的 Encoder 和上一章的 Transformer Encoder 是同一类东西：双向的 Self-Attention，多层堆叠。
+
+$u_i$ 是隐藏向量，还不是对词的预测。要预测什么，得在它上面再接一个头。
+
+## MLM：Masked Language Modeling
+
+**一句话：把句子里的一个 token 遮住，让模型根据两边的上下文把它猜回来。**
+
+### 为什么要 Mask？
+
+想让一个双向的模型从文本里学东西，最直接的想法是「预测每个位置的词」。但双向的 Encoder 能看到整句，包括要预测的那个词本身：答案就摆在输入里，模型照抄就行，什么也学不到。
+
+MLM 的办法是先把选中的位置改掉，再让模型预测它**原来**是什么：
+
+| | |
+| --- | --- |
+| 原句 | the **cat** sat on the mat |
+| 输入 | the **[MASK]** sat on the mat |
+| 目标 | cat |
+
+这是最直观的做法：把选中的位置换成 `[MASK]`。课件提到实际做的时候还有一些技巧（randomly mask words, with some tricks），真实预训练的数据构造更细一些，这里不展开。另外课件说的是 masked word，严格地说 BERT 预测的是被选中的 token 位置，一个词可能被切成不止一个 token。
+
+### 数据怎样经过 Encoder？
+
+遮过的输入 $\widetilde X$ 照常经过 Embedding 和 Encoder：
+
+$$
+\widetilde X \xrightarrow{\ \text{BERTEncoder}\ } U
+$$
+
+取原来 cat 所在位置（第 2 个）的输出 $u_M$，送进一个 MLM Head，得到词表上的一列分数：
+
+$$
+u_M \xrightarrow{\ \text{MLM Head}\ } z \in \mathbb{R}^{|\mathcal V|}
+$$
+
+$|\mathcal V|$ 是词表大小，$z$ 是 logits。过 softmax：
+
+$$
+p = \operatorname{Softmax}(z)
+$$
+
+$p$ 就是「这个位置原来是哪个 token」的概率分布。
+
+<MlmFigure />
+
+注意两件事。Encoder 给每个位置都输出了向量，但 MLM 只在被选中的位置上算 loss。另外，词不是从 Encoder 里直接出来的：Encoder 给的是向量，MLM Head 才把向量变成词表上的分布。
+
+### 如何计算 MLM Loss？
+
+目标是 cat，真实标签是一个 one-hot 向量 $y$，只有 cat 那一维是 1。[交叉熵](/notes/ml/classifiers/softmax-cross-entropy/) 是：
+
+$$
+\mathcal L_{\text{MLM},M} = -\sum_{v \in \mathcal V} y_v \log p_v = -\log p_{\text{cat}}
+$$
+
+假设模型的预测是这样（数值是假设的）：
+
+| Token | 预测概率 |
+| --- | ---: |
+| cat | 0.75 |
+| dog | 0.15 |
+| boy | 0.08 |
+| car | 0.02 |
+
+$$
+\mathcal L = -\ln 0.75 \approx 0.288
+$$
+
+梯度的路径：$\mathcal L_{\text{MLM}} \to$ MLM Head $\to$ BERT Encoder $\to$ Embeddings。Optimizer 更新 MLM Head 和 Encoder 里的参数，让正确 token 的概率变高。
+
+一条序列里通常不止遮一个位置。设 $M$ 是被选中的位置的集合，$x_i$ 是位置 $i$ 原来的 token：
+
+$$
+\mathcal L_{\text{MLM}} = \frac{1}{|M|} \sum_{i \in M} -\log P\left(x_i \mid \widetilde X\right)
+$$
+
+## NSP：Next Sentence Prediction
+
+**一句话：给两段文字，判断第二段是不是原文里紧跟着第一段的那一段。**
+
+### NSP 在预测什么？
+
+给定两个文本片段 A 和 B，预测 B 是否在原始语料里真的跟在 A 后面。它问的是「是否相邻」，不是泛泛的「两句话意思像不像」。
+
+课程的例子，A 是 `calculus is a branch of math`：
+
+| | Sentence B | 标签 |
+| --- | --- | --- |
+| 正例 | it was developed by newton and leibniz | IsNext |
+| 负例 | panda is native to south central china | NotNext |
+
+正例的 B 取语料里紧跟 A 的那一句，负例的 B 从语料里随机取。两者各占约一半。标签是构造数据时自动得到的，不需要人逐条标注。
+
+### 输入格式与特殊 Token
+
+两个片段拼成一条序列：
+
+`[CLS] Sentence A [SEP] Sentence B [SEP]`
+
+- `[CLS]`：放在最前面。它在 Encoder 最后一层的隐藏向量用来做整条序列级别的分类。
+- `[SEP]`：分隔两个片段，并标记序列结束。
+
+课件的部分图里省略了末尾的第二个 `[SEP]`，这里按完整的格式写。
+
+### 怎么得到 NSP 预测？
+
+整条拼接的序列通过同一个 BERT Encoder，取 `[CLS]` 位置的最终隐藏向量：
+
+$$
+U = \operatorname{BERTEncoder}(X), \qquad h_{\text{CLS}} = U_{\text{CLS}}
+$$
+
+接一个二分类头：
+
+$$
+p_{\text{IsNext}} = \sigma\left(w^{\top} h_{\text{CLS}} + b\right)
+$$
+
+课件把二分类器的输出记作 $f \in [0, 1]$，就是这个概率。loss 是二分类的交叉熵，$y = 1$ 表示 IsNext：
+
+$$
+\mathcal L_{\text{NSP}} = -y \log p_{\text{IsNext}} - (1 - y) \log\left(1 - p_{\text{IsNext}}\right)
+$$
+
+这里用 sigmoid 加二分类交叉熵来写。输出两个 logits 再做 softmax 交叉熵是等价的写法。
+
+例子：真实标签 $y = 1$，模型预测 $p = 0.8$：
+
+$$
+\mathcal L_{\text{NSP}} = -\ln(0.8) \approx 0.223
+$$
+
+<NspFigure />
+
+## MLM + NSP 联合预训练
+
+**一句话：一条序列过一次 Encoder，同时给出 MLM 和 NSP 需要的输出；两类 loss 加起来，一起更新这一个 Encoder。**
+
+把两个任务放到同一条样本上。课程的例子：
+
+`[CLS] calculus is a [MASK] of math [SEP] it [MASK] developed by newton and leibniz [SEP]`
+
+这一条序列有三个训练目标：
+
+- NSP：`IsNext`
+- 第 1 个 `[MASK]`：`branch`
+- 第 2 个 `[MASK]`：`was`
+
+一次 Encoder 前向，同时拿到三样东西：
+
+1. `[CLS]` 的隐藏向量 → NSP Head → $\mathcal L_{\text{NSP}}$
+2. 第 1 个 `[MASK]` 的隐藏向量 → MLM Head → $\mathcal L_{\text{MLM},1}$
+3. 第 2 个 `[MASK]` 的隐藏向量 → 同一个 MLM Head → $\mathcal L_{\text{MLM},2}$
+
+<JointPretrainFigure />
+
+课件把这个例子画成「三个 loss 相加」，这样最容易看出两类监督信号汇到了一起。更规范的写法是先把各个被预测位置的 MLM loss 取平均，再加上 NSP 的 loss：
+
+$$
+\boxed{\,\mathcal L_{\text{pretrain}} = \mathcal L_{\text{MLM}} + \mathcal L_{\text{NSP}}\,}
+\qquad
+\mathcal L_{\text{MLM}} = \frac{\mathcal L_{\text{MLM},1} + \mathcal L_{\text{MLM},2}}{2}
+$$
+
+两种写法是同一个训练目标的两类项，差别只在 MLM 部分除不除以位置数。
+
+要分清的几件事：
+
+- **只有一个 BERT Encoder**，不是 MLM 一个、NSP 一个。
+- 两个任务各有自己的输出头，头的用途不同。MLM Head 只有一个，所有被遮住的位置共用它。
+- 两类 loss 的梯度都回到同一个 Encoder，一起更新它的参数。
+- 图里是一条样本。实际训练时一个 batch 里有很多条这样的序列对。
+
+## 数据来源与训练成本
+
+**一句话：答案就在文本自己身上，所以不需要人工标注；代价是算力。**
+
+### 为什么不需要人工逐条标注？
+
+- MLM 的答案是原文里被选中的那个 token。
+- NSP 的 IsNext / NotNext 标签来自语料里的相邻关系和随机采样的负例。
+
+监督信号是从文本自己构造出来的，所以可以直接用海量没有任务标注的文本，这叫**自监督预训练**（self-supervised pre-training）。
+
+课程给的数据是英文 Wikipedia，约 25 亿词；原论文还用了 BooksCorpus，约 8 亿词。数据构造上，原始 BERT 随机选取约 15% 的 token 做 MLM，NSP 的正负例各占约一半。选中的 token 具体怎么替换，本章不展开。
+
+### BERT Base vs Large
+
+| 配置 | BERT Base | BERT Large |
+| --- | ---: | ---: |
+| Encoder 层数 | 12 | 24 |
+| Hidden 维度 | 768 | 1024 |
+| Attention heads | 12 | 16 |
+| 参数量 | 110M | **340M** |
+| 训练用的计算资源 | 16 TPU | 64 TPU |
+| 训练时长 | 约 4 天 | 约 4 天 |
+
+<BertSizeFigure />
+
+> **校注：** 课件截图把 BERT Large 的参数量写成 235M，这个数字有误。原论文是 340M，本页以论文为准。
+
+TPU 数量和训练时长是原论文当年的训练配置，说明这类预训练要花很多算力，不代表今天的硬件上是同样的固定成本。
+
+## Pre-training → Fine-tuning
+
+**一句话：预训练得到的是一个好的 Encoder 起点；每个具体任务再从这个起点出发，接上自己的头，用自己的标注数据继续训练。**
+
+这一节是课程之外的补充。
+
+### 为什么预训练之后仍需 Fine-tuning？
+
+预训练时，MLM 学的是根据上下文恢复被遮住的 token，NSP 学的是判断两段文字是否相邻。可实际要做的任务是情感分类、命名实体识别、抽取式问答，没有一个是「猜被遮住的词」。
+
+训练 MLM 和 NSP 的目的，是得到一个可以迁移的 Encoder，不是让这两个头直接去完成所有下游任务。
+
+### Pre-training 阶段：保留哪些参数？
+
+预训练结束后，学到的 Encoder 参数被保存下来，作为下游任务的初始化。MLM Head 和 NSP Head 完成了产生训练信号的任务，通常不再作为下游任务的预测器。
+
+### Fine-tuning 阶段：具体怎么改？
+
+每个下游任务从**同一个预训练 checkpoint** 初始化一个自己的模型，再接上适合这个任务的头：
+
+| 下游任务 | 输入形式 | 取 BERT 的哪部分输出 | Head / 输出 |
+| --- | --- | --- | --- |
+| Sentiment Classification | 一段文本 | `[CLS]` 的最终隐藏向量 | 分类概率（正 / 负等） |
+| NER | 一段文本 | 每个 token 的最终隐藏向量 | 每个 token 的实体类别 |
+| Extractive QA | 问题 + 上下文 | 上下文各 token 的隐藏向量 | 答案的起点和终点位置 |
+
+<PretrainToFinetuneFigure />
+
+用情感分类具体走一遍。输入 `[CLS] this movie is wonderful [SEP]`，经过预训练好的 Encoder，取 `[CLS]` 的向量，接一个分类头：
+
+$$
+h_{\text{CLS}} = \operatorname{BERT}(X)_{\text{CLS}},
+\qquad
+p = \operatorname{Softmax}\left(W h_{\text{CLS}} + b\right),
+\qquad
+\mathcal L_{\text{task}} = -\log p_y
+$$
+
+$y$ 是这条影评的真实标签。梯度从 $\mathcal L_{\text{task}}$ 经过新加的分类头，一直传回 Encoder：原始 BERT 的 fine-tuning 默认是端到端的，Encoder 和新头一起更新，不是只训练那个头。
+
+两个容易说错的地方：
+
+- 不是「所有任务在 fine-tuning 时共享并同时更新同一份 BERT 参数」。准确的说法是：不同任务从同一个预训练 checkpoint 初始化，之后各自独立地 fine-tune，得到各自的模型。
+- BERT 不是「接一个输出层就能直接处理没有标签的下游任务」。Fine-tuning 需要这个任务自己的标注数据。
+
+用一个真实的中文模型把数据、训练循环、评估走一遍，见 [BERT 微调：用 MacBERT 做三分类](/notes/ml/llms/bert-finetuning/)。
+
+### 两阶段真正的区别
+
+| 维度 | Pre-training | Fine-tuning |
+| --- | --- | --- |
+| 数据 | 大规模、没有任务标注的文本 | 特定下游任务的数据和标签 |
+| 目标 | MLM + NSP | 这个任务自己的 loss |
+| Encoder | 从头学出通用的表示 | 用预训练的权重初始化，再继续更新 |
+| 预测头 | MLM Head、NSP Head | 分类、NER、QA 等各自的头 |
+| 更新哪些参数 | Encoder + 两个预训练头 | Encoder + 当前任务的头（常见做法） |
+
+$$
+\boxed{\ \text{Unlabeled Corpus} \rightarrow \text{Pre-training} \rightarrow \text{Fine-tuning} \rightarrow \text{Downstream Task}\ }
+$$
+
+预训练学可迁移的表示，微调学具体的任务。
+
+## 小结
+
+1. BERT 的主干是 Transformer Encoder，Self-Attention 是双向的；它输出每个位置的向量，不生成句子。
+2. MLM：把选中的位置换成 `[MASK]`，从那个位置的输出向量预测原来的 token，loss 是 $-\log p_{\text{原 token}}$，只在被选中的位置上算。
+3. NSP：`[CLS] A [SEP] B [SEP]`，取 `[CLS]` 的向量做二分类，判断 B 是不是原文里 A 的下一段。
+4. 两个任务共用一个 Encoder，$\mathcal L_{\text{pretrain}} = \mathcal L_{\text{MLM}} + \mathcal L_{\text{NSP}}$；标签都由文本自己构造，不需要人工标注。
+5. Fine-tuning 时，每个任务从同一份预训练权重各自出发，换上自己的头，用自己的标注数据端到端地继续训练。
+
+## Further reading
+
+- [BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding](https://aclanthology.org/N19-1423/)（Devlin 等，NAACL 2019）：两种模型尺寸、参数量、数据和训练配置都出自这篇论文。
+- [BERT：双向编码器怎样读懂一句话](/notes/ml/llms/bert/)：同一个模型的论文向长文，补上了本章有意略过的细节。
+- [BERT vs MacBERT](/notes/ml/llms/bert-vs-macbert/)：预训练时到处是 `[MASK]`、微调时却没有，这个不一致后来怎么处理。
