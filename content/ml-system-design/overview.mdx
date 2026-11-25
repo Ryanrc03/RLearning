@@ -1,0 +1,165 @@
+import { SixStepFigure, MlPipelineFigure, ModelLadderFigure } from "@/components/visualization/ml-system-design/OverviewFigures";
+
+# ML System Design Overview：六步框架
+
+这个模块面向 MLE / Applied AI 的 ML System Design 面试，也面向真实工作里的同一件事：把算法、数据、训练、线上推理和业务目标接成一个能长期运转的系统。本页是模块的入口，先讲它和「学一个模型」有什么不同，再给出贯穿所有案例的六步框架。第一个完整案例是 [Harmful Content Detection](/notes/ml-system-design/case-studies/harmful-content-detection/)，第一个深入的技术专题是 [Probability Calibration](/notes/ml-system-design/inference-evaluation/probability-calibration/)。
+
+## What is ML System Design?
+
+学一个模型时，问题已经被别人定义好了：数据集是现成的，标签是干净的，指标写在论文的表格里。你关心的是结构、公式和训练方法。ML System Design 里这些都不是现成的，而且大部分工作量恰好落在它们身上。
+
+| | ML Modeling | ML System Design |
+| --- | --- | --- |
+| 起点 | 一个给定的数据集和指标 | 一句业务需求，例如「减少有害内容」 |
+| 关注 | 模型结构、数学公式、Loss Function、Training Algorithm、Evaluation Metrics | 怎样定义问题、数据和标签从哪来、选什么模型、怎样部署和维护、怎样衡量真实收益 |
+| 好坏的标准 | 离线指标更高 | 业务指标变好，同时满足延迟、成本、可靠性的约束 |
+| 典型的失败 | 欠拟合、过拟合 | 目标定错了、标签有偏、训练和线上不一致、离线涨了线上没涨 |
+
+一个直接的后果：在系统设计里，模型通常不是最先要决定的东西，也常常不是收益最大的地方。同一个模型，换一种标签定义或者多接一类特征，效果的变化可能比换结构更大；而一个离线指标很好的模型，可能因为延迟超标或者概率不可信而根本用不上。
+
+## Six-step Framework
+
+<SixStepFigure />
+
+六步的顺序有依赖关系：目标没定清楚就画不出架构；架构定了才知道推理时刻手里有什么数据；数据决定了模型能学什么；模型的成本决定了推理方式；最后的 Deep Dives 是在前五步里挑一两个最难的点展开。面试时按这个顺序走，每一步先给结论，再讲取舍。
+
+下面逐步说明每一步在做什么。例子都取自 [Harmful Content Detection](/notes/ml-system-design/case-studies/harmful-content-detection/) 这个案例，那一页会把它完整走一遍。
+
+## Step 1. Problem Framing
+
+三件事，按顺序做：
+
+1. **Clarify the Problem**：输入是什么（文本、图片、视频），输出给谁用（自动处理还是给人工审核排队），规模多大，正例有多稀少，有多少标注数据，延迟和审核人力有什么限制。
+2. **Establish a Business Objective**：业务上真正想要变化的那个量，例如「有害内容的曝光次数」，而不是「模型的准确率」。
+3. **Decide on an ML Objective**：把业务目标翻译成模型能学的预测任务，例如「预测一条帖子有害的概率」。
+
+这一步最容易混在一起的是四个层级。它们各有各的位置，不能互相替代：
+
+| 层级 | 回答的问题 | Harmful Content Detection 里的例子 |
+| --- | --- | --- |
+| Business Objective | 业务想要什么变化 | 减少有害内容曝光 |
+| ML Objective | 模型预测什么 | 帖子属于有害内容的概率 |
+| Loss Function | 训练时最小化什么 | Binary Cross Entropy |
+| Evaluation Metric | 怎样判断模型好不好 | PR-AUC、Recall@Precision95 |
+| Guardrail | 哪条线不能破 | 自动删除的 Precision ≥ 95% |
+
+Loss 要可导、能用梯度下降优化，所以它通常只是 Evaluation Metric 的一个替身；Evaluation Metric 是离线可算的，所以它又只是 Business Objective 的替身。每换一层都会丢一点信息，后面「离线涨了线上没涨」的大部分原因都出在这些缝隙里。
+
+## Step 2. High Level Design
+
+一个完整的 ML 系统由这些部分组成：
+
+- **Event Collection**：收集曝光、点击、举报等事件，它既触发推理，也是之后的训练数据。
+- **Feature Pipeline**：把原始事件变成特征，线上实时计算一部分，离线批量计算一部分。
+- **Training Pipeline**：把特征和标签按时间对齐，周期性地训练和发布模型。
+- **Model Serving**：线上跑模型，输出原始分数。
+- **Calibration**：把原始分数映射成可以当概率读的数。
+- **Decision Policy**：按阈值和业务规则把概率变成动作。
+- **Monitoring & Feedback**：监控指标和数据分布，把结果回流成新的训练数据。
+
+<MlPipelineFigure />
+
+这张图里最值得记住的一点：**Model Prediction 和 Business Decision 是两个模块。** 模型只回答「这条帖子有害的概率是多少」，要不要删除由 Decision Policy 决定。分开之后，调阈值、加一档「降权」、给不同国家用不同策略都不需要重训模型；模型换版本时，只要重新校准，策略也不用改。中间把两者接起来的就是 [Probability Calibration](/notes/ml-system-design/inference-evaluation/probability-calibration/)。
+
+## Step 3. Data and Features
+
+先看标签从哪里来。按监督信号的强弱分：
+
+| 数据类型 | 是什么 | 实际作用 |
+| --- | --- | --- |
+| Supervised Data | 人工标注或公开数据集，标签可信 | 训练主任务，也是评估和校准的依据；贵，量少 |
+| Weakly-supervised Data | 用户举报、隐藏等行为，和真实标签相关但有噪声 | 量大，可以当辅助任务的标签或候选弱标签 |
+| Semi-supervised Learning | 少量有标签数据加大量无标签数据一起训练的方法 | 用模型给无标签数据打伪标签，或加一致性约束 |
+| Self-supervised Learning | 从数据自身构造监督信号，例如遮住一部分去预测 | 预训练文本、图像 encoder，不需要人工标签 |
+
+注意前两行和后两行不是一个维度。「弱监督」说的是**信号的质量**：举报是带噪声的标签。「半监督」说的是**训练的方式**：有标签和无标签的数据怎样一起用。用户举报、隐藏行为属于弱监督信号；拿它们直接当噪声标签训练是弱监督学习，拿模型在无标签帖子上的预测当伪标签才是半监督学习。两者不应直接等同。
+
+接着是另外四个在这一步要想清楚的概念：
+
+- **Label Engineering**：把原始事件变成标签的规则。多少次举报算正例、多久之内的举报才算、被申诉恢复的删除怎么算，这些规则直接决定模型学到的是什么。
+- **Feature Engineering**：决定模型在推理时刻能看到哪些信息。内容本身、行为统计、作者历史通常是三大类。
+- **Class Imbalance**：正例远少于负例时，Accuracy 失去意义，训练时常对负例降采样或对正例加权；降采样会改变输出概率的含义，之后要修正或校准（推导见 [Ranking 总览](/notes/ml/recsys/ranking-overview/) 的校准一节）。
+- **Data Leakage**：训练时用了推理时刻拿不到的信息，离线指标虚高，上线后掉下来。防法是保证特征的 point-in-time correctness，可以对照 [按时间切分](/notes/ml/recsys/point-in-time-split/) 和 [样本与特征拼接](/notes/ml/recsys/sample-feature-join/)。
+
+## Step 4. Modeling
+
+模型设计是一个逐步演进的过程，面试里也应该这样讲：
+
+<ModelLadderFigure />
+
+这一步要讨论三件事：
+
+- **模型选择**：每一级的输入是什么、怎样融合、为什么上一级不够。[GBDT](/notes/ml/trees/gbdt/) 这样的 baseline 在表格特征上依然很强，[Transformer](/notes/ml/llms/transformer-architecture/) 的价值在于让不同来源的 token 直接交互。
+- **Loss Function 与样本权重**：Loss 由标签类型决定（二分类用 BCE，计数用 Poisson）；样本权重用来把业务上的轻重告诉模型，例如给高曝光的帖子更大的权重。
+- **Multi-task Learning**：用共享的表示同时学几个相关任务，结构上的选择见 [MMoE](/notes/ml/recsys/mmoe/) 和 [多目标排序](/notes/ml/recsys/multi-task-ple/)。
+
+不应一开始就默认使用最复杂的 Transformer 或 LLM。复杂模型带来的是更长的延迟、更高的成本和更难排查的问题，只有当你能指出简单模型错在哪一类样本上时，这些代价才值得。
+
+## Step 5. Inference and Evaluation
+
+**推理方式**有三种，区别在于什么时候算：
+
+| 方式 | 什么时候算 | 适合 |
+| --- | --- | --- |
+| Batch Inference | 定时对全量数据离线算好，线上只查表 | 结果变化慢、对新鲜度要求低，例如每天更新的用户 embedding |
+| Online Inference | 请求到来时同步算 | 结果依赖请求当时的上下文，延迟预算是几十毫秒 |
+| Event-driven Inference | 某个事件发生后异步算 | 帖子发布、新增举报这类触发点，可以容忍秒级延迟 |
+
+当模型太贵、流量太大时，用 **Cascading Model**：先用便宜的模型过滤掉绝大多数明显的样本，只把剩下的交给昂贵的模型。这和推荐系统的召回、粗排、精排是同一个思路。
+
+**评估**分两层。Offline Evaluation 用留出的数据算 [ROC-AUC](/notes/ml/evaluation/roc-auc/)、[PR-AUC](/notes/ml/evaluation/pr-curve-precision-at-k/) 这类指标，快而便宜；Online A/B Testing 用一部分真实流量比较新旧系统的业务指标，慢但可信（方法见 [A/B Test 与 p-value](/notes/ml/evaluation/ab-test-p-value/)）。
+
+线下 AUC 提升不一定带来线上业务收益，常见的原因有这些：
+
+- **AUC 只看排序。** 如果下游按概率阈值做决策，决定结果的是概率准不准。两个 AUC 相同的模型，校准不同，同一个阈值下的动作就不同。这就是需要 **Probability Calibration** 的原因。
+- **提升发生在不影响决策的地方。** AUC 对所有正负样本对一视同仁，而业务只关心阈值附近或排在最前面的那部分。
+- **离线数据和线上分布不一致。** 离线数据是旧系统筛选过的（selection bias），或者特征在训练时和线上算法不同（training-serving skew）。
+- **Evaluation Metric 和 Business Objective 之间有缝。** 每条帖子在 AUC 里权重相同，但在「曝光量」里权重相差几个数量级。
+- **系统层面的约束。** 新模型更准但更慢，超时的请求走了兜底逻辑，整体反而变差。
+
+## Step 6. Deep Dives
+
+前五步搭出了一个能工作的系统，这一步在其中挑一两个点讲深。可选的方向：
+
+| 方向 | 讨论什么 |
+| --- | --- |
+| Scalability | 流量和数据量涨十倍时，哪个环节先撑不住 |
+| Data Drift | 输入分布随时间变化，模型怎样发现并跟上 |
+| Feedback Loop | 系统的决策改变了它之后看到的数据 |
+| Selection Bias | 训练数据只来自旧系统选中的样本，对照 [曝光偏差](/notes/ml/recsys/exposure-bias-random-eval/) |
+| Cold Start | 新用户、新内容没有历史行为 |
+| Model Distillation | 用大模型教小模型，在成本内保住效果 |
+| Graph Embedding | 用关系图给节点学表示，例如作者之间的关联 |
+
+不同案例选择不同的 Deep Dive，不需要机械地覆盖所有主题。判断标准是：这个案例里哪一点如果处理不好，前面的设计就不成立。有害内容检测里是作者的冷启动和对抗性的分布漂移；广告排序里是校准和延迟归因。
+
+## 模块地图
+
+模块按六步框架组织章节，案例单独成章。目前写完的是下面标「已完成」的三页，其余是之后的学习计划，还没有页面。
+
+| 章节 | 页面 | 状态 |
+| --- | --- | --- |
+| Overview | 本页 | 已完成 |
+| 01. Problem Framing | Business Objective & ML Objective；Requirements & Constraints | 计划中 |
+| 02. High Level Design | End-to-End ML Pipeline；Cascading Architecture | 计划中 |
+| 03. Data and Features | Training Data & Label Engineering；Feature Engineering | 计划中 |
+| 04. Modeling | Model Architecture；Loss & Multi-task Learning | 计划中 |
+| 05. Inference and Evaluation | Model Serving & Inference；Offline & Online Evaluation | 计划中 |
+| 05. Inference and Evaluation | [Probability Calibration](/notes/ml-system-design/inference-evaluation/probability-calibration/) | 已完成 |
+| 06. Deep Dives | Sampling & Selection Bias；Feedback Loop & Data Drift | 计划中 |
+| Case Studies | [Harmful Content Detection](/notes/ml-system-design/case-studies/harmful-content-detection/) | 已完成 |
+
+## Key ideas to remember
+
+1. ML System Design 的起点是业务需求，模型只是其中一个部件，而且常常不是收益最大的那个。
+2. Business Objective、ML Objective、Loss Function、Evaluation Metric 是四个不同的层级，每换一层都会丢信息。
+3. 模型负责预测，Decision Policy 负责决策，中间用 Calibration 接起来。
+4. 弱监督说的是标签质量，半监督说的是训练方式，两者不是一回事。
+5. 从简单的 baseline 开始，每加一级复杂度都要对应一个观察到的问题。
+6. 离线 AUC 涨了不等于线上有收益，先检查校准、分布一致性和指标与业务目标之间的缝。
+
+## References
+
+- [Hello Interview：Harmful Content Detection](https://www.hellointerview.com/learn/ml-system-design/problem-breakdowns/harmful-content)，六步框架和本页所有例子取自这门课的这个案例。
+- [Hello Interview 的讲解视频（YouTube）](https://www.youtube.com/watch?v=9KUC_nHydZg&list=PL5q3E8eRUieVx_cUnx-pFiIi4b04RvKgB&index=3)，同一案例的视频版本。
+- [scikit-learn：Probability calibration](https://scikit-learn.org/stable/modules/calibration.html)，Step 5 里校准一节的背景。

@@ -55,6 +55,10 @@ export const roadmapNodes: RoadmapNode[] = [
   { id: "ml-post-training", section: "Post-training", categoryId: "ml", row: 5, col: 4 },
   { id: "ml-rl", section: "Reinforcement Learning", categoryId: "ml", label: "RL", row: 6, col: 4 },
   { id: "ml-multimodal", section: "Multimodal Learning", categoryId: "ml", label: "Multimodal", row: 6, col: 5.5 },
+  // ML System Design: the framework, then its first deep-dive chapter, then the case that uses both
+  { id: "msd-overview", section: "Overview", categoryId: "ml-design", label: "ML System Design", row: 4, col: 7 },
+  { id: "msd-inference-evaluation", section: "05. Inference and Evaluation", categoryId: "ml-design", label: "Calibration", row: 5, col: 7 },
+  { id: "msd-case-studies", section: "Case Studies", categoryId: "ml-design", label: "Design Case Studies", row: 6, col: 7 },
 ];
 
 // Edges the knowledge tree does not know about.
@@ -77,6 +81,11 @@ const handEdges: RoadmapEdge[] = [
   { from: "ml-training", to: "ml-dl-blocks" },
   { from: "ml-llm-engineering", to: "ai-agent" },
   { from: "ml-post-training", to: "ml-rl" },
+  { from: "ml-evaluation", to: "msd-overview" },
+  { from: "ml-evaluation", to: "msd-inference-evaluation" },
+  { from: "ml-recsys", to: "msd-inference-evaluation" },
+  { from: "msd-overview", to: "msd-inference-evaluation" },
+  { from: "msd-inference-evaluation", to: "msd-case-studies" },
 ];
 
 /** Chapter-level edges: chapter A → B when any node of A is a prerequisite of a node of B. */

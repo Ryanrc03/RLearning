@@ -222,6 +222,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px soli
 .rm-cat-cs { --c: #5f8a3c; --c-soft: #eef5e6; }
 .rm-cat-systems { --c: #c0663a; --c-soft: #fcefe7; }
 .rm-cat-ml { --c: #7852ee; --c-soft: #efeafd; }
+.rm-cat-ml-design { --c: #c2498f; --c-soft: #fbe9f3; }
 .rm-cat-ai-infra { --c: #1f8f86; --c-soft: #e3f4f2; }
 .rm-cat-algorithms { --c: #3b78b0; --c-soft: #e7f0f9; }
 .rm-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: -4px 0 14px; padding: 0; list-style: none; font-size: 11px; color: #777777; }

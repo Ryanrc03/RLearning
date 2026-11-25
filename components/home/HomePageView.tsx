@@ -21,7 +21,7 @@ export default function HomePageView({ lang }: { lang: Lang }) {
     const { description, textLang } = noteText(note, lang);
     return (
       <Link className="recent-note" key={note.slug} href={notePath(note, lang)}>
-        <span className="note-card-icon"><Icon name={note.categoryId === "ml" ? "brain" : note.categoryId === "algorithms" ? "search" : "code"} /></span>
+        <span className="note-card-icon"><Icon name={note.categoryId === "ml" ? "brain" : note.categoryId === "ml-design" ? "flow" : note.categoryId === "algorithms" ? "search" : "code"} /></span>
         <div className="recent-note-copy"><p className="note-category">{note.category} <span>/</span> {note.section}</p><NoteTitle note={note} lang={lang} as="h3" /><p lang={textLang}>{description}</p></div>
         <div className="recent-note-end"><span className={`note-status status-${note.status}`}><span />{note.status === "growing" ? "Growing" : note.status === "stable" ? "Stable" : "Seed"}</span><time dateTime={note.updated}>{note.updated.slice(5).replace("-", ".")}</time></div><Icon name="arrow" className="card-arrow" />
       </Link>

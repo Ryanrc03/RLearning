@@ -152,6 +152,9 @@ import Correlation from "@/content/ml/causal-inference/correlation.mdx";
 import LinearRegression from "@/content/ml/causal-inference/linear-regression.mdx";
 import DifferenceInDifferences from "@/content/ml/causal-inference/difference-in-differences.mdx";
 import MinimumWageExample from "@/content/ml/causal-inference/minimum-wage-example.mdx";
+import MsdOverview from "@/content/ml-system-design/overview.mdx";
+import MsdProbabilityCalibration from "@/content/ml-system-design/inference-evaluation/probability-calibration.mdx";
+import MsdHarmfulContent from "@/content/ml-system-design/case-studies/harmful-content-detection.mdx";
 import GrpoEn from "@/content/ml/post-training/grpo.en.mdx";
 import RewardHackingEn from "@/content/ml/post-training/reward-hacking.en.mdx";
 import Grpo3060ProjectEn from "@/content/ml/post-training/grpo-3060-project.en.mdx";
@@ -178,6 +181,9 @@ export const noteComponents = {
   "ml/recsys/ranking-overview": RankingOverview,
   "ml/recsys/mmoe": Mmoe,
   "ml/recsys/score-fusion": ScoreFusion,
+  "ml-system-design/overview": MsdOverview,
+  "ml-system-design/inference-evaluation/probability-calibration": MsdProbabilityCalibration,
+  "ml-system-design/case-studies/harmful-content-detection": MsdHarmfulContent,
   "ml/recsys/watch-time-completion": WatchTimeCompletion,
   "ml/recsys/kuairand-input": KuairandInput,
   "ml/recsys/lightgbm-explained": LightgbmExplained,

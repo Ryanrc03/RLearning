@@ -600,3 +600,28 @@ button.mod-card { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   .bah-note .bah-fade, .bah-note .bah-bar, .bah-note .bah-size { transition: none; }
 }
+
+/* ML System Design notes. SVG colors are the .bah-note tokens; these rules cover
+   the step figure's two layouts, the feature columns, and the HTML parts in dark mode. */
+.msd-note .msd-narrow { display: none; }
+.msd-note .msd-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.msd-note .msd-col { background: var(--bah-surface); border: 1px solid var(--vline); border-top: 3px solid var(--c); border-radius: 6px; padding: 10px 12px; min-width: 0; }
+.msd-note .msd-col h5 { margin: 0 0 2px; font-size: 12.5px; font-weight: 600; color: var(--bah-ink); }
+.msd-note .msd-col > small { display: block; color: var(--muted); font-size: 11.5px; margin-bottom: 6px; }
+.msd-note .msd-col ul { margin: 0; padding-left: 16px; font-size: 12.5px; }
+.msd-note .msd-col li { margin: 2px 0; }
+.msd-note .viz-table td.is-crit { color: var(--vcrit); font-weight: 600; }
+.msd-note .viz-tabs { margin-bottom: 12px; }
+.msd-note .viz-controls { margin-bottom: 12px; }
+@media (max-width: 640px) {
+  .msd-note .msd-wide { display: none; }
+  .msd-note .msd-narrow { display: block; }
+  .msd-note .msd-narrow svg { min-width: 0; max-width: 320px; margin: 0 auto; }
+  .msd-note .msd-cols { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-color-scheme: dark) {
+  .msd-note .viz-stat div, .msd-note .viz-tabs, .msd-note .viz-panel, .msd-note .viz-chip { background: var(--paper); border-color: var(--vline); color: var(--ink); }
+  .msd-note .viz-stat b { color: var(--ink); }
+  .msd-note .viz-tab.is-on, .msd-note .viz-chip.is-on, .msd-note .viz-btn.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .msd-note .viz-panel h5 { color: var(--muted); }
+}
