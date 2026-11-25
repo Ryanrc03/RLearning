@@ -1,0 +1,63 @@
+/* Only used by the MapReduce/Spark note; inherits SQL frame theme tokens. */
+.spark-viz { min-width: 0; }
+.spark-viz .spark-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin: 12px 0; }
+.spark-panel { min-width: 0; padding: 12px; border: 1px solid var(--sql-line); border-radius: 7px; background: var(--sql-bg); }
+.spark-viz .spark-node-controls { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.spark-viz .spark-node { font: inherit; color: var(--sql-ink); background: var(--sql-bg); padding: 8px 10px; border: 1px solid var(--sql-line); border-radius: 6px; min-height: 38px; text-align: left; overflow-wrap: anywhere; }
+.spark-viz .spark-node.is-selected, .spark-viz .spark-node[aria-pressed=true] { border-color: var(--sql-accent); background: var(--sql-soft); }
+.spark-selected-panel { border-color: var(--sql-accent); }
+.spark-record { display: flex; justify-content: space-between; gap: 8px; border-left: 3px solid var(--group-color,var(--sql-line)); margin: 6px 0; padding: 6px 8px; background: var(--sql-panel); font-family: monospace; font-size: 12px; overflow-wrap: anywhere; }
+.spark-record b { white-space: nowrap; }
+.spark-viz small { color: var(--sql-muted); }
+.spark-viz .spark-edges { width: 100%; max-width: 520px; margin: 10px auto; color: #2a78d6; }
+.spark-viz .spark-edges.is-wide { color: #c45c30; }
+.spark-edges rect { fill: var(--sql-bg); stroke: var(--sql-line); }
+.spark-edges text { fill: var(--sql-ink); font-size: 16px; }
+.spark-viz .spark-legend { margin: 6px 0 14px; color: var(--sql-muted); font-size: 12px; }
+.spark-boundary { padding: 10px 12px; border: 1px dashed #c45c30; border-radius: 6px; background: var(--sql-bg); color: var(--sql-ink); margin: 12px 0; }
+.spark-stage-ops { display: grid; gap: 6px; margin-top: 12px; }
+.spark-stage-ops > button:not(:last-child)::after { content: ' ↓'; color: #2a78d6; }
+.spark-role, .spark-architecture { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+.spark-role > .spark-panel { display: flex; flex-direction: column; gap: 6px; }
+.spark-edge-label { font-size: 12px; color: var(--sql-muted); text-align: center; }
+.spark-wave-grid { display: grid; grid-template-columns: repeat(10,minmax(0,1fr)); gap: 3px; }
+.spark-wave-grid span { display: grid; place-items: center; font-size: 10px; min-height: 20px; border: 1px solid var(--sql-line); border-radius: 3px; }
+.spark-wave-grid .is-running { background: var(--sql-soft); border-color: var(--sql-accent); }
+.spark-bars { display: grid; gap: 10px; padding: 12px 0; }
+.spark-bar-row { display: grid; grid-template-columns: 64px minmax(24px,1fr) 80px; gap: 6px; align-items: center; font-size: 11px; font-variant-numeric: tabular-nums; }
+.spark-bar-row b { text-align: right; font-weight: 500; }
+.spark-bar-track { height: 16px; background: var(--sql-panel); border-radius: 3px; overflow: hidden; }
+.spark-bar-track > div { height: 100%; min-width: 1px; transition: width .25s ease; border-radius: 3px; }
+.spark-viz .spark-check { display: flex; align-items: center; gap: 8px; margin: 12px 0; cursor: pointer; }
+.spark-viz input { accent-color: var(--sql-accent); flex-shrink: 0; }
+.spark-viz .spark-details { margin: 14px 0; border: 1px solid var(--sql-line); border-radius: 6px; padding: 10px 12px; background: var(--sql-bg); }
+.spark-details summary { cursor: pointer; }
+.spark-viz .spark-details p { margin: 8px 0 0; }
+.spark-viz .spark-data { font: 12px/1.7 monospace; white-space: pre-wrap; overflow-wrap: anywhere; background: none; color: var(--sql-ink); padding: 0; border: 0; margin: 0; }
+.spark-viz .spark-run-flow, .spark-viz .spark-flow-list { margin: 8px 0; padding: 0; list-style: none; display: grid; gap: 20px; }
+.spark-run-flow li, .spark-flow-list li { position: relative; padding: 8px 10px; border: 1px solid var(--sql-line); border-radius: 5px; }
+.spark-run-flow li:not(:last-child)::after, .spark-flow-list li:not(:last-child)::after { content: '↓'; position: absolute; bottom: -21px; left: 50%; color: var(--sql-accent); }
+.spark-run-flow .is-current { border-color: var(--sql-accent); background: var(--sql-soft); }
+.spark-sink { margin-top: 16px; }
+.spark-viz .spark-sink p { margin: 6px 0; }
+.spark-result-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.spark-result-chips span { border: 1px solid var(--sql-line); border-radius: 4px; padding: 4px 7px; font-family: monospace; }
+.spark-cron { padding: 8px; border: 1px dashed var(--sql-accent); border-radius: 4px; color: var(--sql-muted); }
+.spark-viz .spark-code .spark-token-keyword { color: #7852c7; font-weight: 600; }
+.spark-viz .spark-code .spark-token-string { color: #276c50; }
+.spark-viz .spark-code .spark-token-number { color: #a34823; }
+.spark-viz .spark-code .spark-token-comment { color: var(--sql-muted); }
+@media (max-width: 640px) {
+  .spark-viz .spark-grid { grid-template-columns: minmax(0,1fr); }
+  .spark-viz .spark-node, .spark-viz .viz-btn { min-height: 42px; }
+  .spark-bar-row { grid-template-columns: 64px minmax(24px,1fr) 80px; }
+  .spark-panel { padding: 10px; }
+}
+@media (prefers-reduced-motion: reduce) { .spark-bar-track > div { transition: none; } }
+@media (prefers-color-scheme: dark) {
+  .spark-viz .spark-code .spark-token-keyword { color: #c4a6ff; }
+  .spark-viz .spark-code .spark-token-string { color: #91d9af; }
+  .spark-viz .spark-code .spark-token-number { color: #ffb995; }
+  .spark-viz .spark-edges { color: #80baff; }
+  .spark-viz .spark-edges.is-wide { color: #f6a174; }
+}
