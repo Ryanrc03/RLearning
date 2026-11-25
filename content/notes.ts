@@ -4,7 +4,7 @@ export type NoteEntry = {
   slug: string;
   title: string;
   description: string;
-  categoryId: "cs" | "systems" | "ml" | "ai-infra" | "algorithms";
+  categoryId: "cs" | "systems" | "ml" | "ml-design" | "ai-infra" | "algorithms";
   category: string;
   section: string;
   subsection?: string;
@@ -2259,6 +2259,52 @@ export const noteEntries: NoteEntry[] = [
     readingMinutes: 6,
     tags: ["ml-fundamentals", "evaluation", "interactive"],
     series: { id: "ml-evaluation", title: "Evaluation：模型好不好", order: 6 },
+  },
+  // ML System Design: the section names carry the step numbers of the six-step framework.
+  {
+    slug: "ml-system-design/overview",
+    title: "ML System Design Overview：六步框架",
+    description:
+      "ML System Design 和单独建模的区别，以及贯穿整个模块的六步框架：Problem Framing、High Level Design、Data and Features、Modeling、Inference and Evaluation、Deep Dives。",
+    categoryId: "ml-design",
+    category: "ML System Design",
+    section: "Overview",
+    created: "2026-11-24",
+    updated: "2026-11-24",
+    status: "growing",
+    readingMinutes: 12,
+    tags: ["ml-system-design", "overview", "framework", "interview", "interactive"],
+    series: { id: "ml-system-design", title: "ML System Design", order: 1 },
+  },
+  {
+    slug: "ml-system-design/inference-evaluation/probability-calibration",
+    title: "Probability Calibration：让 0.95 真的代表 95%",
+    description:
+      "模型输出的分数不一定是可信的概率。Reliability Diagram、ECE、Brier Score，用 PAVA 手算一遍 Isotonic Regression，再看校准怎样改变广告的 eCPM 和排序。",
+    categoryId: "ml-design",
+    category: "ML System Design",
+    section: "05. Inference and Evaluation",
+    created: "2026-11-24",
+    updated: "2026-11-24",
+    status: "growing",
+    readingMinutes: 16,
+    tags: ["ml-system-design", "calibration", "isotonic regression", "PAVA", "ECE", "ads", "interactive"],
+    series: { id: "ml-system-design", title: "ML System Design", order: 2 },
+  },
+  {
+    slug: "ml-system-design/case-studies/harmful-content-detection",
+    title: "Case Study：Harmful Content Detection",
+    description:
+      "用六步框架走完一个有害内容检测系统：减少曝光的业务目标、校准后的三档决策、弱监督数据、三代多模态模型、两阶段推理、Recall@Precision95 和 Creator Embedding。",
+    categoryId: "ml-design",
+    category: "ML System Design",
+    section: "Case Studies",
+    created: "2026-11-24",
+    updated: "2026-11-24",
+    status: "growing",
+    readingMinutes: 24,
+    tags: ["ml-system-design", "case-study", "harmful content", "multimodal", "multi-task", "cascade", "interactive"],
+    series: { id: "ml-system-design", title: "ML System Design", order: 3 },
   },
 ];
 

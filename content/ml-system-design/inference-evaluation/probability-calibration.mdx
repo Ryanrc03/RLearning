@@ -1,0 +1,307 @@
+import { ReliabilityFigure, RankingVsCalibrationFigure, PavaFigure, CalibrationPipelineFigure, AdsEcpmFigure } from "@/components/visualization/ml-system-design/CalibrationFigures";
+
+# Probability Calibration：让 0.95 真的代表 95%
+
+这是 [ML System Design](/notes/ml-system-design/overview/) 模块第五步 Inference and Evaluation 里的第一个技术专题。它回答一个问题：模型输出的分数能不能当概率用，不能的话怎么修。本页先用 Reliability Diagram 看清问题，区分排序和校准，然后把 Isotonic Regression 用 PAVA 手算一遍，接着讲它在训练和线上流程里的位置、怎样评估，最后用广告排序说明校准为什么直接影响钱。在 [Harmful Content Detection](/notes/ml-system-design/case-studies/harmful-content-detection/) 案例里，它是模型和删除策略之间的那一层。
+
+## Why Calibration?
+
+从一个问题开始：模型预测一条帖子有害的概率是 0.95，是否意味着所有被打了 0.95 的帖子里，真的有约 95% 是有害的？
+
+不一定。Sigmoid 和 Softmax 保证输出落在 0 到 1 之间，多分类时加起来等于 1，但这只是形状上像概率。数值和真实频率对不对得上，取决于训练数据、loss、正则和模型容量。几个常见的偏离来源：训练时对负例做了降采样，深度网络在训练后期把 logit 越推越大，样本加权改变了各类样本在 loss 里的比重，线上分布和训练时不一样。
+
+把一批有标签的帖子按模型分数分桶，数一数每个桶里实际有多少是有害的，就得到下面这张表（教学数据）：
+
+| Raw Score | Sample Count | Actual Positive Rate |
+| ---: | ---: | ---: |
+| 0.10 | 100 | 0.05 |
+| 0.30 | 100 | 0.15 |
+| 0.50 | 100 | 0.30 |
+| 0.70 | 100 | 0.50 |
+| 0.90 | 100 | 0.75 |
+| 0.95 | 100 | 0.85 |
+
+把它画出来就是 Reliability Diagram：
+
+<ReliabilityFigure />
+
+校准要做的事情是在模型后面接一个函数 $g$，把原始分数映射成和实际频率一致的概率：
+
+$$
+p_{calibrated} = g(p_{raw})
+$$
+
+在这份数据里，$g(0.95) = 0.85$，$g(0.50) = 0.30$。严格的定义是：对任意取值 $p$，在所有被预测为 $p$ 的样本里，正例的比例恰好是 $p$，即 $P(Y = 1 \mid g(p_{raw}) = p) = p$。
+
+为什么这件事重要：只要下游把分数当成数值来用，而不只是用来比大小，就需要它是校准的。「概率 ≥ 95% 才自动删除」是在用数值；「pCTR × 出价」是在用数值；把两个模型的输出相加或相乘也是在用数值。
+
+## Ranking vs. Calibration
+
+三个容易混在一起的概念：
+
+| 概念 | 回答什么 | 怎样衡量 |
+| --- | --- | --- |
+| Ranking（排序能力） | 正例的分数是不是普遍高于负例 | [ROC-AUC](/notes/ml/evaluation/roc-auc/)、PR-AUC |
+| Calibration（校准） | 预测的概率和实际发生的频率是否一致 | Reliability Diagram、ECE |
+| Decision Policy（决策策略） | 拿到概率之后做什么动作 | 业务指标和 guardrail |
+
+AUC 只依赖样本之间的相对顺序。对分数做任何严格单调的变换（开方、平方、乘以常数），顺序不变，AUC 就不变，但每个数值代表的概率全变了。所以两个模型可以有相同的 AUC 和完全不同的 Calibration Error：
+
+<RankingVsCalibrationFigure />
+
+反过来也成立：一个模型可以校准得很好但毫无区分能力。对每条帖子都预测全站的有害比例 0.01，这个预测是校准的（被预测为 0.01 的帖子里确实有 1% 有害），AUC 却只有 0.5。所以两者都要看，哪一个都不能替代另一个。
+
+Decision Policy 是第三层：即使排序和校准都好，「超过多少删除、超过多少降权」仍然是业务决定，它取决于误删和漏放各自的代价，不取决于模型。
+
+## Isotonic Regression
+
+中文叫保序回归，也译作等序回归。它是最常用的非参数校准方法。
+
+核心想法：不假设 $g$ 是什么形状，只要求它单调不降，也就是原始分数更高的样本，校准后的概率不能更低：
+
+$$
+s_i \leq s_j \Rightarrow g(s_i) \leq g(s_j)
+$$
+
+把校准集里的样本按原始模型分数升序排列，记第 $i$ 条的分数为 $s_i$、标签为 $y_i \in \{0, 1\}$。Isotonic Regression 在所有单调不降的函数里找平方误差最小的那个：
+
+$$
+\min_g \sum_{i=1}^{N} \left(y_i - g(s_i)\right)^2
+$$
+
+约束为：
+
+$$
+g(s_1) \leq g(s_2) \leq \cdots \leq g(s_N)
+$$
+
+这个定义带来几个性质：
+
+- **不要求固定的函数形式。** 不是直线，也不是 sigmoid，数据是什么形状就拟合成什么形状，只要单调。
+- **不需要重新训练原始分类模型。** 它是接在模型后面的一个一维映射，输入只有分数和标签。
+- **尽可能保留原始排序关系。** 单调约束保证不会把高分样本排到低分样本后面。
+- **允许不同原始分数映射到相同概率。** 解的形状是一段一段的平台，平台内的样本得到同一个值。
+- **ROC-AUC 不保证完全不变。** 平台把原来有先后的样本变成了并列（ties），这一段里的排序信息丢了，所以 AUC 可能有小幅变化。说 Isotonic Regression「不改变 AUC」是不准确的，准确的说法是它不会把顺序颠倒。
+
+代价是它需要足够多的校准数据。自由度高意味着数据少的时候会把噪声也拟合进去，scikit-learn 的文档也指出它在小数据集上比 sigmoid 方法更容易过拟合。
+
+## PAVA Algorithm
+
+上面的优化问题有一个简单的精确解法：Pool Adjacent Violators Algorithm，简称 PAVA。名字就是算法本身：找到相邻且违反单调的两个区间，把它们合并（pool）。
+
+用一个可以手算的例子。五个分数桶，每桶 100 条样本：
+
+| Raw Score | Observed Positive Rate |
+| ---: | ---: |
+| 0.1 | 0.05 |
+| 0.3 | 0.35 |
+| 0.5 | 0.25 |
+| 0.7 | 0.65 |
+| 0.9 | 0.85 |
+
+从左往右看，0.05 到 0.35 是上升的，没问题。但接下来：
+
+$$
+0.35 > 0.25
+$$
+
+分数从 0.3 升到 0.5，正例率反而下降，违反单调约束。把这两个区间合并，用样本数加权取平均：
+
+$$
+\frac{100 \times 0.35 + 100 \times 0.25}{100 + 100} = 0.30
+$$
+
+合并后的值 0.30 比左边的 0.05 大、比右边的 0.65 小，没有新的冲突，算法结束：
+
+| | 0.1 | 0.3 | 0.5 | 0.7 | 0.9 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Before | 0.05 | 0.35 | 0.25 | 0.65 | 0.85 |
+| After | 0.05 | 0.30 | 0.30 | 0.65 | 0.85 |
+
+<PavaFigure />
+
+为什么合并成加权平均就是最优解：在「这两个点必须取同一个值」的前提下，使平方误差最小的那个值就是它们的加权均值。而当左边的观测比右边大时，最优解一定让这两个点相等，因为任何「左小右大」的取法都可以通过把两者向中间靠拢来降低误差。
+
+几点补充：
+
+- **合并可能连锁发生。** 合并出来的新值可能比它左边的区间小，或者仍比右边的大，这时要继续合并，直到整条序列单调。图里的第二个例子需要合并两次。
+- **样本数量不同时用加权平均。** 图里第二个例子的最后一步是 $(200 \times 0.45 + 200 \times 0.20) / 400 = 0.325$，权重是各区间累计的样本数。
+- **复杂度是线性的。** 数据排好序之后，用一个 Stack 从左到右扫一遍：新元素入栈，只要栈顶的值比它大就出栈合并。每个元素最多入栈一次、出栈一次，所以是 $O(N)$；加上排序，整体是 $O(N \log N)$。
+- **不要把所有实现都理解成严格的阶梯函数。** PAVA 给出的是每个训练点上的拟合值。对训练时没见过的分数怎么取值是另一个选择：scikit-learn 的 `IsotonicRegression` 在相邻的拟合节点之间做线性插值，所以它的预测函数是连续的折线，只有在平台内部才是水平的；另一些实现直接用阶梯函数。
+
+## Python Implementation
+
+用 scikit-learn 复现上面的手算结果：
+
+```python
+import numpy as np
+from sklearn.isotonic import IsotonicRegression
+
+# Five score buckets, already sorted by raw score.
+scores = np.array([
+    0.1, 0.3, 0.5, 0.7, 0.9
+])
+
+# Observed positive rate in each bucket.
+rates = np.array([
+    0.05, 0.35, 0.25, 0.65, 0.85
+])
+
+# Number of samples in each bucket, used as weights when pooling.
+weights = np.array([
+    100, 100, 100, 100, 100
+])
+
+calibrator = IsotonicRegression(
+    y_min=0,                # calibrated values stay inside [0, 1]
+    y_max=1,
+    increasing=True,        # higher raw score -> higher probability
+    out_of_bounds="clip"    # scores outside the fitted range use the end values
+)
+
+calibrator.fit(
+    scores,
+    rates,
+    sample_weight=weights
+)
+
+print(calibrator.predict(scores))
+```
+
+输出：
+
+```text
+[0.05 0.3  0.3  0.65 0.85]
+```
+
+也就是 `[0.05, 0.30, 0.30, 0.65, 0.85]`，和手算一致（NumPy 打印时省略了末尾的 0）。对一个没见过的分数，例如 `calibrator.predict([0.2])`，结果是 0.175：它落在 0.1 和 0.3 两个节点之间，按线性插值取 0.05 和 0.30 的中点。`out_of_bounds="clip"` 让低于 0.1 的分数都得到 0.05，高于 0.9 的都得到 0.85；默认值是返回 NaN，线上不能用。
+
+**这个例子用聚合后的正例比例作为 `y`，只是为了方便手算。** 实际训练时不需要先分桶，直接把每条样本的预测分数和真实的 0/1 标签交给它：
+
+```python
+# raw_scores: frozen model's outputs on the calibration set, shape (N,)
+# labels:     ground-truth 0/1 labels of the same samples, shape (N,)
+calibrator = IsotonicRegression(y_min=0, y_max=1, out_of_bounds="clip")
+calibrator.fit(raw_scores, labels)
+
+# Serving: map new raw scores to calibrated probabilities.
+calibrated = calibrator.predict(new_raw_scores)
+```
+
+两种写法解的是同一个优化问题：一个分数相同的桶里有 100 条 0/1 样本，和一条权重 100、取值为正例率的样本，对平方误差的贡献只差一个与 $g$ 无关的常数。
+
+## Training & Serving Pipeline
+
+Calibrator 是一个要用数据拟合的部件，所以它有自己的训练流程，也要和模型一起上线：
+
+<CalibrationPipelineFigure />
+
+这个流程里容易出错的地方：
+
+- **Calibration Dataset 必须独立于原模型的训练数据。** 模型在见过的样本上分数更极端，用它们拟合出来的 $g$ 在新数据上不成立。数据不够分的时候用交叉验证：把数据分成 k 折，每次用其余 k − 1 折训练模型，对留出的那一折打分，把所有折的 out-of-fold 分数拼起来拟合 calibrator。scikit-learn 的 `CalibratedClassifierCV` 做的就是这件事。
+- **校准数据应尽量反映真实线上分布。** $g$ 学到的是「这个分数段里正例的比例」，这个比例随流量的构成而变。用一个月前的数据、或者只用被人工审核过的样本去拟合，学到的就是那个人群上的比例。
+- **训练数据做过正负样本重采样时，不能直接假设输出概率符合线上实际比例。** 负例降采样会把预测整体抬高。可以用公式修正采样的影响（推导见 [Ranking 总览](/notes/ml/recsys/ranking-overview/) 的 Probability Calibration 一节），也可以直接在没有重采样的数据上拟合 calibrator。
+- **多阶段模型要关注进入后级模型的样本分布。** 两阶段系统里，第二阶段的模型只看得到第一阶段放行的样本，它的 calibrator 也应该在这个被筛选过的分布上拟合，而不是在全量数据上。
+- **阈值确定与最终测试评估应适当分离。** 如果在同一份数据上既拟合 $g$、又选阈值、又报告最终的 Precision，这个 Precision 是偏乐观的。最终的数字留给一份只用一次的测试集。
+- **Calibration 需要随 Data Drift 和模型版本变化持续监控。** 模型换版本，分数的含义就变了，旧的 calibrator 直接作废；模型不变，内容和用户的分布也在变。线上要定期用新标注的样本重画 Reliability Diagram，偏了就重新拟合。
+
+## Evaluation Metrics
+
+**Reliability Diagram** 是最直接的工具：分桶、画点、看离对角线多远。它能告诉你哪个分数段偏了、往哪边偏，这是单个数字做不到的。
+
+**ECE（Expected Calibration Error）** 把这张图压成一个数：每个桶里预测和实际的差，按桶的大小加权平均。
+
+$$
+ECE = \sum_{m=1}^{M} \frac{|B_m|}{N} \left| acc(B_m) - conf(B_m) \right|
+$$
+
+这个公式的记号来自多分类的场景，那里 $acc$ 是桶内的准确率，$conf$ 是桶内最大类概率的均值。**对于二分类的正例概率校准，这里的 $acc(B_m)$ 表示桶 $B_m$ 内的实际正例率，$conf(B_m)$ 表示桶内预测正例概率的平均值。**
+
+对第一节的教学数据，六个桶大小相等，各占 $1/6$：
+
+$$
+ECE = \frac{0.05 + 0.15 + 0.20 + 0.20 + 0.15 + 0.10}{6} \approx 0.142
+$$
+
+ECE 的局限：它依赖分桶方式，桶数和等宽还是等频都会改变结果；桶内的正负偏差会互相抵消；样本少的桶估计很不稳。
+
+**Brier Score** 是概率和标签之间的均方误差：
+
+$$
+BS = \frac{1}{N} \sum_{i=1}^{N} (p_i - y_i)^2
+$$
+
+它不需要分桶，越小越好。但 Brier Score 同时受到概率校准和区分能力的影响，并不是纯粹的 Calibration Metric。它可以分解成三项：衡量校准的 reliability、衡量区分能力的 resolution、以及只由正例比例决定的 uncertainty。一个校准完美但没有区分能力的模型（永远预测基础比例）Brier Score 并不好。所以 Brier Score 下降不一定是校准变好了，要和 ECE、AUC 一起看。图 1 里校准把它从 0.181 降到 0.158，这部分下降全部来自校准，因为排序没有变。
+
+最后一个容易想当然的地方：**校准后的概率达到 95%，不意味着实际部署后删除的 Precision 一定能保证 95%。** 如果概率完全校准，「只删 $p \geq 0.95$ 的帖子」在期望上确实给出不低于 95% 的 Precision，但这个结论有三个前提会被打破：
+
+- **有限样本误差。** 高分段的样本很少，$g$ 在 0.95 附近是用几十上百条样本估出来的，本身有置信区间。
+- **分布漂移。** $g$ 是在过去的数据上拟合的，新出现的内容类型、新的规避手法会让同一个分数对应的真实比例变化。
+- **校准集和线上流量不一致。** 校准集如果是人工挑选或被旧系统筛选过的，它的比例就不是线上的比例。
+
+所以 95% 的 guardrail 不能只靠校准保证，还要靠线上持续抽样复核被删除的帖子，直接监控 Precision。
+
+## Calibration Methods Comparison
+
+| Method | Core Idea | 公式 | Characteristics |
+| --- | --- | --- | --- |
+| Platt Scaling | Sigmoid Mapping | $p = \sigma(As + B)$ | 只有两个参数，数据少也稳；假设偏差是 sigmoid 形状 |
+| Temperature Scaling | Logits / Temperature | $p = \operatorname{softmax}(z / T)$ | 只有一个参数 $T$，不改变预测类别；常用于神经网络的多分类输出 |
+| Isotonic Regression | Monotonic Mapping | $\min_g \sum (y_i - g(s_i))^2$，$g$ 单调 | 不假设形状，灵活；需要足够数据，会产生平台 |
+| Histogram Binning | Bucket Positive Rate | $p$ = 所在桶的正例率 | 直观；结果依赖分桶，不保证单调 |
+
+Platt Scaling 的 $A$、$B$ 和 Temperature Scaling 的 $T$ 都是在校准集上最小化 log loss 得到的。Temperature Scaling 可以看成 Platt Scaling 去掉截距、推广到多分类的版本：$T > 1$ 把分布压平，修正过度自信；$T < 1$ 相反。图 2 里的模型 B 就是对模型 A 做了一次温度变换。
+
+Isotonic Regression 和 Histogram Binning 的关系：两者的结果都是分段常数，但 Histogram Binning 的桶边界是事先定的，Isotonic Regression 的平台边界是数据决定的，并且保证单调。
+
+怎么选：校准数据少（几百到一两千条）时用参数少的 Platt 或 Temperature Scaling；数据充足、偏差形状不规则时用 Isotonic Regression。
+
+## Application in Ads Ranking
+
+广告排序是校准要求最严格的场景之一，因为概率直接乘以钱。按点击计费（CPC）的广告，平台每展示一千次的期望收入是：
+
+$$
+eCPM = 1000 \times pCTR \times Bid_{CPC}
+$$
+
+假设一个广告的 CPC Bid 是 2 美元。校准前，模型预测：
+
+$$
+pCTR = 0.10 \quad\Rightarrow\quad eCPM = 1000 \times 0.10 \times 2 = 200
+$$
+
+校准后发现它的真实点击率只有 0.06：
+
+$$
+pCTR = 0.06 \quad\Rightarrow\quad eCPM = 1000 \times 0.06 \times 2 = 120
+$$
+
+同一个广告，预期价值差了 40%。放进一次竞价里看后果：
+
+<AdsEcpmFigure />
+
+概率高估造成三层影响：
+
+- **预期价值。** 平台以为每千次展示值 200 美元，实际只换回 120 美元，收入预估和预算消耗的节奏都跟着偏。
+- **排序。** eCPM 是不同广告之间比较的统一尺度。出价不同的广告之间，$pCTR$ 的绝对值决定谁排在前面；只要不同广告被高估的程度不一样，就会有本不该赢的广告赢得位置。
+- **竞价和计费。** 在按第二高价等机制计费时，赢家付多少由排在它后面的 eCPM 折算而来，被高估的 eCPM 会抬高别人的成本；对广告主，自动出价系统用 $pCTR$、$pCVR$ 反推出价，概率偏了，出价就偏了。
+
+这和有害内容检测是同一个结构：一个模型只需要在自己的样本里排对顺序时，AUC 就够了；一旦概率要和别的量相乘、相加，或者和固定阈值比较，就需要校准。推荐系统里把点击、点赞、时长几个概率融合成一个排序分数时也是如此，见 [Ranking 总览](/notes/ml/recsys/ranking-overview/) 和 [融合分数](/notes/ml/recsys/score-fusion/)；$pCTR$ 和 $pCVR$ 的建模见 [CTR、CVR 与 ESMM](/notes/ml/recsys/ctr-cvr-esmm/)。
+
+## Key ideas to remember
+
+1. Sigmoid 输出落在 0 到 1 之间，不代表它是校准的概率；校准的定义是「预测为 $p$ 的样本里正例比例恰好是 $p$」。
+2. AUC 决定模型的排序能力，Calibration 决定概率的可信度，Business Policy 决定怎样把预测变成决策。三者互相独立。
+3. Isotonic Regression 拟合一个单调不降的映射，不改动原模型；PAVA 通过反复合并相邻的违反区间求出它，合并值是加权平均。
+4. 平台会产生并列，所以 Isotonic Regression 不会颠倒顺序，但 AUC 不保证完全不变。
+5. Calibrator 要在独立的、接近线上分布的数据上拟合，和模型版本绑定，并且持续监控。
+6. 校准到 95% 不等于线上 Precision 保证 95%，有限样本和分布漂移都会让它偏，guardrail 要靠线上抽样复核。
+
+## References
+
+- [scikit-learn：Probability calibration](https://scikit-learn.org/stable/modules/calibration.html)，校准曲线、sigmoid 与 isotonic 两种方法、`CalibratedClassifierCV` 的用法。
+- [scikit-learn：Isotonic regression](https://scikit-learn.org/stable/modules/isotonic.html)，`IsotonicRegression` 的优化目标和线性插值的预测方式。
+- [Hello Interview：Harmful Content Detection](https://www.hellointerview.com/learn/ml-system-design/problem-breakdowns/harmful-content)，校准在审核系统里的位置。
+- Guo et al., [On Calibration of Modern Neural Networks](https://arxiv.org/abs/1706.04599)（ICML 2017），Temperature Scaling 和 ECE 的常用出处。
+- Platt, Probabilistic Outputs for Support Vector Machines and Comparisons to Regularized Likelihood Methods（1999），Platt Scaling 的出处。
+- Zadrozny & Elkan, Transforming Classifier Scores into Accurate Multiclass Probability Estimates（KDD 2002），用 Isotonic Regression 做校准的出处。

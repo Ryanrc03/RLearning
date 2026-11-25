@@ -1,0 +1,369 @@
+import { DecisionPolicyFigure, FeatureColumnsFigure, LeakageTimelineFigure, TwoStageFigure, RecallAtPrecisionFigure, SocialGraphFigure } from "@/components/visualization/ml-system-design/HarmfulContentFigures";
+import { IndependentClassifiersFigure, LateFusionFigure, MultimodalTransformerFigure, MultiTaskHeadsFigure, ViewWeightFigure } from "@/components/visualization/ml-system-design/HarmfulContentModels";
+
+# Case Study：Harmful Content Detection
+
+这是 [ML System Design](/notes/ml-system-design/overview/) 模块的第一个完整案例：为一个社交平台设计有害内容检测系统。案例来自 Hello Interview 的同名讲解，本页按 [六步框架](/notes/ml-system-design/overview/) 的顺序把它走一遍：先定目标，再画架构，然后是数据、三代模型、推理与评估，最后展开 Creator Embedding 这一个 Deep Dive。中间用到的校准单独写在 [Probability Calibration](/notes/ml-system-design/inference-evaluation/probability-calibration/)。
+
+## Step 1. Problem Framing
+
+### Clarify the Problem
+
+面试时先用几个问题把范围定下来。本案例的假设如下：
+
+| 维度 | 假设 |
+| --- | --- |
+| 输入 | 帖子的文本和图片 |
+| 输出 | 这条帖子的有害内容风险 |
+| 规模 | 每天约十亿条帖子 |
+| 正例比例 | 有害内容不足 1% |
+| 标注数据 | 约 50,000 条人工标注，正负各半 |
+| 精度约束 | 自动删除的内容，Precision 至少 95% |
+| 资源约束 | 人工审核的人力有限 |
+
+**这些数字是教学案例的假设，不是 Facebook 或任何平台的实际生产数据。** 它们的作用是把后面的设计决定逼出来：十亿条每天意味着不能对每条帖子都跑最贵的模型；正例不足 1% 意味着 Accuracy 没有意义；只有五万条标注意味着必须找别的监督信号；95% 的 Precision 约束意味着输出的概率必须可信。
+
+### Business Objective
+
+目标不是简单地减少有害帖子的数量，而是**减少有害内容的曝光**。写成优化问题：
+
+$$
+\min \sum_{i=1}^{N} y_i V_i
+$$
+
+约束为：
+
+$$
+\text{Precision}_{\text{delete}} \geq 0.95
+$$
+
+其中：
+
+- $y_i \in \{0, 1\}$：第 $i$ 条帖子是否有害。
+- $V_i$：执行审核策略**之后**这条帖子得到的曝光量。删除让之后的曝光变成 0，降权让它变小，放行则不变。
+
+按曝光而不是按条数来算，是因为帖子的影响相差几个数量级：一条拥有百万次曝光的有害帖子，造成的影响可能比一万条各只有几次曝光的帖子加起来还大。这个定义还带来两个推论：越早处理越好，因为 $V_i$ 只能挡住还没发生的曝光；优先处理可能大范围传播的帖子，这会在后面的 View-weighted Loss 里用到。
+
+约束项来自另一侧的代价：误删正常内容会伤害用户和平台的信誉，所以自动删除这个最重的动作要有很高的把握。
+
+### ML Objective
+
+把它建模为 Binary Classification：给定帖子 $x$，预测它有害的概率。
+
+$$
+p_\theta(x) = P(Y = 1 \mid X = x)
+$$
+
+之后可以扩展为 Multi-label Classification：同时预测它属于哪几类违规（裸露、仇恨言论、暴力等），一条帖子可以同时属于多类。
+
+评估指标不能用 Accuracy。看一个极端不平衡的例子：10,000 条帖子里只有 50 条有害，一个把所有帖子都预测为正常的模型，对了 9,950 条：
+
+$$
+\text{Accuracy} = \frac{9950}{10000} = 99.5\%, \qquad \text{Recall} = \frac{0}{50} = 0
+$$
+
+Accuracy 很高，却一条有害帖都没抓到。在 [Confusion Matrix](/notes/ml/evaluation/confusion-matrix/) 里，这个模型的 TP 是 0，Accuracy 完全由数量庞大的 TN 撑起来。正例稀少时应该看只盯着正例的指标，也就是 [Precision 和 Recall](/notes/ml/evaluation/precision-recall-f1/)，具体用哪个放到第五步。
+
+## Step 2. High Level Design
+
+<DecisionPolicyFigure />
+
+三个部件各管一件事：
+
+- **Classification Model**：识别内容风险，输出一个原始分数。它在帖子发布（Post Created）时跑一次，之后随着曝光（Post Viewed）带来新的行为信号再重新跑。
+- **Calibration**：把原始分数校准成概率，使「0.95」的含义是「这样的帖子里约 95% 有害」。
+- **Decision Policy**：根据业务目标决定处理方式。低于 70% 放行（Allow），70% 到 95% 之间降权（Demote），达到 95% 删除（Delete）。
+
+**70% 和 95% 是教学示例阈值**，实际阈值要用验证数据和线上的业务约束来确定。
+
+为什么中间要有 Demote 这一档：业务目标是减少曝光，而自动删除又要求 95% 的把握。对于「很可疑但还不够确定」的帖子，降权可以立刻减少它的曝光，又不是不可逆的；同时把它排进人工审核队列，把有限的审核人力用在模型最拿不准的地方。
+
+为什么 Calibration 是独立的一层：策略里的阈值是按概率的含义写的，而模型的原始分数不保证有这个含义，尤其是在后面用了样本加权和多任务训练之后。详细的原因、Isotonic Regression 的算法和它在线上的位置，见 [Probability Calibration](/notes/ml-system-design/inference-evaluation/probability-calibration/)。
+
+## Step 3. Data and Features
+
+### Training Data
+
+五万条人工标注远远不够训练一个多模态模型，所以要把能用的信号都找出来。按监督信号的强弱分成三类：
+
+| 类别 | 数据 | 特点 |
+| --- | --- | --- |
+| **Supervised Data** | Human-labeled Data：审核员标注的约 5 万条；Open NSFW Datasets：公开的违规图片数据集 | 标签可信，量少，和平台真实分布可能有差距 |
+| **Weak Supervision**（可进一步用于 Semi-supervised Learning） | User Reports：用户举报；Negative User Actions：拉黑、取关、「不感兴趣」；Hide Post：隐藏帖子 | 量大，和有害相关，但有噪声、有偏 |
+| **Unsupervised / Self-supervised Learning** | Post Comments：评论文本；User Behavior：浏览、互动序列 | 没有标签，量最大，用来预训练表示 |
+
+这里最需要讲清楚的是第二类：**用户举报不等于 Ground Truth，没有举报也不等于正常内容。**
+
+- 举报有假阳性：恶意举报、因为观点不同而举报、成规模的举报攻击。
+- 没有举报有假阴性：有害内容发在同好的小群里没人会举报；刚发布的帖子还没有人看到；一些类型（例如诈骗）受害者意识不到。
+- 举报量和曝光量强相关：同样的内容，曝光多的帖子举报自然多。
+
+所以举报不能直接当作标签去替换人工标注。合理的用法有三种：
+
+1. **作为辅助任务**：让模型多一个 head 去预测举报率，用海量的举报数据帮共享的 backbone 学表示（第四步的 Multi-task Learning）。
+2. **生成候选弱标签**：举报率很高且被多个互不相关的用户举报的帖子，作为带噪声的正例，和人工标注数据一起训练，或者优先送去人工标注。
+3. **进一步做半监督学习**：用已有模型给大量无标签帖子打分，把高置信度的预测当作伪标签加入训练。这一步才是 semi-supervised learning；前两种是 weak supervision。两者的区别见 [Overview 的第三步](/notes/ml-system-design/overview/#step-3-data-and-features)。
+
+第三类数据没有标签，但可以构造自监督任务：遮住评论里的词去预测它（和 [BERT 的 MLM](/notes/ml/llms/pretraining-objectives/) 一样），或者用图文配对做对比学习（见 [CLIP](/notes/ml/multimodal/clip-contrastive-learning/)）。这样得到的 encoder 在平台自己的语料上学过，再用少量有标签数据微调。
+
+### Feature Engineering
+
+<FeatureColumnsFigure />
+
+三类特征回答三个不同的问题：内容特征回答「这条帖子本身说了什么」；行为特征回答「看到它的人有什么反应」；作者特征回答「发它的人过去是什么样」。内容特征在发布的那一刻就齐了，行为特征要等曝光之后才有，这个时间差决定了系统为什么要多次推理，也是下一节数据泄漏的来源。
+
+### Feature Freshness & Data Leakage
+
+行为特征是有时间戳的：同一个特征在不同时刻的取值不同。看一条帖子的时间线：
+
+<LeakageTimelineFigure />
+
+线上在 T = 10 min 做推理时，模型手里只有那一刻的信息。训练样本必须还原同一个时刻的特征，不能使用 T = 60 min 才出现的举报。这个要求叫 **Point-in-time Correctness**：每条训练样本的每个特征，取值都必须是「预测时刻」的快照。
+
+做到它的常见办法：
+
+- 特征落盘时带上事件时间，训练时按「样本的预测时刻」做 as-of join，只取这个时刻之前的值。
+- 更直接的办法是在线上推理时把当时用到的特征原样记录下来（feature logging），训练直接用这份日志，从根上避免离线重算时算错。
+- 标签可以来自未来（举报、审核结果都发生在推理之后），特征不行。
+
+这个问题在推荐系统里完全一样，可以对照 [按时间切分](/notes/ml/recsys/point-in-time-split/) 和 [样本与特征拼接](/notes/ml/recsys/sample-feature-join/)。
+
+Feature Freshness 是同一件事的另一面：行为特征越新越有用，但实时计数需要流式计算，成本更高。通常的折中是内容特征算一次后缓存，作者特征每天批量更新，行为特征用分钟级的实时计数。
+
+## Step 4. Modeling
+
+这是本案例的重点。模型分三代演进，每一代解决上一代的一个具体问题。
+
+### Independent Classifiers
+
+最简单的做法：每个模态训练一个分类器，各打各的分，最后取最大值。
+
+<IndependentClassifiersFigure />
+
+$$
+s = \max(s_{text}, s_{image}, s_{behavior})
+$$
+
+优点和缺点都很清楚：
+
+- **简单，易于独立迭代。** 文本模型和图像模型可以由不同的团队分别训练、分别上线，可以直接用现成的预训练分类器，某一路出问题也容易定位。作为 baseline 很合适。
+- **无法充分捕捉跨模态交互。** 图里的第二个场景：图片和文字单看都没问题，合在一起才构成违规。三个分类器都只看到一半的信息。
+- **Max Score 不一定是可靠的概率。** 三个模型的分数尺度可能不同，取最大值还会系统性地偏高（三个带噪声的数里取最大的那个）。即使每个分类器各自校准过，它们的最大值也不是校准的，需要在最终分数上再做一次校准。
+
+### Late Fusion
+
+第二代不再让每个模态输出分数，而是输出向量，拼接后一起判断。
+
+<LateFusionFigure />
+
+$$
+h = [e_{image};\ e_{text};\ x_{behavior};\ x_{creator}]
+$$
+
+$$
+p = \sigma(\operatorname{MLP}(h))
+$$
+
+**Embedding Concatenation 怎样学到跨特征交互：** 拼接本身只是把向量首尾相连，交互发生在后面的 MLP 里。MLP 第一层的每个神经元对 $h$ 的所有维度做加权求和再过非线性，于是它可以表示「图像向量的某个方向」和「举报率高」同时出现这样的组合条件。层数越多，能表示的组合越复杂。这和推荐排序模型把各种 embedding 拼起来过 MLP 是同一个结构。
+
+**为什么独立的 Encoder 仍可能丢失细粒度的图文关系：** 每个 encoder 在看不到另一个模态的情况下，就要把自己的输入压成一个固定长度的向量。Image Encoder 不知道文字说了什么，所以不知道图里哪个区域重要，只能保留一个笼统的概括；多张图再做平均，又抹掉一层。到拼接的时候，「文字里的这个词指的是图里的这个物体」这种对应关系已经不在向量里了，后面的 MLP 无从恢复。交互发生得太晚，这就是 late fusion 这个名字的含义；与它相对的 early fusion 是在编码之前或编码过程中就让两个模态互相看到。
+
+### Multi-modal Transformer
+
+第三代把融合提前到 token 层面。
+
+<MultimodalTransformerFigure />
+
+- **图片与文本在 Token 层面通过 Attention 交互。** 图片切成 patch，每个 patch 是一个 token（做法见 [Visual Tokens](/notes/ml/multimodal/visual-tokens/)）；文本照常分词。两种 token 拼成一个序列，进同一个 [Transformer](/notes/ml/llms/transformer-architecture/)。[Self-Attention](/notes/ml/llms/attention-qkv/) 让每个 token 都能直接读到其它所有 token，文本里的词可以关注图里的具体区域。这属于 early fusion。
+- **实时行为特征在后续 MLP 中融合。** 行为特征是几个数值，不是序列，没有必要进 Transformer；更重要的是它们一直在变。
+- **可以缓存内容 Embedding，降低帖子反复推理的成本。** 一条帖子在生命周期里会被打分很多次（每来一批新的曝光和举报就要重新评估），但它的内容不变。把 Transformer 的输出按帖子 ID 缓存，重新打分时只需要重跑后面便宜的 MLP。
+
+这个结构把模型切成了「贵但只跑一次」和「便宜但反复跑」两段，切分点正好是第三步里内容特征和行为特征的时间差。这是一个系统约束反过来决定模型结构的例子。
+
+三代的对比：
+
+| | Independent Classifiers | Late Fusion | Multi-modal Transformer |
+| --- | --- | --- | --- |
+| 融合的位置 | 分数层面 | 向量层面 | token 层面 |
+| 跨模态交互 | 没有 | 粗粒度 | 细粒度 |
+| 推理成本 | 低 | 中 | 高，内容部分可缓存 |
+| 迭代方式 | 各模态独立 | 需要联合训练 | 需要联合训练，数据需求最大 |
+
+### Multi-task Learning
+
+五万条二分类标签撑不起一个多模态 Transformer。办法是让同一个 backbone 同时学几个相关的任务：
+
+<MultiTaskHeadsFigure />
+
+三个 Classification Head：
+
+- **Harmful / Benign**：主任务。
+- **Nudity / Other Violation Types**：具体的违规类型，多标签。
+- **User Report Prediction**：预测这条帖子会被举报的比例。
+
+基础的损失是三项的加权和：
+
+$$
+L_{total} = \alpha L_{harmful} + \beta L_{violation} + \gamma L_{report}
+$$
+
+**各任务根据标签类型选择对应的 Loss。** 主任务是二分类，用 Binary Cross Entropy。违规类型不互斥，每一类一个 sigmoid，各自算 BCE 再求和。举报的标签是「$n$ 次曝光里有 $k$ 次举报」，是比例或计数而不是 0/1，适合用 binomial 的负对数似然：
+
+$$
+L_{report} = -\left[k \log r + (n - k) \log(1 - r)\right]
+$$
+
+其中 $r$ 是模型预测的举报率。举报非常稀少时，也可以用以曝光量为 exposure 的 Poisson 损失。这样曝光多的帖子自然贡献更多的信息，不需要人为地把举报率切成「高 / 低」两类。
+
+多任务带来的好处是数据：举报日志比人工标注多几个数量级，它把 backbone 训练成一个知道「什么样的内容会让人反感」的表示，主任务的 head 只需要在这个表示上用少量标注学一个分界。代价是任务之间可能互相拉扯，$\alpha$、$\beta$、$\gamma$ 需要调，举报任务的偏差（见第三步）也会渗进共享表示。任务冲突时怎样改结构，见 [MMoE](/notes/ml/recsys/mmoe/) 和 [多目标排序](/notes/ml/recsys/multi-task-ple/)。
+
+### View-weighted Loss
+
+普通的 Binary Cross Entropy 对每条样本一视同仁：
+
+$$
+L_{BCE} = -\left[y \log p + (1 - y) \log(1 - p)\right]
+$$
+
+但业务目标 $\sum y_i V_i$ 不是这样的：漏掉一条百万曝光的有害帖，比漏掉一条十次曝光的严重得多。可以把这层轻重通过样本权重告诉模型。下面是一个示例设计：
+
+$$
+w_i = 1 + \min\left(\log(1 + \hat V_i),\ c\right)
+$$
+
+$$
+L = \frac{1}{N} \sum_{i=1}^{N} w_i L_{BCE,i}
+$$
+
+其中：
+
+- $\hat V_i$：这条帖子的预测潜在曝光量。用预测值而不是实际值，是因为被及时删除的帖子实际曝光很低，但它本来可能传播很广。
+- $c$：权重上限，防止个别爆款帖子的权重无限增长。
+- $\log$：避免高曝光样本完全主导梯度。曝光量是重尾分布，直接用 $\hat V_i$ 当权重，一个 batch 的梯度会几乎全部来自一两条帖子。
+- 加 1：保证零曝光的样本权重为 1 而不是 0，仍然参与训练。
+
+<ViewWeightFigure />
+
+**这是本笔记额外补充的示例权重设计，用来说明「怎样把曝光量放进 loss」，不是原教程公式的逐字复现。** 实际使用时权重的形式和上限都需要通过实验来定。
+
+加权有一个副作用：它改变了模型看到的样本分布。高曝光样本被放大之后，模型输出的不再是「一条随机帖子有害的概率」，而是偏向高曝光人群的估计，概率的含义变了。多任务训练、负例降采样也有类似的效果。所以用了这些技巧之后，更需要一层独立的 [Calibration](/notes/ml-system-design/inference-evaluation/probability-calibration/)，在一份未加权、接近线上分布的数据上把分数重新对齐到真实频率。
+
+## Step 5. Inference and Evaluation
+
+### Two-stage Inference
+
+每天十亿条帖子，每条还要在生命周期里重新打分多次。对所有帖子都跑 Multimodal Transformer 成本太高，而其中 99% 以上是正常内容。
+
+<TwoStageFigure />
+
+这种结构叫 **Cascading Architecture**：
+
+- **Stage 1：高 Recall、低延迟、低成本。** 一个轻量的分类器（例如只用文本和少量特征的小模型）给所有帖子打分。它的任务不是判定有害，而是把明显正常的帖子尽早排除，所以阈值设得很低，宁可多放进来，不能漏。
+- **Stage 2：更精确的跨模态判断。** 只有被第一阶段标记为高风险的帖子，才进入 Multimodal Transformer 和多任务 heads，输出经过校准后交给 Decision Policy。
+- **第一阶段漏掉的有害内容，通常无法被第二阶段补救。** 第二阶段根本看不到它们。所以系统的 Recall 是两个阶段 Recall 的乘积，上限是第一阶段的 Recall。
+- **需要同时评估整体系统与各阶段的 Precision、Recall。** 只看第二阶段在它收到的样本上的指标会过于乐观，因为最难的那些样本可能已经在第一阶段被放走了。评估第一阶段的漏判，需要从它放行的帖子里抽样送人工标注。
+- **帖子产生新的行为事件之后，可以再次推理。** 一条发布时被第一阶段放行的帖子，在累计到一定曝光或出现举报后重新进入流程，这时行为特征能补上内容模型的盲区。这是 Event-driven Inference：由事件而不是定时任务触发。
+
+第二阶段的模型只见过第一阶段筛选后的样本，它的训练数据和校准数据也都应该来自这个分布，这一点在 [Probability Calibration](/notes/ml-system-design/inference-evaluation/probability-calibration/) 里会再提到。
+
+这和推荐系统的多阶段筛选是同一个思路：推荐里先用便宜的召回从上亿候选里取出几千个，再用粗排、精排逐级用更贵的模型打分（见 [双塔模型](/notes/ml/recsys/two-tower-architecture/) 和 [Ranking 总览](/notes/ml/recsys/ranking-overview/)）。两者的共同点是：前面的阶段决定了后面的阶段能看到什么，前面丢掉的后面救不回来。不同点是目标：推荐的前级要的是「好东西别漏」，这里的前级要的是「坏东西别漏」。
+
+### Offline Evaluation
+
+离线评估用的指标：
+
+| 指标 | 回答什么 | 在本案例中的位置 |
+| --- | --- | --- |
+| PR-AUC | 在所有阈值上，Precision 和 Recall 的整体权衡 | 比较模型的主要指标，正例稀少时比 ROC-AUC 敏感 |
+| Recall@Precision95 | 在 Precision 不低于 95% 的前提下，最多能抓到多少 | 直接对应业务约束，最贴近「能自动删除多少」 |
+| ROC-AUC | 正例分数高于负例的概率 | 参考指标；负例极多时容易显得过于好看 |
+| Calibration Error | 预测概率和实际频率差多少 | 决定阈值策略能不能按概率的字面意思执行 |
+| Bias Evaluation | 不同语言、地区、人群上的指标是否有系统性差异 | 检查模型是否对某些群体误删率偏高 |
+
+为什么 PR-AUC 比 [ROC-AUC](/notes/ml/evaluation/roc-auc/) 更合适，[PR 曲线与 Precision@k](/notes/ml/evaluation/pr-curve-precision-at-k/) 里有一个可以拖动的对比：负例远多于正例时，FPR 的分母很大，大量误报在 ROC 上几乎看不出来，在 PR 曲线上却会把 Precision 直接拉垮。
+
+**Recall@Precision95** 需要展开一下，因为它是这个案例最重要的指标。计算步骤：
+
+1. 用模型给验证集的每条样本打分。
+2. 遍历所有可能的 Classification Threshold（每个不同的分数值都是一个候选）。
+3. 对每个阈值，把分数不低于它的样本判为有害，算出 Precision 和 Recall。
+4. 筛出满足 Precision ≥ 95% 的阈值。
+5. 在这些阈值里选 Recall 最大的那个，它的 Recall 就是 Recall@Precision95，它本身就是自动删除的工作阈值。
+
+<RecallAtPrecisionFigure />
+
+它比 PR-AUC 更贴近业务，因为它只看约束线以上的那一段：一个模型如果在 Precision 60% 的区域比另一个好很多，对自动删除毫无帮助。它的弱点是只取曲线上一个点，在高 Precision 区域样本很少，估计的方差大，所以通常和 PR-AUC 一起报告。同样的做法可以用在 Demote 的阈值上，只是把约束换成更宽松的 Precision。
+
+Bias Evaluation 不只是公平性上的要求。模型可能把某些方言、某些群体的日常用语和违规内容混在一起，表现为这个切片上的误删率明显偏高；总体指标里这个问题会被平均掉，只有分组算指标才看得见。
+
+### Online Evaluation
+
+离线指标再好，也要在线上验证，原因见 [Overview 的第五步](/notes/ml-system-design/overview/#step-5-inference-and-evaluation)。线上看这些：
+
+| 指标 | 含义 | 方向 |
+| --- | --- | --- |
+| Harmful Content Impression Rate | 有害内容的曝光占全部曝光的比例 | 越低越好，最接近业务目标 |
+| User Report Rate | 每千次曝光的举报数 | 越低越好，不需要人工标注就能实时看 |
+| Wrongful Removal Rate | 被删除的内容里实际正常的比例 | 越低越好，对应 Precision 约束 |
+| Appeal Rate | 被删除后用户申诉、以及申诉成功的比例 | 越低越好，是误删的间接信号 |
+| Inference Latency | 从事件发生到做出决定的时间 | 越短，挡住的曝光越多 |
+| Serving Cost | 每天的推理开销 | 约束项 |
+
+**Labelled A/B Test。** 普通的 [A/B Test](/notes/ml/evaluation/ab-test-p-value/) 直接从日志里读指标，但这里最重要的指标 Harmful Content Impression Rate 需要知道哪些曝光是有害的，而这正是模型要预测的东西，日志里没有。所以要从实验组和对照组各抽一批曝光，送人工标注，再比较两组里有害曝光的比例。User Report Rate 可以作为不需要标注的代理指标同时看，但它带着第三步说过的那些偏差。
+
+**Importance Sampling。** 人工标注的预算有限，而有害内容不足 1%：随机抽 1,000 条去标注，只能期望抽到几条正例，估计出来的比例几乎没有精度。办法是提高高风险内容的抽样比例，再按实际的抽样概率加权，恢复对总体的估计。
+
+用一个小例子看直觉。总体有 1,000,000 次曝光，模型把其中 10,000 次标为高风险，其余 990,000 次为低风险。标注预算 1,000 条，两层各抽 500 条：
+
+| 层 | 总体数量 | 抽样数 | 抽样概率 | 每条样本代表 | 标出的有害数 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 高风险 | 10,000 | 500 | 1 / 20 | 20 条 | 100 |
+| 低风险 | 990,000 | 500 | 1 / 1980 | 1,980 条 | 1 |
+
+每条被抽中的样本代表「抽样概率的倒数」那么多条总体样本，所以总体里有害曝光的估计是：
+
+$$
+100 \times 20 + 1 \times 1980 = 3980, \qquad \frac{3980}{1000000} \approx 0.4\%
+$$
+
+如果忘了加权，直接把 1,000 条样本合起来算，会得到 $101 / 1000 = 10.1\%$，高估了二十多倍。加权之后估计是无偏的，而且高风险层里有 100 个正例可用，比均匀抽样稳定得多。这个例子也暴露了它的弱点：低风险层那 1 条正例的权重是 1,980，它的出现与否对结果影响很大，所以低风险层也不能抽得太少。
+
+这和推荐系统里用 IPS 修正曝光偏差是同一个原理，可以对照 [偏差分解与 IPS](/notes/ml/recsys/bias-decomposition-ips/)。具体的公式推导和方差分析留给之后的 Sampling & Selection Bias 专题。
+
+## Step 6. Deep Dives：Creator Embedding
+
+前面的作者特征里有一项 User Embedding。发布者是谁，是判断内容的一个很强的先验：过去多次违规的账号、和已知违规网络关系密切的账号，发出有害内容的概率更高。问题是这个向量从哪里来。
+
+<SocialGraphFigure />
+
+几种做法，从简单到复杂：
+
+- **User ID Embedding。** 给每个用户 ID 一行可训练的向量，和模型一起训练（和推荐系统里的 [ID Embedding](/notes/ml/recsys/id-embedding-one-epoch/) 相同）。它能记住每个老用户的特点，但只利用了这个用户自己的数据，而且对没有历史的用户无能为力。
+- **Graph-based Embedding。** 用户之间有关注、互动、共同加入群组等关系，构成一张图。在图上学表示，使一个节点的向量由它的邻居决定，关系密切的账号得到相近的表示。成规模的违规行为（例如协同发布垃圾内容的账号群）在单个账号上看不出来，在图上却是明显的结构。
+- **Transductive GNN。** 在一张固定的图上为每个节点直接学一个向量。训练时所有节点都必须已经在图里；来了新节点，要么重训，要么没有向量。
+- **Inductive GNN / GraphSAGE。** 不直接学每个节点的向量，而是学一个聚合函数：给定一个节点自己的特征和它采样到的邻居的表示，怎样算出这个节点的表示。函数学好之后，对训练时没见过的节点同样可以用。
+- **Cold Start。** 新注册的账号没有发帖历史，ID Embedding 没有可用的行；但它往往已经有了一些边（关注了谁、加入了哪些群组、从哪个设备或邀请链接来），inductive 的方法可以立刻从这些邻居算出表示。这在本案例里尤其重要，因为被封禁的违规者最常见的做法就是换一个新账号。
+
+需要特别小心的一点：**图关系只能作为风险相关的特征，不应把「与违规用户存在连接」直接等同于「用户违规」。** 被骚扰的人和骚扰者之间有边；讨论某个敏感话题的正常社群和违规账号可能有大量重叠的邻居；某个地区或语言群体的用户在图上天然聚在一起。如果模型学到的是「属于这个社群就更可疑」，它就在按身份而不是按行为处罚。所以引入图特征之后必须做偏差评估：按社群、地区、语言分组比较误删率和申诉成功率，并且让作者特征只调整风险排序，最终的删除决定仍然要有内容本身的证据。
+
+本节只介绍基本思路。GNN 具体怎样采样邻居、怎样训练、怎样在十亿级的图上做推理，留待之后学习。
+
+## Key ideas to remember
+
+1. 业务目标是减少有害内容的**曝光**而不是条数，约束是自动删除的 Precision ≥ 95%。这两句话决定了后面几乎所有的设计。
+2. 模型给分，Calibration 把分数变成概率，Decision Policy 把概率变成 Allow、Demote、Delete。三者可以各自迭代。
+3. 用户举报是弱监督信号，不是 Ground Truth。它适合做辅助任务和候选弱标签。
+4. 特征必须是推理时刻的快照（point-in-time），标签可以来自未来，特征不行。
+5. 三代模型的差别在于融合发生的位置：分数、向量、token。越早融合，跨模态关系保留得越多，成本也越高。
+6. 内容不变而行为在变，所以把贵的内容编码缓存下来，把便宜的融合层反复跑。
+7. 两阶段推理里，系统 Recall 的上限是第一阶段的 Recall。
+8. Recall@Precision95 是最贴近业务的离线指标；线上的有害曝光率要靠带标注的 A/B Test 和重要性采样来估。
+9. 图上的连接是风险特征，不是违规的证据，用了之后必须做偏差评估。
+
+## References
+
+- [Hello Interview：Harmful Content Detection](https://www.hellointerview.com/learn/ml-system-design/problem-breakdowns/harmful-content)，本案例的原文，问题设定、架构和三代模型都来自这里。
+- [Hello Interview 的讲解视频（YouTube）](https://www.youtube.com/watch?v=9KUC_nHydZg&list=PL5q3E8eRUieVx_cUnx-pFiIi4b04RvKgB&index=3)，同一案例的视频版本，本页的结构图按视频课件重绘。
+- [scikit-learn：Probability calibration](https://scikit-learn.org/stable/modules/calibration.html)，第二步里校准一层的背景。
+- Hamilton, Ying & Leskovec, [Inductive Representation Learning on Large Graphs](https://arxiv.org/abs/1706.02216)（NeurIPS 2017），GraphSAGE 的论文。
+- 本页的 View-weighted Loss 权重公式、两阶段推理和重要性采样的数字例子是为说明原理补充的，不是原教程的内容。

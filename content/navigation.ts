@@ -5,6 +5,7 @@ export const categories = [
   { id: "cs", title: "CS Foundations", icon: "code" },
   { id: "systems", title: "Systems", icon: "layers" },
   { id: "ml", title: "ML & LLM", icon: "brain" },
+  { id: "ml-design", title: "ML System Design", icon: "flow" },
   { id: "ai-infra", title: "AI Infrastructure", icon: "cpu" },
   { id: "algorithms", title: "Algorithms", icon: "search" },
 ] as const;

@@ -6,6 +6,8 @@
 
 > 2026-10-30 更新：首页封面改为作者主机的 3D 模型（硬件 = system，跑一步 GRPO = ML），自我介绍放在左侧；新增 /en/ 英文版，按篇选择翻译。
 
+> 2026-11-24 更新：新增一级分类 ML System Design（`categoryId: "ml-design"`，内容在 `content/ml-system-design/`，图在 `components/visualization/ml-system-design/`）。章节按六步框架命名（`01. Problem Framing` … `06. Deep Dives`）加 `Case Studies`，只为已写的笔记建 section；规划中的章节列在 Overview 页的模块地图里，不建空页面。这个分类不属于 ML 知识树（`content/ml/tree.ts`）。
+
 > A personal, evolving knowledge base for Computer Science, Machine Learning, LLMs, and AI Infrastructure.
 
 ## 1. Overview
